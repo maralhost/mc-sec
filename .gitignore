@@ -1,0 +1,34 @@
+# --- Secrets and local configs: never commit ---
+.env
+.env.*
+!.env.example
+configuration.php
+*.local.php
+*.pem
+*.key
+
+# --- Real data never lands in the repo: no WHMCS dumps ---
+*.sql
+*.sql.gz
+dumps/
+
+# --- Test output, preview database, release zips, security reports ---
+tests/tmp/
+*.log
+*.sqlite
+releases/
+dist/
+security-reports/
+node_modules/
+
+# --- Licensed brand assets: the Ray font is licensed for Maral Cloud's site only; never in git or a release ---
+site-assets/
+*.ttf
+*.woff
+*.woff2
+*.otf
+
+# --- OS and editor files ---
+.DS_Store
+Thumbs.db
+.claude/settings.local.json
