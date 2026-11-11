@@ -1044,7 +1044,7 @@ sudo fail2ban-client status sshd'],
             ],
             'effort' => 'حدود ۲۰ دقیقه',
             'refs' => ['https://infosec.mozilla.org/guidelines/openssh', 'https://man.openbsd.org/sshd_config'],
-            'maral' => 'اگر سرورتان در مارال کلاد است و دسترسی SSH را از دست دادید، از راه کنسول پنل یا پشتیبانی می‌شود دسترسی را برگرداند.',
+            'maral' => 'اگر سرورتان در مارال کلاد است و پس از این تغییر دسترسی SSH قطع شد، با پشتیبانی تماس بگیرید تا راه بازگرداندن دسترسی را بررسی کنند.',
         ],
         'ftp-plaintext' => [
             'title' => 'جایگزینی FTP بی‌رمز با SFTP یا FTPS',
@@ -1196,7 +1196,91 @@ SSLHonorCipherOrder off'],
             'refs' => ['https://ssl-config.mozilla.org/', 'https://wiki.mozilla.org/Security/Server_Side_TLS', 'https://www.ssllabs.com/ssltest/'],
             'maral' => 'روی هاست اشتراکی این تنظیم در سطح سرور است؛ اگر هاستتان در مارال کلاد است، موضوع را با پشتیبانی در میان بگذارید.',
         ],
-        // @@KB-MORE@@
+        'mixed-content' => [
+            'title' => 'رفع محتوای ترکیبی (Mixed Content)',
+            'why' => 'صفحه با HTTPS باز می‌شود ولی بعضی تصویرها، اسکریپت‌ها یا استایل‌ها هنوز با http:// بارگذاری می‌شوند. مرورگرها اسکریپت‌های ناامن را مسدود می‌کنند و ممکن است بخشی از سایت خراب شود؛ آنچه هم بارگذاری می‌شود در مسیر شبکه قابل تغییر است و نشان قفل امن نوار آدرس از بین می‌رود.',
+            'steps' => [
+                'صفحه را باز کنید و در Console بخش DevTools مرورگر پیام‌های Mixed Content را ببینید؛ آدرس دقیق منابع http:// همان‌جاست.',
+                'آدرس‌های http:// سایت خودتان را در پایگاه داده و قالب به https:// تغییر دهید. در وردپرس WP-CLI این کار را امن انجام می‌دهد؛ اول با ‎--dry-run ببینید چه چیزی عوض می‌شود و پیش از آن پشتیبان بگیرید.',
+                'برای منابع سایت‌های دیگر نسخه‌ی https همان منبع را بگذارید؛ اگر وجود ندارد، فایل را روی سایت خودتان بگذارید یا حذفش کنید.',
+                'به‌عنوان راه موقت، CSP با upgrade-insecure-requests مرورگر را وادار می‌کند منابع را با https بخواهد؛ اما منبعی که https ندارد بارگذاری نمی‌شود.',
+                'پس از تغییر، cache افزونه‌ها و CDN را پاک کنید و دوباره بسنجید.',
+            ],
+            'snippets' => [
+                ['label' => 'WordPress (WP-CLI)', 'code' => 'wp db export ~/before-https.sql
+wp search-replace "http://example.com" "https://example.com" --all-tables --skip-columns=guid --dry-run
+wp search-replace "http://example.com" "https://example.com" --all-tables --skip-columns=guid'],
+                ['label' => 'جست‌وجو در فایل‌های قالب', 'code' => 'grep -rn "http://" wp-content/themes/YOUR-THEME --include=*.php --include=*.css --include=*.js'],
+                ['label' => 'nginx (راه موقت)', 'code' => 'add_header Content-Security-Policy "upgrade-insecure-requests" always;'],
+                ['label' => 'Apache / .htaccess (راه موقت)', 'code' => '<IfModule mod_headers.c>
+    Header always set Content-Security-Policy "upgrade-insecure-requests"
+</IfModule>'],
+            ],
+            'effort' => 'حدود ۳۰ دقیقه',
+            'refs' => ['https://developer.mozilla.org/en-US/docs/Web/Security/Mixed_content', 'https://developer.wordpress.org/cli/commands/search-replace/'],
+        ],
+        'security-txt' => [
+            'title' => 'افزودن فایل security.txt',
+            'why' => 'فایل security.txt به پژوهشگرهای امنیتی می‌گوید اگر آسیب‌پذیری‌ای در سایت شما پیدا کردند، کجا گزارش دهند. نبودنش خطر مستقیمی نیست، اما ممکن است گزارش‌های مفید هرگز یا دیر به دستتان برسد.',
+            'steps' => [
+                'یک نشانی ایمیل یا صفحه‌ی تماس برای گزارش‌های امنیتی در نظر بگیرید که کسی واقعاً آن را می‌خواند.',
+                'فایل متنی security.txt را با محتوای نمونه بسازید و در مسیر ‎/.well-known/security.txt بگذارید (در cPanel یعنی پوشه‌ی public_html/.well-known).',
+                'فیلد Expires الزامی است و بهتر است کمتر از یک سال بعد باشد؛ یادآوری بگذارید که هر سال تمدیدش کنید.',
+                'آدرس https://example.com/.well-known/security.txt را باز کنید و مطمئن شوید فایل نمایش داده می‌شود.',
+            ],
+            'snippets' => [
+                ['label' => '‎/.well-known/security.txt', 'code' => 'Contact: mailto:security@example.com
+Expires: 2027-10-31T20:30:00.000Z
+Preferred-Languages: fa, en
+Canonical: https://example.com/.well-known/security.txt'],
+            ],
+            'effort' => 'حدود ۱۰ دقیقه',
+            'refs' => ['https://www.rfc-editor.org/rfc/rfc9116', 'https://securitytxt.org/'],
+        ],
+        'waf-missing' => [
+            'title' => 'استفاده از فایروال وب (WAF)',
+            'why' => 'WAF درخواست‌های مخرب رایج (مثل تلاش برای SQL injection و XSS، اسکن خودکار و حدس رمز) را پیش از رسیدن به سایت مسدود می‌کند و وقتی وصله‌ای هنوز نصب نشده، برایتان زمان می‌خرد. WAF جای به‌روزرسانی و کد امن را نمی‌گیرد؛ یک لایه‌ی دفاعی اضافه و اختیاری است.',
+            'steps' => [
+                'ساده‌ترین راه، گذاشتن سایت پشت یک CDN با WAF است؛ مثل ابر آروان یا Cloudflare. معمولاً کافی است NSهای دامنه را عوض کنید یا ترافیک رکوردها را از CDN عبور دهید.',
+                'اگر سرور خودتان را دارید، ModSecurity را با مجموعه‌قاعده‌ی OWASP CRS نصب کنید. در cPanel این کار از WHM انجام می‌شود.',
+                'برای وردپرس، افزونه‌های امنیتی دارای فایروال (مثل Wordfence) هم لایه‌ای در سطح برنامه می‌سازند.',
+                'قاعده‌ها را اول در حالت فقط ثبت (Detection یا Log) بگذارید، چند روز مثبت‌های کاذب را بررسی کنید و بعد مسدودسازی را روشن کنید.',
+                'اگر پشت CDN هستید، دسترسی مستقیم به IP سرور را فقط برای IPهای CDN باز بگذارید؛ وگرنه مهاجم با IP سرور، WAF را دور می‌زند. IP واقعی بازدیدکننده را هم در وب‌سرور بازیابی کنید تا لاگ‌ها و محدودیت‌ها درست کار کنند.',
+            ],
+            'snippets' => [
+                ['label' => 'ModSecurity', 'code' => '# modsecurity.conf: start in log-only mode
+SecRuleEngine DetectionOnly
+# after reviewing the audit log for false positives:
+# SecRuleEngine On'],
+                ['label' => 'WHM (cPanel)', 'code' => 'WHM: Security Center → ModSecurity Vendors → OWASP ModSecurity Core Rule Set → Install'],
+                ['label' => 'nginx: IP واقعی پشت CDN', 'code' => '# example for Cloudflare; use the current IP list your CDN publishes
+set_real_ip_from 173.245.48.0/20;
+# ... one line per published range
+real_ip_header CF-Connecting-IP;'],
+            ],
+            'effort' => 'از ۳۰ دقیقه تا چند ساعت',
+            'refs' => ['https://owasp.org/www-community/Web_Application_Firewall', 'https://coreruleset.org/', 'https://www.cloudflare.com/ips/'],
+            'maral' => 'اگر سرور یا هاستتان در مارال کلاد است، از پشتیبانی بپرسید چه گزینه‌هایی برای WAF یا ModSecurity روی سرویس شما در دسترس است.',
+        ],
+        'generic' => [
+            'title' => 'راهنمای کلی بررسی و رفع یک یافته',
+            'why' => 'هر یافته یعنی اسکنر چیزی دیده که ممکن است راه نفوذ یا سوءاستفاده باشد. شدت یافته نشان می‌دهد اگر درست باشد چقدر جدی است؛ اما اسکنرها گاهی اشتباه می‌کنند، پس پیش از هر کاری آن را بررسی کنید.',
+            'steps' => [
+                'عنوان، مکان (آدرس یا IP و درگاه) و شواهد یافته را بخوانید تا بفهمید دقیقاً چه چیزی و کجا دیده شده است. اگر شناسه‌ی CVE یا CWE دارد، توضیحش را در پیوندهای مرجع ببینید.',
+                'درستی‌اش را بسنجید: آدرس را خودتان باز کنید یا با دستوری مثل curl امتحان کنید. اگر مطمئن شدید اشتباه است، آن را «مثبت کاذب» علامت بزنید و دلیلش را بنویسید.',
+                'به ترتیب شدت پیش بروید: اول بحرانی و بالا، بعد متوسط و پایین. موارد بحرانی را همان روز رسیدگی کنید.',
+                'رفع معمولاً یکی از این‌هاست: به‌روزرسانی نرم‌افزار، بستن دسترسی (فایروال یا محدودیت IP)، حذف فایل یا سرویس اضافه، یا تغییر تنظیمات. پیش از تغییر پشتیبان بگیرید.',
+                'پس از رفع، دکمه‌ی «رفع کردم، دوباره بسنج» را در صفحه‌ی همان یافته بزنید. اگر یافته در اسکن بعدی دیده نشود، خودکار «رفع‌شده» می‌شود.',
+                'اگر ریسکی را آگاهانه می‌پذیرید (مثلاً سرویسی که باید باز بماند)، آن را «ریسک پذیرفته» علامت بزنید و دلیل و اقدام جایگزین را بنویسید تا بعدها معلوم باشد چرا.',
+            ],
+            'snippets' => [
+                ['label' => 'بررسی سریع با curl', 'code' => 'curl -sI https://example.com/
+curl -s -o /dev/null -w "%{http_code}\n" https://example.com/path'],
+            ],
+            'effort' => 'بسته به یافته',
+            'refs' => ['https://owasp.org/www-project-top-ten/', 'https://cwe.mitre.org/'],
+            'maral' => 'اگر یافته‌ای را متوجه نمی‌شوید یا رفعش از توانتان بیرون است، با پشتیبانی مارال کلاد تماس بگیرید تا بگویند چه کمکی از دستشان برمی‌آید و آیا هزینه‌ای دارد.',
+        ],
     ];
 
     /** Built-in check keys (after "builtin.", dashes read as underscores): prefix => kb key. */
@@ -1255,7 +1339,7 @@ SSLHonorCipherOrder off'],
         ['~(?<![a-z])cors(?![a-z])|cross[-_ ]?origin~', 'cors-misconfig'],
         ['~http[-_ ]?to[-_ ]?https|(missing|no)[-_ ]?(https[-_ ]?)?redirect~', 'web-no-redirect'],
         ['~redirect~', 'open-redirect'],
-        ['~backup|(?<![a-z])bak(?![a-z])|\.sql(?![a-z])|\.zip(?![a-z])|\.tar(?![a-z])|\.t?gz(?![a-z])|\.rar(?![a-z])|\.7z(?![a-z])|\.old(?![a-z])|\.swp(?![a-z])|dump~', 'exposed-backup'],
+        ['~backup|(?<![a-z])bak(?![a-z])|sqlite|\.db(?![a-z])|\.mdb(?![a-z])|\.sql(?![a-z])|\.zip(?![a-z])|\.tar(?![a-z])|\.t?gz(?![a-z])|\.rar(?![a-z])|\.7z(?![a-z])|\.old(?![a-z])|\.swp(?![a-z])|dump~', 'exposed-backup'],
         ['~phpinfo|\.ds_store|ds[-_]store|web\.config|\.htaccess|\.htpasswd|docker[-_]compose|(?<![a-z])config|\.ini(?![a-z])|\.ya?ml(?![a-z])|\.log(?![a-z])|debug|(?<![a-z])(settings|credentials|secrets?)\.~', 'exposed-config'],
         ['~^(?=.*(?<![a-z])ssh)(?=.*(weak|password|root|auth|cipher|algo|brute|kex|mac))~s', 'weak-ssh'],
         ['~(?<![a-z])ftp~', 'ftp-plaintext'],
