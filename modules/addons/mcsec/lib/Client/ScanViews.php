@@ -119,6 +119,11 @@ final class ScanViews
         $profile = Catalog::all(true)[$s->profile] ?? ['label' => $s->profile, 'eta' => '', 'desc' => ''];
         Views::$pageTitle = self::e($profile['label']) . ' ' . Ui::ltr($asset->value ?? '', 'mcs-title-ltr') . ' ' . self::statusChip($s);
         $out = '';
+        // a scan of the real server behind a CDN domain says which domain it is for
+        $for = $asset && $asset->kind === 'ip' ? Db::rows(Db::table('mod_mcsec_assets')->where('client_id', $cid)->where('origin_id', $asset->id)->where('status', '!=', 'removed')->limit(5)) : [];
+        if ($for) {
+            $out .= '<p class="mcs-small mcs-muted">سرور اصلی ' . implode('، ', array_map(fn ($d) => Ui::ltr($d->value), $for)) . ' (پشت CDN): اسکن‌هایی که درگاه‌ها را می‌سنجند روی این IP اجرا می‌شوند، نه سرورهای CDN.</p>';
+        }
         if (isset($_GET['started']) && in_array($s->status, ['queued', 'running'], true)) {
             $out .= Ui::alert('success', 'اسکن ثبت شد' . ((int) $s->credits > 0 ? ' و ' . self::e(Text::fa((int) $s->credits)) . ' اعتبار کم شد' : '') . '. می‌توانید این صفحه را ببندید؛ پس از پایان خبرتان می‌کنیم.', 'check');
         }

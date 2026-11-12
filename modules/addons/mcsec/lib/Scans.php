@@ -65,6 +65,24 @@ final class Scans
         if ((int) $asset->client_id !== $clientId || $asset->status !== 'verified') {
             return ['ok' => false, 'error' => 'دارایی «' . $asset->value . '» هنوز تأیید نشده است؛ اسکن فقط پس از تأیید مالکیت ممکن است.'];
         }
+        $via = '';
+        if ($asset->kind === 'domain') {
+            // one lookup: the domain's IPs against the blocklist, and the CDN in front of it
+            $sc = Net::screen('domain', (string) $asset->value);
+            Assets::noteCdn($asset, $sc['cdn']);
+            if ($sc['blocked'] !== '') {
+                return ['ok' => false, 'error' => 'این دارایی در فهرست ممنوع است.'];
+            }
+            if ($sc['cdn'] !== '' && $profile['engine'] !== 'builtin') {
+                // engines that probe ports never touch a CDN's servers; with the real server proven, they scan that
+                $origin = Assets::origin($asset);
+                $why = self::cdnRefusal($asset, $profile, $sc['cdn'], $origin);
+                if ($why !== '') {
+                    return ['ok' => false, 'error' => $why, 'cdn' => $sc['cdn']];
+                }
+                [$via, $asset] = [(string) $asset->value, $origin];
+            }
+        }
         if (!in_array($asset->kind, $profile['kinds'], true)) {
             return ['ok' => false, 'error' => '«' . $profile['label'] . '» برای ' . (Assets::KINDS[$asset->kind] ?? $asset->kind) . ' اجرا نمی‌شود.'];
         }
@@ -99,8 +117,27 @@ final class Scans
                 return ['ok' => false, 'error' => $paid['error'], 'need' => $cost];
             }
         }
-        Audit::log($clientId, 'scan_start', $profile['label'] . ' ' . $asset->value, ['scan' => $id, 'credits' => $cost, 'schedule' => $scheduleId], $userId);
-        return ['ok' => true, 'scan_id' => $id, 'credits' => $cost];
+        Audit::log($clientId, 'scan_start', $profile['label'] . ' ' . $asset->value, array_filter(['scan' => $id, 'credits' => $cost, 'schedule' => $scheduleId, 'for' => $via]), $userId);
+        return ['ok' => true, 'scan_id' => $id, 'credits' => $cost, 'via' => $via !== '' ? (string) $asset->value : ''];
+    }
+
+    /** Why a scan that probes ports cannot run for a domain behind a CDN ('' = it runs on the verified origin server). */
+    private static function cdnRefusal(object $asset, array $profile, string $cdn, ?object $origin): string
+    {
+        $head = '«' . $asset->value . '» پشت CDN (' . Net::cdnLabel($cdn) . ') است و «' . $profile['label'] . '» روی سرورهای CDN اجرا نمی‌شود. ';
+        if (!Settings::bool('cdn_origin_scan')) {
+            return $head . 'برای این دامنه «بررسی سلامت پایه» را بگیرید.';
+        }
+        if (!in_array('ip', $profile['kinds'], true)) {
+            return $head . 'این نوع اسکن فقط برای دامنه است و روی IP سرور اجرا نمی‌شود؛ «کشف سطح حمله» یا «اسکن آسیب‌پذیری» را بگیرید.';
+        }
+        if (!$origin) {
+            return $head . 'IP اصلی سرورتان را در صفحه‌ی همین دامنه ثبت کنید تا اسکن روی آن انجام شود.';
+        }
+        if ($origin->status !== 'verified') {
+            return $head . 'IP اصلی سرور (' . $origin->value . ') هنوز تأیید نشده است؛ در صفحه‌ی همان IP مالکیتش را تأیید کنید.';
+        }
+        return '';
     }
 
     /** Customer cancel: a queued scan gets its credits back; a running one is stopped (the work already done is not refunded). */
@@ -177,6 +214,19 @@ final class Scans
         $profile = Catalog::get((string) $s->profile) ?? (Catalog::all(true)[$s->profile] ?? null);
         if (!$asset || $asset->status !== 'verified' || !$profile) {
             self::fail($s, 'دارایی دیگر تأییدشده نیست یا نوع اسکن خاموش شد.', true);
+            return false;
+        }
+        // the scope may have changed since the scan was queued (a new blocklist rule, the domain moved behind a CDN)
+        $sc = Net::screen((string) $asset->kind, (string) $asset->value);
+        if ($sc['blocked'] !== '') {
+            self::fail($s, 'این دارایی به فهرست ممنوع افزوده شد و اسکن نمی‌شود.', true);
+            return false;
+        }
+        if ($sc['cdn'] !== '' && $s->engine !== 'builtin') {
+            if ($asset->kind === 'domain') {
+                Assets::noteCdn($asset, $sc['cdn']);
+            }
+            self::fail($s, '«' . $asset->value . '» اکنون پشت CDN (' . Net::cdnLabel($sc['cdn']) . ') است و اسکن روی سرورهای CDN انجام نمی‌شود.', true);
             return false;
         }
         try {

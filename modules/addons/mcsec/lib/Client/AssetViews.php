@@ -13,6 +13,7 @@ use McSec\Net;
 use McSec\Plans;
 use McSec\Scans;
 use McSec\Score;
+use McSec\Settings;
 use McSec\Surface;
 use McSec\Text;
 use McSec\Verify;
@@ -70,7 +71,7 @@ final class AssetViews
             $sched = array_merge($schedules[(int) $a->id] ?? [], $a->status === 'verified' ? ($schedules[0] ?? []) : []);
             $rows .= '<tr>' . Ui::td('دارایی', '<a class="mcs-asset-link' . ($isSub ? ' is-sub' : '') . '" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '">'
                     . Ui::ico($a->kind === 'domain' ? 'globe' : 'server') . Ui::ltr($a->value) . '</a>' . (trim((string) $a->label) !== '' ? '<small class="mcs-muted">' . self::e($a->label) . '</small>' : ''))
-                . Ui::td('وضعیت', self::statusChip($a) . ($a->status === 'pending' ? ' <a class="mcs-small" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '#verify">ادامه‌ی تأیید</a>' : ''))
+                . Ui::td('وضعیت', self::statusChip($a) . ((string) ($a->cdn ?? '') !== '' ? ' ' . Ui::chip('پشت CDN', 'muted') : '') . ($a->status === 'pending' ? ' <a class="mcs-small" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '#verify">ادامه‌ی تأیید</a>' : ''))
                 . Ui::td('امتیاز', (int) $a->last_scan_at > 0 && (int) $a->score >= 0 ? '<span class="mcs-score-pill mcs-tone-' . Score::tone((int) $a->score) . '">' . self::e(Text::fa((int) $a->score)) . '</span>' : '<span class="mcs-muted">—</span>')
                 . Ui::td('یافته‌های باز', (int) $a->last_scan_at > 0 ? Ui::sevCounts(Assets::counts($a), 'index.php?m=mcsec&p=findings&asset=' . (int) $a->id, true) : '<span class="mcs-muted">هنوز اسکن نشده</span>')
                 . Ui::td('آخرین اسکن', self::e(Views::when((int) $a->last_scan_at)))
@@ -116,7 +117,9 @@ final class AssetViews
         }
         if ($a->status !== 'verified') {
             $out .= self::verifyPanel($ctx, $a, ($_GET['new'] ?? '') === '1');
-        } else {
+        }
+        $out .= self::cdnPanel($ctx, $a);
+        if ($a->status === 'verified') {
             Views::$pageActions = $ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=scans&amp;asset=' . (int) $a->id . '#new">' . Ui::ico('play') . 'اسکن تازه</a>' : '';
         }
         $counts = Assets::counts($a);
@@ -124,6 +127,8 @@ final class AssetViews
         $out .= '<div class="mcs-grid2">' . Ui::card(Ui::gauge($score, $score < 0 ? 'هنوز اسکنی تمام نشده است.' : self::e('آخرین اسکن: ' . Views::when((int) $a->last_scan_at))), 'امتیاز این دارایی', 'shield-check')
             . Ui::card(Ui::sevCounts($counts, 'index.php?m=mcsec&p=findings&asset=' . (int) $a->id) . Ui::facts([
                 'نوع' => self::e(Assets::KINDS[$a->kind] ?? $a->kind),
+                'سرور اصلی برای' => $a->kind === 'ip' ? implode(' ', array_map(fn ($d) => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $d->id . '">' . Ui::ltr($d->value) . '</a>',
+                    Db::rows(Db::table('mod_mcsec_assets')->where('client_id', $cid)->where('origin_id', $a->id)->where('status', '!=', 'removed')->limit(10)))) : '',
                 'روش تأیید' => $a->status === 'verified' ? self::e(Verify::METHODS[$a->method] ?? $a->method) . ' — ' . self::e(Text::date((int) $a->verified_at, false)) : '',
                 'بررسی بعدی تأیید' => $a->status === 'verified' && !in_array($a->method, ['admin'], true) ? self::e(Text::date((int) $a->next_check_at, false)) : '',
                 'برچسب‌ها' => trim((string) $a->tags) !== '' ? implode(' ', array_map(fn ($t) => Ui::chip($t), explode(',', (string) $a->tags))) : '',
@@ -156,6 +161,37 @@ final class AssetViews
             $out .= Ui::drawer('تنظیمات دارایی', $settings, false, 'key');
         }
         return $out;
+    }
+
+    /**
+     * A domain behind a CDN: what that means for its scans and, when the admin allows it, the real server's IP on
+     * which the scans that probe ports run instead.
+     */
+    private static function cdnPanel(array $ctx, object $a): string
+    {
+        if ($a->kind !== 'domain' || (string) ($a->cdn ?? '') === '') {
+            return '';
+        }
+        $body = '<p>بازدیدکننده‌ها به سرورهای ' . self::e(Net::cdnLabel((string) $a->cdn)) . ' وصل می‌شوند، نه سرور شما. «بررسی سلامت پایه» همان چیزی را می‌سنجد که بازدیدکننده می‌بیند؛ '
+            . 'ولی اسکن‌هایی که درگاه‌ها را می‌سنجند هرگز روی سرورهای CDN اجرا نمی‌شوند، چون آن سرورها مال شما نیستند.</p>';
+        if (!Settings::bool('cdn_origin_scan')) {
+            return Ui::card($body . '<p class="mcs-small mcs-muted">برای این دامنه «بررسی سلامت پایه» در دسترس است.</p>', 'این دامنه پشت CDN است', 'globe');
+        }
+        $origin = Assets::origin($a);
+        $form = fn (string $inner, string $confirm = '') => Ui::form($ctx, 'asset', 'asset_origin', '<input type="hidden" name="asset" value="' . (int) $a->id . '">' . $inner, $confirm, '', false, '&amp;id=' . (int) $a->id);
+        if ($origin) {
+            $body .= Ui::facts(['سرور اصلی' => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $origin->id . '">' . Ui::ltr($origin->value) . '</a> ' . self::statusChip($origin)])
+                . '<p class="mcs-small">' . ($origin->status === 'verified' ? 'کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی همین IP اجرا می‌شوند.'
+                    : 'پس از تأیید مالکیت این IP (در صفحه‌ی خودش)، کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی آن اجرا می‌شوند.') . '</p>';
+            if ($ctx['manage']) {
+                $body .= $form('<input type="hidden" name="origin" value=""><button type="submit" class="btn btn-default btn-sm">برداشتن پیوند</button>', 'پیوند سرور اصلی برداشته شود؟ دارایی IP آن سر جایش می‌ماند.');
+            }
+        } elseif ($ctx['manage']) {
+            $body .= $form('<div class="mcs-form-row">' . Ui::field('mcs-origin', 'IP اصلی سرور', '<input class="form-control" id="mcs-origin" name="origin" maxlength="45" dir="ltr" inputmode="decimal" autocomplete="off" placeholder="203.0.113.10">',
+                'IP سروری که سایت واقعاً روی آن است؛ در پنل CDN، بخش DNS، به نام «IP مبدأ» یا Origin. اگر از سرویس‌های مارال کلاد در همین حساب باشد خودکار تأیید می‌شود؛ وگرنه مالکیتش را مثل هر IP دیگر تأیید می‌کنید.')
+                . '</div><button type="submit" class="btn btn-primary">ثبت سرور اصلی</button>');
+        }
+        return Ui::card($body, 'این دامنه پشت CDN است', 'globe');
     }
 
     /** The verification wizard: three ways, each with copyable values, and one button to check now. */

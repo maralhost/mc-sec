@@ -76,6 +76,9 @@ final class Installer
             $t->string('counts', 255)->default('');  // open findings per severity (json)
             $t->integer('last_scan_at')->default(0);
             $t->string('autoscan', 32)->default('');  // profile to start once verified ('' = none)
+            $t->string('cdn', 40)->default('');       // CDN in front of a domain ('' = none), see Net::cdnOf
+            $t->integer('cdn_checked_at')->default(0);
+            $t->integer('origin_id')->default(0);     // the IP asset of the real server behind the CDN
             $t->integer('created_by')->default(0);
             $t->integer('created_at')->default(0);
             $t->integer('removed_at')->default(0);
@@ -341,6 +344,19 @@ final class Installer
             $t->mediumText('v')->nullable();
             $t->integer('expires_at')->default(0);
         });
+
+        // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)
+        $col = function (string $table, string $column, callable $def) use ($s): void {
+            if ($s->hasTable($table) && !$s->hasColumn($table, $column)) {
+                $s->table($table, function ($t) use ($def) {
+                    $def($t);
+                });
+            }
+        };
+        // 0.1.1: CDN detection and the origin server behind it
+        $col('mod_mcsec_assets', 'cdn', fn ($t) => $t->string('cdn', 40)->default(''));
+        $col('mod_mcsec_assets', 'cdn_checked_at', fn ($t) => $t->integer('cdn_checked_at')->default(0));
+        $col('mod_mcsec_assets', 'origin_id', fn ($t) => $t->integer('origin_id')->default(0));
 
         // seed: nothing customer-facing (feature off until the admin turns it on)
         if (!Db::table('mod_mcsec_settings')->where('k', 'installed_at')->exists()) {

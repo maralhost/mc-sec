@@ -46,6 +46,12 @@ function demo_data(): void
     $api = \McSec\Assets::add($who, 'api.shop-maral.ir')['id'];
     $srv = \McSec\Assets::add($who, '198.51.100.7', 'سرور ابری')['id'];
     \McSec\Assets::add($who, 'example-partner.com');
+    // a domain behind Cloudflare whose real server is the Maral server above
+    $GLOBALS['__dns']['blog-maral.ir']['A'] = [['ip' => '104.16.5.5']];
+    setting('cdn_origin_scan', '1');
+    $blog = \McSec\Assets::add($who, 'blog-maral.ir', 'وبلاگ')['id'];
+    \McSec\Verify::adminApprove((int) $blog, 'demo');
+    \McSec\Assets::setOrigin($who, (int) $blog, '198.51.100.7');
     // a built-in hygiene scan on the shop with a realistic website
     $GLOBALS['__dns']['shop-maral.ir']['A'] = [['ip' => '198.51.100.7']];
     $GLOBALS['__dns']['shop-maral.ir']['TXT'] = [['txt' => 'v=spf1 include:_spf.mail.test ~all']];

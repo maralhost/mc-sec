@@ -41,7 +41,7 @@ final class Controller
     public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read'];
 
@@ -195,6 +195,16 @@ final class Controller
             case 'asset_save':
                 $r = Assets::setLabel($who, $int('asset'), $in('label'), $in('tags'));
                 return ['flash' => $r['ok'] ? 'ok:ذخیره شد.' : 'err:' . $r['error']];
+            case 'asset_origin':
+                $r = Assets::setOrigin($who, $int('asset'), $in('origin'));
+                if (!$r['ok']) {
+                    return ['flash' => 'err:' . $r['error']];
+                }
+                if (!empty($r['unlinked'])) {
+                    return ['flash' => 'ok:پیوند سرور اصلی برداشته شد. دارایی IP آن سر جایش ماند.'];
+                }
+                return ['flash' => $r['verified'] ? 'ok:سرور اصلی ثبت و تأیید شد. کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی ' . $r['value'] . ' اجرا می‌شوند.'
+                    : 'ok:سرور اصلی ثبت شد. حالا مالکیت ' . $r['value'] . ' را در صفحه‌ی همان IP تأیید کنید؛ پس از آن اسکن‌ها روی آن اجرا می‌شوند.'];
             case 'asset_remove':
                 $r = Assets::remove($who, $int('asset'));
                 return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=assets&removed=1'] : ['flash' => 'err:' . $r['error']];

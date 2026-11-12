@@ -5,7 +5,7 @@
 set -u
 cd "$(dirname "$0")"
 PHP=${PHP:-php}
-SUITES=(core_test.php credits_test.php flow_test.php engines_test.php security_test.php pages_test.php)
+SUITES=(core_test.php credits_test.php flow_test.php engines_test.php security_test.php scope_test.php pages_test.php)
 if [ $# -gt 0 ]; then SUITES=("$@"); fi
 FAILED=0
 for t in "${SUITES[@]}"; do

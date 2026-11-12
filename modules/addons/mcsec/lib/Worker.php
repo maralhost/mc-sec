@@ -29,6 +29,7 @@ final class Worker
                 'dispatch' => fn () => Scans::dispatch($deadline),
                 'schedules' => fn () => Schedules::due($deadline),
                 'verify' => fn () => Verify::due((int) max(5, min(20, $deadline - microtime(true)))),
+                'cdn' => fn () => Assets::detectCdn($deadline),
                 'reports' => fn () => Reports::process($deadline),
                 'digests' => fn () => self::every('digests', 1800) ? Notify::digests($deadline) : 'skip',
                 'deliver' => fn () => Notify::deliver($deadline + 10),

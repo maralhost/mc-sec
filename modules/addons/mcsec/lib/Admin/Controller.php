@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace McSec\Admin;
 
+use McSec\Assets;
 use McSec\Audit;
 use McSec\Auth;
 use McSec\Catalog;
 use McSec\Clock;
 use McSec\Credits;
 use McSec\Db;
+use McSec\Net;
 use McSec\Notify;
 use McSec\Scans;
 use McSec\Settings;
@@ -32,7 +34,7 @@ final class Controller
 
     private const ACTIONS = [
         'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_groups' => 'settings',
-        'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops',
+        'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
     ];
 
     public static function handle(string $link): string
@@ -173,6 +175,28 @@ final class Controller
                     }
                     Scans::fail($s, 'به دست پشتیبانی متوقف شد.', true);
                     return 'ok:اسکن متوقف و اعتبارش برگشت داده شد.';
+                case 'scope_test':
+                    // read-only: what the scope rules say about a target right now (one DNS lookup)
+                    $t = Net::parse($in('target'));
+                    if (isset($t['error'])) {
+                        return 'err:' . $t['error'];
+                    }
+                    $sc = Net::screen($t['kind'], $t['value']);
+                    $out = [$t['value'] . ' — ' . (Assets::KINDS[$t['kind']] ?? $t['kind'])];
+                    if ($t['kind'] === 'domain') {
+                        $out[] = 'IPها: ' . ($sc['ips'] ? implode('، ', $sc['ips']) : 'پیدا نشد');
+                    } elseif (!Settings::bool('allow_private_ips') && !Net::isPublicIp(explode('/', $t['value'])[0])) {
+                        $out[] = 'IP خصوصی یا رزروشده: پذیرفته نمی‌شود.';
+                    }
+                    $out[] = $sc['blocked'] !== '' ? 'ممنوع با قاعده‌ی «' . $sc['blocked'] . '»: افزوده و اسکن نمی‌شود.' : 'در فهرست ممنوع نیست.';
+                    if ($sc['cdn'] === '') {
+                        $out[] = 'پشت هیچ CDN شناخته‌شده‌ای نیست.';
+                    } elseif ($t['kind'] === 'domain') {
+                        $out[] = 'پشت CDN ' . Net::cdnLabel($sc['cdn']) . ' (' . $sc['cdn'] . '): ' . (Settings::bool('cdn_origin_scan') ? 'اسکن‌های درگاه و آسیب‌پذیری فقط روی IP اصلی تأییدشده‌ی مشتری.' : 'فقط بررسی سلامت پایه.');
+                    } else {
+                        $out[] = 'از سرورهای CDN ' . Net::cdnLabel($sc['cdn']) . ': به‌عنوان دارایی پذیرفته و اسکن نمی‌شود.';
+                    }
+                    return 'ok:' . implode("\n", $out);
                 case 'retry_scan':
                     $s = Db::table('mod_mcsec_scans')->where('id', $int('scan_id'))->where('status', 'failed')->first();
                     $asset = $s ? Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->first() : null;

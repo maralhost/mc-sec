@@ -136,43 +136,201 @@ final class Net
         return true;
     }
 
-    /** Whether an IP falls inside a CIDR (IPv4). */
+    /** Whether an IP (v4 or v6) falls inside a CIDR, a range "a-b" or equals an IP. */
     public static function inCidr(string $ip, string $cidr): bool
     {
-        if (!str_contains($cidr, '/')) {
-            return $ip === $cidr;
-        }
-        [$net, $bits] = explode('/', $cidr, 2);
-        $l = ip2long($ip);
-        $n = ip2long($net);
-        if ($l === false || $n === false) {
-            return false;
-        }
-        $mask = -1 << (32 - (int) $bits);
-        return ($l & $mask) === ($n & $mask);
+        $a = self::ipRange($ip);
+        $b = self::ipRange($cidr);
+        return $a !== null && $b !== null && self::overlaps($a, $b);
     }
 
-    /** The first blocklist line a target matches ('' = allowed). Lines: domain, *.domain, IP or CIDR. */
-    public static function blocked(string $kind, string $value, ?string $list = null): string
+    /**
+     * An IP, a CIDR (IPv4 or IPv6) or a range "a-b" → [first, last] as packed addresses of one family; null if it is
+     * none of these. Packed addresses of the same family compare correctly with strcmp.
+     * @return array{0:string,1:string}|null
+     */
+    public static function ipRange(string $rule): ?array
     {
-        foreach (preg_split('~\R~', $list ?? Settings::get('blocklist')) ?: [] as $line) {
-            $p = strtolower(trim(Text::toAscii($line)));
-            if ($p === '' || str_starts_with($p, '#')) {
+        $rule = trim($rule);
+        if (str_contains($rule, '-')) {
+            [$x, $y] = array_map('trim', explode('-', $rule, 2));
+            $a = filter_var($x, FILTER_VALIDATE_IP) ? inet_pton($x) : false;
+            $b = filter_var($y, FILTER_VALIDATE_IP) ? inet_pton($y) : false;
+            if ($a === false || $b === false || strlen($a) !== strlen($b)) {
+                return null;
+            }
+            return strcmp($a, $b) <= 0 ? [$a, $b] : [$b, $a];
+        }
+        $bits = null;
+        if (str_contains($rule, '/')) {
+            [$rule, $b] = explode('/', $rule, 2);
+            if (!ctype_digit($b)) {
+                return null;
+            }
+            $bits = (int) $b;
+        }
+        if (!filter_var($rule, FILTER_VALIDATE_IP)) {
+            return null;
+        }
+        $p = (string) inet_pton($rule);
+        $len = strlen($p) * 8;
+        $bits = $bits ?? $len;
+        if ($bits > $len) {
+            return null;
+        }
+        $first = '';
+        $last = '';
+        for ($i = 0; $i < strlen($p); $i++) {
+            $keep = max(0, min(8, $bits - $i * 8));
+            $mask = $keep === 0 ? 0 : (0xFF << (8 - $keep)) & 0xFF;
+            $first .= chr(ord($p[$i]) & $mask);
+            $last .= chr((ord($p[$i]) & $mask) | (~$mask & 0xFF));
+        }
+        return [$first, $last];
+    }
+
+    /** @param array{0:string,1:string} $a @param array{0:string,1:string} $b */
+    private static function overlaps(array $a, array $b): bool
+    {
+        return strlen($a[0]) === strlen($b[0]) && strcmp($a[0], $b[1]) <= 0 && strcmp($b[0], $a[1]) <= 0;
+    }
+
+    /** The meaningful lines of a list setting: Persian digits made Latin, "# note" cut off, lower case. @return string[] */
+    public static function lines(string $list): array
+    {
+        $out = [];
+        foreach (preg_split('~\R~', $list) ?: [] as $line) {
+            $p = strtolower(trim(preg_replace('~\s#.*$~', '', Text::toAscii($line)) ?? ''));
+            if ($p !== '' && !str_starts_with($p, '#')) {
+                $out[] = $p;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * The blocklist rule that forbids this target ('' = allowed). Rules, one per line ("# note" allowed):
+     *   example.com, *.gov.ir          the domain and all its subdomains
+     *   *bank*, shop*.example.com      a pattern, * = any letters (here: every domain that contains "bank")
+     *   5.6.7.8, 5.6.7.0/24, 5.6.7.10-5.6.7.50, 2001:db8::/32   an IP, a CIDR or a range (IPv4 or IPv6)
+     * A domain is also forbidden when one of its IPs ($resolved) falls in an IP rule (someone pointing a domain at a
+     * forbidden address), and an asset range when it overlaps one.
+     * @param string[]|null $resolved the domain's current IPs (null = not looked up)
+     */
+    public static function blocked(string $kind, string $value, ?string $list = null, ?array $resolved = null): string
+    {
+        $value = strtolower($value);
+        $mine = $kind === 'domain' ? null : self::ipRange($value);
+        foreach (self::lines($list ?? Settings::get('blocklist')) as $p) {
+            $range = self::ipRange($p);
+            if ($range !== null) {
+                if ($mine !== null && self::overlaps($mine, $range)) {
+                    return $p;
+                }
+                foreach ($kind === 'domain' ? (array) $resolved : [] as $ip) {
+                    $r = self::ipRange((string) $ip);
+                    if ($r !== null && self::overlaps($r, $range)) {
+                        return $p . ' (' . $ip . ')';
+                    }
+                }
                 continue;
             }
-            if ($kind === 'domain') {
-                $d = ltrim($p, '*.');
-                if ($d !== '' && !preg_match('~^[\d./]+$~', $d) && self::within($value, $d)) {
+            if ($kind !== 'domain' || preg_match('~[^a-z0-9.*_-]~', $p)) {
+                continue;
+            }
+            $d = str_starts_with($p, '*.') ? substr($p, 2) : $p;
+            if (!str_contains($d, '*')) {
+                if ($d !== '' && self::within($value, $d)) {
                     return $p;
                 }
-            } elseif (preg_match('~^[\d.]+(/\d+)?$~', $p)) {
-                $ip = $kind === 'cidr' ? explode('/', $value)[0] : $value;
-                if (self::inCidr($ip, $p)) {
-                    return $p;
-                }
+            } elseif (preg_match('~^' . str_replace('\*', '[a-z0-9._-]*', preg_quote($p, '~')) . '$~', $value)) {
+                return $p;
             }
         }
         return '';
+    }
+
+    /** Display names of the CDN keys used in cdn_list (an unknown key is shown as written). */
+    private const CDN_LABELS = ['cloudflare' => 'Cloudflare', 'arvancloud' => 'ابر آروان', 'mizbancloud' => 'میزبان‌کلاد', 'cloudfront' => 'Amazon CloudFront',
+        'akamai' => 'Akamai', 'fastly' => 'Fastly', 'azure-cdn' => 'Azure CDN', 'cdn' => 'CDN'];
+
+    public static function cdnLabel(string $key): string
+    {
+        return self::CDN_LABELS[strtolower($key)] ?? $key;
+    }
+
+    /** @var array{0:string,1:array}|null parsed cdn_list, cached per request by its text */
+    private static ?array $cdnCache = null;
+
+    /** @return array<int,array{name:string,range?:array{0:string,1:string},suffix?:string}> */
+    private static function cdnRules(): array
+    {
+        $text = Settings::get('cdn_list');
+        if (self::$cdnCache !== null && self::$cdnCache[0] === $text) {
+            return self::$cdnCache[1];
+        }
+        $rules = [];
+        foreach (self::lines($text) as $line) {
+            $parts = preg_split('~\s+~', $line) ?: [];
+            [$name, $target] = count($parts) >= 2 ? [$parts[0], $parts[1]] : ['cdn', $parts[0]];
+            $range = self::ipRange($target);
+            if ($range !== null) {
+                $rules[] = ['name' => $name, 'range' => $range];
+            } elseif (preg_match('~^\.?[a-z0-9-]+(\.[a-z0-9-]+)+$~', $target)) {
+                $rules[] = ['name' => $name, 'suffix' => ltrim($target, '.')];
+            }
+        }
+        self::$cdnCache = [$text, $rules];
+        return $rules;
+    }
+
+    /**
+     * The CDN in front of a target ('' = none): an IP or range inside a listed CDN range, a domain whose address is
+     * one, or whose CNAME chain reaches a listed CDN name (CloudFront, Akamai…). CDN edges are never port-scanned.
+     * @param string[]|null $ips the domain's IPs if already looked up
+     */
+    public static function cdnOf(string $kind, string $value, ?array $ips = null): string
+    {
+        $rules = self::cdnRules();
+        if (!$rules) {
+            return '';
+        }
+        foreach ($kind === 'domain' ? ($ips ?? self::ips($value)) : [$value] as $ip) {
+            $r = self::ipRange((string) $ip);
+            foreach ($r === null ? [] : $rules as $rule) {
+                if (isset($rule['range']) && self::overlaps($r, $rule['range'])) {
+                    return $rule['name'];
+                }
+            }
+        }
+        if ($kind !== 'domain') {
+            return '';
+        }
+        $name = strtolower($value);
+        for ($hop = 0; $hop < 4; $hop++) {
+            $target = strtolower(rtrim((string) (self::dns($name, 'CNAME')[0]['target'] ?? ''), '.'));
+            if ($target === '' || $target === $name) {
+                break;
+            }
+            foreach ($rules as $rule) {
+                if (isset($rule['suffix']) && self::within($target, $rule['suffix'])) {
+                    return $rule['name'];
+                }
+            }
+            $name = $target;
+        }
+        return '';
+    }
+
+    /**
+     * What the scope rules need to know about a target, with one DNS lookup: its IPs, the blocklist rule it hits and
+     * the CDN in front of it. Network: only from the worker or an explicit POST.
+     * @return array{ips:string[],blocked:string,cdn:string}
+     */
+    public static function screen(string $kind, string $value): array
+    {
+        $ips = $kind === 'domain' ? self::ips($value) : [];
+        return ['ips' => $ips, 'blocked' => self::blocked($kind, $value, null, $ips), 'cdn' => self::cdnOf($kind, $value, $kind === 'domain' ? $ips : null)];
     }
 
     /** DNS records of one type as dns_get_record returns them; [] on failure. */
