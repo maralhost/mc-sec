@@ -39,6 +39,14 @@ ok(isset($j['json']['html']) && $j['json']['page'] === 'findings' && $j['json'][
 $pr = client_get(['p' => 'scan', 'id' => (string) $running, 'progress' => '1']);
 ok(($pr['json']['ok'] ?? false) && $pr['json']['status'] === 'running' && is_int($pr['json']['progress']), 'progress JSON');
 
+section('a discovery result does not claim "no problems"');
+$aid = (int) \McSec\Db::table('mod_mcsec_assets')->where('client_id', 1)->where('status', 'verified')->value('id');
+$now = \McSec\Clock::now();
+$sid = \McSec\Db::table('mod_mcsec_scans')->insertGetId(['client_id' => 1, 'asset_id' => $aid, 'profile' => 'surface', 'engine' => 'oasm', 'status' => 'completed', 'progress' => 100,
+    'queued_at' => $now - 120, 'started_at' => $now - 100, 'finished_at' => $now - 60, 'summary' => json_encode(['new' => 0, 'fixed' => 0, 'reopened' => 0, 'seen' => 0, 'open' => [], 'surface_seen' => 5, 'surface_new' => 0])]);
+$h = html(client_get(['p' => 'scan', 'id' => (string) $sid]));
+ok(str_contains($h, 'نقشه‌ی سطح حمله آماده است') && !str_contains($h, 'مشکلی پیدا نکرد'), 'discovery scan with nothing risky: says what it did, not "no problems found"');
+
 section('viewer and new account');
 login(11, 1);
 foreach (['home', 'assets', 'findings', 'finding', 'notify', 'credits'] as $p) {

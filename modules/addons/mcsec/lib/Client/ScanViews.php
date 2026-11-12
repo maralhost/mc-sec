@@ -151,6 +151,9 @@ final class ScanViews
                     $list .= '<li><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '">' . Ui::sev((string) $f->severity) . '<span class="mcs-todo-title">' . self::e($f->title) . '</span></a><span class="mcs-todo-meta">' . Ui::ltr($f->location) . '</span></li>';
                 }
                 $out .= Ui::card('<ol class="mcs-todo">' . $list . '</ol>', 'یافته‌هایی که این اسکن برای اولین بار دید', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings&amp;scan=' . (int) $s->id . '&amp;status=all">همه</a>');
+            } elseif ((int) ($sum['seen'] ?? 0) === 0 && $s->profile === 'surface') {
+                // discovery does not look for vulnerabilities: "no problem found" would be a false reassurance
+                $out .= Ui::card(Ui::emptyState('radar', 'نقشه‌ی سطح حمله آماده است', 'درگاه پرخطری باز نبود. این اسکن دنبال آسیب‌پذیری نمی‌گردد؛ برای آن، «اسکن آسیب‌پذیری» بگیرید.'));
             } elseif ((int) ($sum['seen'] ?? 0) === 0) {
                 $out .= Ui::card(Ui::emptyState('shield-check', 'این اسکن مشکلی پیدا نکرد', 'آفرین. با زمان‌بندی، اسکن‌های بعدی را خودکار بگیرید.'));
             }

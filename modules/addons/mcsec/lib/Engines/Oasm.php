@@ -190,6 +190,12 @@ final class Oasm implements Engine
         $since = gmdate('Y-m-d\TH:i:s\Z', Clock::now() - 30);
         $kind = $profile['key'] === 'vuln' ? 'vuln' : 'discovery';
         if ($kind === 'vuln') {
+            // without nuclei installed in the workspace and a worker able to run it, OASM accepts the scan and leaves it
+            // pending forever (seen live on staging): stop now so the customer gets the credits back at once
+            $n = $this->nuclei($ws, true);
+            if ($n['known'] && (!$n['installed'] || $n['workers'] < 1)) {
+                return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run nuclei: ' . (!$n['installed'] ? 'not installed in workspace' : 'no worker for it (needs a node-mode worker with Docker)')];
+            }
             $r = $this->call('POST', '/api/vulnerabilities/scan', ['targetIds' => [$t['id']]], $ws);
         } elseif (!$t['created']) {
             $r = $this->call('POST', '/api/targets/' . rawurlencode($t['id']) . '/re-scan', null, $ws);
@@ -200,6 +206,30 @@ final class Oasm implements Engine
             return ['ok' => false, 'error' => 'OASM: HTTP ' . $r['status'] . ' ' . mb_substr((string) $r['body'], 0, 160), 'retry' => $r['status'] === 0 || $r['status'] >= 500];
         }
         return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
+    }
+
+    /**
+     * nuclei (a connector tool) in a workspace: installed on demand; 'workers' = workers able to run it. On staging the
+     * only worker is the built-in cloud one, which runs subfinder/naabu/httpx but no connector, so 'workers' is 0.
+     * @return array{known:bool,installed:bool,workers:int}
+     */
+    public function nuclei(string $ws, bool $install, int $clientId = -1): array
+    {
+        $r = $this->call('GET', '/api/tools?category=vulnerabilities&limit=50', null, $ws, 20, $clientId);
+        if (!$r['ok']) {
+            return ['known' => false, 'installed' => false, 'workers' => 0];
+        }
+        foreach ((array) ($r['json']['data'] ?? []) as $t) {
+            if (strtolower((string) ($t['name'] ?? '')) !== 'nuclei') {
+                continue;
+            }
+            $installed = !empty($t['isInstalled']);
+            if (!$installed && $install && (string) ($t['id'] ?? '') !== '') {
+                $installed = $this->call('POST', '/api/tools/install', ['toolId' => (string) $t['id']], $ws, 20, $clientId)['ok'];
+            }
+            return ['known' => true, 'installed' => $installed, 'workers' => (int) ($t['availableWorkersCount'] ?? 0)];
+        }
+        return ['known' => true, 'installed' => false, 'workers' => 0];
     }
 
     public function poll(object $scan, object $asset, array $profile): array
@@ -269,7 +299,8 @@ final class Oasm implements Engine
                     $hosts[$host] = true;
                     $surface[] = ['kind' => 'host', 'value' => $host, 'meta' => ['ips' => array_slice((array) ($a['ipAddresses'] ?? []), 0, 8)]];
                 }
-                $hr = is_array($a['httpResponses'] ?? null) ? $a['httpResponses'] : [];
+                // httpx tries every open port; a failed probe (SSH on 22, seen live) still carries a made-up http:// URL
+                $hr = is_array($a['httpResponses'] ?? null) && empty($a['httpResponses']['failed']) ? $a['httpResponses'] : [];
                 if (!empty($a['port'])) {
                     $surface[] = ['kind' => 'port', 'value' => $host . ':' . (int) $a['port'], 'meta' => array_filter([
                         'title' => mb_substr((string) ($hr['title'] ?? ''), 0, 120), 'server' => (string) ($hr['webserver'] ?? ''), 'status' => (int) ($hr['status_code'] ?? 0),
@@ -361,6 +392,14 @@ final class Oasm implements Engine
         if (!$w['ok']) {
             return ['ok' => false, 'message' => 'OASM در دسترس است ولی ورود حساب سرویس انجام نشد (HTTP ' . $w['status'] . ').', 'version' => $ver, 'ms' => $h['ms']];
         }
-        return ['ok' => true, 'message' => 'OASM ' . $ver . ' در دسترس است و حساب سرویس وارد شد.', 'version' => $ver, 'ms' => $h['ms']];
+        $msg = 'OASM ' . $ver . ' در دسترس است و حساب سرویس وارد شد؛ کشف سطح حمله آماده است.';
+        $sws = (string) ($w['json']['data'][0]['id'] ?? '');
+        $n = $sws !== '' ? $this->nuclei($sws, false, 0) : ['known' => false, 'installed' => false, 'workers' => 0];
+        if ($n['known'] && $n['workers'] < 1) {
+            $msg .= ' ولی «اسکن آسیب‌پذیری» اجرا نمی‌شود: در OASM کارگری برای nuclei نیست (کارگر حالت node با Docker لازم است). تا آن موقع این نوع اسکن را در «قیمت و پلن» خاموش کنید؛ اگر مشتری بگیرد، فوراً ناموفق می‌شود و اعتبارش برمی‌گردد.';
+        } elseif ($n['known']) {
+            $msg .= ' اسکن آسیب‌پذیری (nuclei) هم آماده است.';
+        }
+        return ['ok' => true, 'message' => $msg, 'version' => $ver, 'ms' => $h['ms'], 'vuln' => $n['known'] ? $n['workers'] > 0 : null];
     }
 }

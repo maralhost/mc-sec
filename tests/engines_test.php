@@ -21,7 +21,7 @@ $asset = Db::table('mod_mcsec_assets')->where('id', 50)->first();
 
 section('OASM: per-client user, workspace, target, discovery, results');
 $calls = [];
-$state = ['run_done' => false];
+$state = ['run_done' => false, 'nuclei_installed' => false, 'nuclei_workers' => 1];
 http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
     $path = (string) parse_url($url, PHP_URL_PATH) . (parse_url($url, PHP_URL_QUERY) ? '?' . parse_url($url, PHP_URL_QUERY) : '');
     $calls[] = [$method, $path, $headers['X-Workspace-Id'] ?? '', $headers['Origin'] ?? '', $body];
@@ -53,6 +53,8 @@ http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
             ['id' => 'a1', 'value' => 'www.example.com:443', 'port' => 443, 'ipAddresses' => ['93.184.216.34'], 'httpResponses' => ['title' => 'Shop', 'webserver' => 'nginx', 'status_code' => 200, 'url' => 'https://www.example.com', 'tech' => ['WordPress', 'PHP'],
                 'tls' => ['not_after' => '2027-01-01T00:00:00Z', 'issuer_dn' => 'R3', 'subject_cn' => 'www.example.com', 'tls_version' => 'tls13']]],
             ['id' => 'a2', 'value' => 'db.example.com:3306', 'port' => 3306, 'ipAddresses' => [], 'httpResponses' => null],
+            // shape seen live on OASM v0.12.1: httpx failed on SSH but the row still has a URL
+            ['id' => 'a3', 'value' => 'www.example.com:22', 'port' => 22, 'ipAddresses' => ['93.184.216.34'], 'httpResponses' => ['url' => 'http://www.example.com:22', 'failed' => true, 'status_code' => 0, 'tech' => [], 'tls' => null]],
         ], 'hasNextPage' => false])];
     }
     if (str_starts_with($path, '/api/vulnerabilities?')) {
@@ -62,6 +64,25 @@ http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
     }
     if ($path === '/api/vulnerabilities/scan') {
         return ['status' => 201, 'body' => '{"message":"ok"}'];
+    }
+    if (str_starts_with($path, '/api/tools?category=vulnerabilities')) {
+        return ['status' => 200, 'body' => json_encode(['data' => [
+            ['id' => 'tool-zap', 'name' => 'zap', 'isInstalled' => false, 'availableWorkersCount' => 0],
+            ['id' => 'tool-nuclei', 'name' => 'nuclei', 'isInstalled' => $state['nuclei_installed'], 'availableWorkersCount' => $state['nuclei_workers']],
+        ]])];
+    }
+    if ($path === '/api/health') {
+        return ['status' => 200, 'body' => '{"status":"ok"}'];
+    }
+    if ($path === '/api/metadata') {
+        return ['status' => 200, 'body' => '{"currentVersion":"v0.12.1"}'];
+    }
+    if ($method === 'GET' && str_starts_with($path, '/api/workspaces?')) {
+        return ['status' => 200, 'body' => json_encode(['data' => [['id' => 'svc-ws', 'name' => 'service']], 'total' => 1])];
+    }
+    if ($method === 'POST' && $path === '/api/tools/install') {
+        $state['nuclei_installed'] = ($b['toolId'] ?? '') === 'tool-nuclei';
+        return ['status' => 201, 'body' => '{"tool":{"name":"nuclei"}}'];
     }
     return ['status' => 404, 'body' => '{"message":"not mocked ' . $path . '"}'];
 });
@@ -88,7 +109,9 @@ $state['run_done'] = true;
 ok($oasm->poll($scan, $asset, \McSec\Catalog::get('surface'))['status'] === 'completed', 'completed');
 $c = $oasm->collect($scan, $asset, \McSec\Catalog::get('surface'));
 $kinds = array_count_values(array_column($c['surface'], 'kind'));
-ok(($kinds['host'] ?? 0) === 2 && ($kinds['port'] ?? 0) === 2 && ($kinds['tech'] ?? 0) === 2 && ($kinds['cert'] ?? 0) === 1, 'surface: hosts, ports, tech, cert (' . json_encode($kinds) . ')');
+ok(($kinds['host'] ?? 0) === 2 && ($kinds['port'] ?? 0) === 3 && ($kinds['tech'] ?? 0) === 2 && ($kinds['cert'] ?? 0) === 1, 'surface: hosts, ports, tech, cert (' . json_encode($kinds) . ')');
+$ssh = array_values(array_filter($c['surface'], fn ($x) => $x['value'] === 'www.example.com:22'));
+ok(count($ssh) === 1 && $ssh[0]['meta'] === [], 'failed HTTP probe (SSH): port kept, no made-up URL');
 ok($c['findings'] === [] && $c['kinds'] === ['host', 'port'], 'discovery: no vulnerability list, hosts/ports fully covered');
 $exp = \McSec\Scans::exposureFindings($c['surface']);
 ok(count($exp) === 1 && $exp[0]['key'] === 'builtin.port.3306' && $exp[0]['severity'] === 'high', 'MySQL on the internet becomes a finding');
@@ -110,10 +133,29 @@ http_mock(function ($m, $u, $h, $b, $o) use ($prev) {
 $r = $oasm->start(Db::table('mod_mcsec_scans')->where('id', 701)->first(), $asset, \McSec\Catalog::get('vuln'));
 ok($r['ok'] && $r['meta']['kind'] === 'vuln', 'vuln scan started after signing in again');
 ok(Crypto::decrypt((string) \McSec\Kv::get('oasm:s:1')) === 'session=c1-cookie', 'fresh client session cached');
+$inst = array_values(array_filter($calls, fn ($c) => $c[1] === '/api/tools/install'));
+ok(count($inst) === 1 && $inst[0][2] === 'ws-1' && str_contains((string) $inst[0][4], 'tool-nuclei'), 'nuclei installed in the client workspace before the first vulnerability scan');
 Db::table('mod_mcsec_scans')->where('id', 701)->update(['status' => 'running', 'backend_ref' => 't-1', 'backend_meta' => json_encode($r['meta'])]);
 $c = $oasm->collect(Db::table('mod_mcsec_scans')->where('id', 701)->first(), $asset, \McSec\Catalog::get('vuln'));
 ok(count($c['findings']) === 1 && $c['findings'][0]['severity'] === 'medium' && $c['findings'][0]['cvss'] == 5.3, 'nuclei finding normalized');
 ok(str_contains(implode("\n", array_map(fn ($c) => $c[1], $calls)), '') || true, 'calls recorded');
+
+// staging today: the only OASM worker runs the built-in tools, none can run nuclei
+Db::table('mod_mcsec_scans')->whereIn('id', [700, 701])->update(['status' => 'completed']);
+$state['nuclei_workers'] = 0;
+$calls = [];
+$bal = \McSec\Credits::balance(1)['total'];
+$q = \McSec\Scans::queue(1, $asset, 'vuln', 0, 1);
+ok($q['ok'] && $q['credits'] > 0 && \McSec\Credits::balance(1)['total'] === $bal - $q['credits'], 'vuln scan queued and charged');
+\McSec\Scans::dispatch(microtime(true) + 10);
+$s = Db::table('mod_mcsec_scans')->where('id', $q['scan_id'])->first();
+ok($s->status === 'failed' && $s->error_ref !== '' && \McSec\Credits::balance(1)['total'] === $bal, 'no worker for nuclei: failed at once (not after hours), credits back, support code');
+ok(!array_filter($calls, fn ($c) => $c[1] === '/api/vulnerabilities/scan'), 'nothing left pending in OASM');
+$h = $oasm->health();
+ok($h['ok'] && $h['vuln'] === false && str_contains($h['message'], 'nuclei') && str_contains($h['message'], 'خاموش کنید'), 'setup test: discovery ready, vulnerability scan flagged as not runnable');
+ok(!array_filter($calls, fn ($c) => $c[1] === '/api/tools/install' && $c[2] === 'svc-ws'), 'the test only reads (installs nothing)');
+$state['nuclei_workers'] = 1;
+ok($oasm->health()['vuln'] === true, 'with a worker: vulnerability scan ready');
 
 section('Osmedeus: API key, run, progress, results');
 setting('osm_url', 'http://osm.test:8811');

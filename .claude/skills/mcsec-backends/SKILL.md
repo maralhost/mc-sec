@@ -19,9 +19,9 @@ description: >
 | --- | --- | --- |
 | هدف | `POST /api/targets/bulk {targets:[{value,type:DOMAIN|IP|CIDR}]}` | ساختن هدف خودش کشف را شروع می‌کند. تکراری کل درخواست را 400 می‌کند ⚠ ← `GET /api/targets?value=` |
 | کشف دوباره | `POST /api/targets/{id}/re-scan` | |
-| آسیب‌پذیری | `POST /api/vulnerabilities/scan {targetIds:[…]}` | workflow `vulnerability_scan_basic` (nuclei). worker با Docker لازم است، وگرنه pending می‌ماند |
+| آسیب‌پذیری | `POST /api/vulnerabilities/scan {targetIds:[…]}` | workflow `vulnerability_scan_basic` (nuclei). پیش از آن `Oasm::nuclei`: nuclei در فضای تازه نصب نیست (`POST /api/tools/install {toolId}`) و اگر `availableWorkersCount` صفر باشد (staging امروز: فقط کارگر داخلی، هیچ connector) اسکن همان لحظه ناموفق می‌شود و اعتبار برمی‌گردد؛ وگرنه برای همیشه pending می‌ماند |
 | پیشرفت | `GET /api/targets/{id}/runs?limit=10&sortOrder=DESC` | `isCompleted`، `status`، `jobsTotal/jobsDone`، `currentTool`، `workflowName` («Domain discovery»، «Ip address discovery»، …). شناسه‌ی اجرا برنمی‌گردد: با زمان (`since`) و نام workflow جور می‌شود |
-| نتیجه | `GET /api/assets?targetIds=<id>&limit=100&page=n` | هر ردیف یک سرویس `host:port` با `httpResponses` (title، webserver، status_code، tech[]، tls) |
+| نتیجه | `GET /api/assets?targetIds=<id>&limit=100&page=n` | هر ردیف یک سرویس `host:port` با `httpResponses` (title، webserver، status_code، tech[]، tls). روی درگاه غیر HTTP (مثل ۲۲) `failed: true` با URL ساختگی می‌آید؛ نادیده گرفته می‌شود |
 | یافته‌ها | `GET /api/vulnerabilities?targetId=<id>&limit=100&page=n` | name، severity، affectedUrl/host/ports، description، solution، references، cveId، cweId، cvssScore، epssScore، extractedResults، detectionStatus |
 | لغو | `GET …/runs?active=true` ← `POST /api/jobs-registry/histories/{id}/cancel` | |
 | سلامت | `GET /api/health` (متن OK)، `GET /api/metadata` (`currentVersion`) | عمومی |

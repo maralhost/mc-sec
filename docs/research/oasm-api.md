@@ -991,6 +991,17 @@ Keep a local mirror keyed by OASM ids. Finding ids are stable across re-scans th
 12. Is there an upstream plan to make `LIMIT_WORKSPACE_CREATE` configurable? A small patch on our fork would remove the need for one user per 5 customers.
 13. Behaviour and runtime of a /24 CIDR target on the staging worker capacity.
 
+### 8.7 Live end-to-end test on staging (2026-11-12, MC-Sec 0.1.0 code, target `scanme.nmap.org`)
+
+The real module code ran against staging (SQLite harness, real HTTP), with `scanme.nmap.org` as the target because the Nmap project allows port scans of it. `oasm-staging.maral.cloud` itself was not used because it resolves to MizbanCloud edge IPs (185.226.140.140 and 185.226.142.142).
+
+- **Answered (Q9, Q8):** `create-user` with an `@mcsec-livetest.invalid` email worked, and the new user signed in at once (no email verification). The user (`mcsec-c1@mcsec-livetest.invalid`), the workspace (`mcsec-c1`) and the `bulk` target all behaved as documented, and `created[0].id` is filled in.
+- **Answered (Q4, discovery):** a first "Domain discovery" run took about 50 s (5 jobs: subfinder, naabu, httpx, screenshot). A `re-scan` took about 32 s. Matching runs by `since` plus `workflowName` picked the right run, and the earlier run was ignored.
+- **Answered (Q1): no worker can run connectors.** Admin `GET /api/workers?scope=cloud` needs an `X-Workspace-Id` header (any workspace the admin belongs to) and shows one online cloud worker. Every connector, nuclei included, has `availableWorkersCount: 0`. nuclei is also **not installed** in a new workspace, so `POST /api/tools/install {"toolId"}` is needed (201, idempotent in practice). `Oasm::start` installs nuclei and fails fast when no worker exists, so no OASM vulnerability scan works until an operator adds a node-mode worker with Docker.
+- **httpx on non-HTTP ports:** an asset row for `:22` carries `httpResponses` with `failed: true`, `status_code: 0` and a made-up `url: http://host:22`. `collect` now ignores failed probes.
+- **CDN edges:** a DOMAIN target fronted by a CDN gets naabu's default top ports run against the CDN edge IPs. This can't be switched off per workspace (built-in tool command; the workflow templates are rewritten on boot). It is still an open product decision (see `cybersec-expert`, rule 3).
+- Screenshots are presigned URLs on OASM's object store, valid for 48 h. MC-Sec does not use them.
+
 ---
 
 ## 9. Source pointers (upstream, tag v0.12.1)
