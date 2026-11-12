@@ -7,7 +7,9 @@ namespace McSec;
 /**
  * The security score (0–100) with a word, never a letter grade alone: penalties per open finding, with caps so a
  * single critical issue can never hide behind many clean checks (one open critical → at most 49, a high → at most 79;
- * the SSL Labs way). The account score is the mean of its scanned assets, under the same caps.
+ * the SSL Labs way; an open finding in CISA KEV, exploited in the wild, counts like a critical one). The account
+ * score is the mean of its scanned assets, under the same caps. "partial" counts assets whose last check was
+ * incomplete: their score is shown as incomplete, never as healthy.
  */
 final class Score
 {
@@ -22,7 +24,7 @@ final class Score
             $p += $w * ($n <= 3 ? $n : 3 + sqrt($n - 3));
         }
         $s = (int) max(0, round(100 - $p));
-        if ((int) ($c['critical'] ?? 0) > 0) {
+        if ((int) ($c['critical'] ?? 0) > 0 || (int) ($c['kev'] ?? 0) > 0) {
             $s = min($s, 49);
         } elseif ((int) ($c['high'] ?? 0) > 0) {
             $s = min($s, 79);
@@ -30,27 +32,29 @@ final class Score
         return $s;
     }
 
-    /** @return array{score:int,label:string,tone:string,scanned:int} score -1 = nothing scanned yet */
+    /** @return array{score:int,label:string,tone:string,scanned:int,partial:int} score -1 = nothing scanned yet */
     public static function forClient(int $clientId): array
     {
         $scores = [];
         $crit = false;
         $high = false;
+        $partial = 0;
         foreach (Assets::forClient($clientId) as $a) {
             if ((int) $a->last_scan_at === 0 || (int) $a->score < 0) {
                 continue;
             }
             $scores[] = (int) $a->score;
             $c = Assets::counts($a);
-            $crit = $crit || $c['critical'] > 0;
+            $crit = $crit || $c['critical'] > 0 || (int) ($c['kev'] ?? 0) > 0;
+            $partial += trim((string) ($a->partial ?? '')) !== '' ? 1 : 0;
             $high = $high || $c['high'] > 0;
         }
         if (!$scores) {
-            return ['score' => -1, 'label' => 'هنوز اسکنی نشده', 'tone' => 'none', 'scanned' => 0];
+            return ['score' => -1, 'label' => 'هنوز اسکنی نشده', 'tone' => 'none', 'scanned' => 0, 'partial' => 0];
         }
         $s = (int) round(array_sum($scores) / count($scores));
         $s = $crit ? min($s, 49) : ($high ? min($s, 79) : $s);
-        return ['score' => $s, 'label' => self::label($s), 'tone' => self::tone($s), 'scanned' => count($scores)];
+        return ['score' => $s, 'label' => self::label($s), 'tone' => self::tone($s), 'scanned' => count($scores), 'partial' => $partial];
     }
 
     public static function label(int $s): string

@@ -62,11 +62,24 @@ function demo_data(): void
             $url === 'https://shop-maral.ir/' => ['status' => 200, 'body' => '<title>فروشگاه</title>', 'headers' => ['server' => ['nginx/1.18.0'], 'x-powered-by' => ['PHP/7.4.33'], 'set-cookie' => ['wordpress_logged_in=1; path=/']]],
             $url === 'http://shop-maral.ir/' => ['status' => 200, 'body' => 'ok'],
             $url === 'https://shop-maral.ir/.git/HEAD' => ['status' => 200, 'body' => "ref: refs/heads/main\n"],
+            str_contains($url, 'blog-maral.ir') => ['status' => 403, 'body' => 'Attention Required!', 'headers' => ['server' => ['cloudflare']]],
             default => ['status' => 404, 'body' => ''],
         };
     });
+    // 0.2.0: KEV facts, monitoring, support link, an offer, the scanner page
+    foreach (['support_dept' => '2', 'offers' => 'tls-expiring | گواهی SSL با تمدید خودکار و بی‌دردسر از مارال کلاد | https://maral.cloud/ssl', 'monitor_enabled' => '1', 'intel_enabled' => '1',
+        'abuse_email' => 'abuse@maral.cloud', 'scanner_ips' => "185.165.119.10\n185.165.119.11"] as $k => $v) {
+        setting($k, $v);
+    }
+    Db::table('mod_mcsec_intel')->insertOrIgnore(['cve' => 'CVE-2024-27956', 'kev' => 1, 'kev_added' => '2024-05-01', 'kev_ransom' => 0, 'epss' => 0.94, 'epss_at' => Clock::now(), 'updated_at' => Clock::now()]);
     $q = \McSec\Scans::queue(1, Db::table('mod_mcsec_assets')->where('id', $shop)->first(), 'hygiene', 0, 1);
     \McSec\Scans::dispatch(microtime(true) + 30);
+    // the blog behind Cloudflare: its WAF answers the check with 403, so the basic check is incomplete
+    \McSec\Scans::queue(1, Db::table('mod_mcsec_assets')->where('id', $blog)->first(), 'hygiene', 0, 1);
+    \McSec\Scans::dispatch(microtime(true) + 30);
+    \McSec\Scans::pollRunning(microtime(true) + 30);
+    Db::table('mod_mcsec_assets')->where('id', $shop)->update(['mon_status' => 'up', 'mon_at' => Clock::now() - 420, 'mon_since' => Clock::now() - 86400 * 9, 'mon_cert_at' => Clock::now() - 3600, 'mon_cert_end' => '2026-11-23']);
+    Db::table('mod_mcsec_assets')->where('id', $blog)->update(['mon_status' => 'down', 'mon_at' => Clock::now() - 300, 'mon_since' => Clock::now() - 1800, 'mon_fails' => 6, 'mon_note' => 'HTTP 502']);
     // nuclei-style findings from a completed OASM vulnerability scan
     $sid = Db::table('mod_mcsec_scans')->insertGetId(['client_id' => 1, 'asset_id' => $shop, 'profile' => 'vuln', 'engine' => 'oasm', 'status' => 'completed', 'credits' => 6,
         'queued_at' => Clock::now() - 7200, 'started_at' => Clock::now() - 7000, 'finished_at' => Clock::now() - 3600, 'stage' => 'تمام شد', 'progress' => 100]);

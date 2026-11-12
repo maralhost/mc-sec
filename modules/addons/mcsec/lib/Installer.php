@@ -79,6 +79,14 @@ final class Installer
             $t->string('cdn', 40)->default('');       // CDN in front of a domain ('' = none), see Net::cdnOf
             $t->integer('cdn_checked_at')->default(0);
             $t->integer('origin_id')->default(0);     // the IP asset of the real server behind the CDN
+            $t->string('partial', 255)->default('');  // why the last scan could not check everything ('' = complete)
+            $t->string('mon_status', 8)->default(''); // light monitoring: '' unknown | up | down
+            $t->integer('mon_at')->default(0);        // last availability check
+            $t->integer('mon_fails')->default(0);     // failed checks in a row
+            $t->integer('mon_since')->default(0);     // current status since
+            $t->string('mon_note', 160)->default(''); // last failure, e.g. "HTTP 502"
+            $t->integer('mon_cert_at')->default(0);   // last certificate check (once a day)
+            $t->string('mon_cert_end', 10)->default(''); // certificate valid until (Y-m-d)
             $t->integer('created_by')->default(0);
             $t->integer('created_at')->default(0);
             $t->integer('removed_at')->default(0);
@@ -126,6 +134,8 @@ final class Installer
             $t->string('severity', 10);               // critical | high | medium | low | info
             $t->decimal('cvss', 4, 1)->nullable();
             $t->decimal('epss', 6, 5)->nullable();
+            $t->integer('kev')->default(0);           // 1 = a CVE of it is in CISA's Known Exploited Vulnerabilities
+            $t->integer('priority')->default(0);      // 0–100: severity/CVSS × EPSS × KEV (Intel::priority)
             $t->string('cve', 255)->default('');
             $t->string('cwe', 255)->default('');
             $t->string('location', 500)->default('');
@@ -344,6 +354,16 @@ final class Installer
             $t->mediumText('v')->nullable();
             $t->integer('expires_at')->default(0);
         });
+        // vulnerability intelligence per CVE: CISA KEV and FIRST EPSS (Intel, refreshed by the worker)
+        $make('mod_mcsec_intel', function ($t) {
+            $t->string('cve', 24)->primary();
+            $t->integer('kev')->default(0);
+            $t->string('kev_added', 10)->default('');
+            $t->integer('kev_ransom')->default(0);   // known use in ransomware campaigns
+            $t->decimal('epss', 6, 5)->nullable();
+            $t->integer('epss_at')->default(0);
+            $t->integer('updated_at')->default(0);
+        });
 
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)
         $col = function (string $table, string $column, callable $def) use ($s): void {
@@ -357,6 +377,17 @@ final class Installer
         $col('mod_mcsec_assets', 'cdn', fn ($t) => $t->string('cdn', 40)->default(''));
         $col('mod_mcsec_assets', 'cdn_checked_at', fn ($t) => $t->integer('cdn_checked_at')->default(0));
         $col('mod_mcsec_assets', 'origin_id', fn ($t) => $t->integer('origin_id')->default(0));
+        // 0.2.0: incomplete scans, light monitoring, KEV/EPSS priority
+        $col('mod_mcsec_assets', 'partial', fn ($t) => $t->string('partial', 255)->default(''));
+        $col('mod_mcsec_assets', 'mon_status', fn ($t) => $t->string('mon_status', 8)->default(''));
+        $col('mod_mcsec_assets', 'mon_at', fn ($t) => $t->integer('mon_at')->default(0));
+        $col('mod_mcsec_assets', 'mon_fails', fn ($t) => $t->integer('mon_fails')->default(0));
+        $col('mod_mcsec_assets', 'mon_since', fn ($t) => $t->integer('mon_since')->default(0));
+        $col('mod_mcsec_assets', 'mon_note', fn ($t) => $t->string('mon_note', 160)->default(''));
+        $col('mod_mcsec_assets', 'mon_cert_at', fn ($t) => $t->integer('mon_cert_at')->default(0));
+        $col('mod_mcsec_assets', 'mon_cert_end', fn ($t) => $t->string('mon_cert_end', 10)->default(''));
+        $col('mod_mcsec_findings', 'kev', fn ($t) => $t->integer('kev')->default(0));
+        $col('mod_mcsec_findings', 'priority', fn ($t) => $t->integer('priority')->default(0));
 
         // seed: nothing customer-facing (feature off until the admin turns it on)
         if (!Db::table('mod_mcsec_settings')->where('k', 'installed_at')->exists()) {

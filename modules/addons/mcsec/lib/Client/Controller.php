@@ -48,6 +48,12 @@ final class Controller
     public static function handle(): array
     {
         $pjax = ($_GET['pjax'] ?? $_POST['pjax'] ?? '') === '1';
+        if (($_GET['p'] ?? '') === 'scanner' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+            // public page for site owners who saw the scanner in their logs: no login, nothing changes
+            $label = 'درباره‌ی اسکنر امنیتی';
+            return ['pagetitle' => $label, 'breadcrumb' => ['index.php?m=mcsec&p=scanner' => $label], 'templatefile' => 'templates/page', 'requirelogin' => false, 'forcessl' => true,
+                'vars' => ['mcsec_html' => Views::scanner()]];
+        }
         $who = Auth::client();
         if ($who === null) {
             return $pjax ? self::json(['ok' => true, 'redirect' => 'clientarea.php']) : self::page('home', '');

@@ -108,9 +108,32 @@ final class Ai
         return null;
     }
 
-    /** Hides e-mail addresses, phone numbers, long secrets and tokens before data leaves for the model. */
+    /**
+     * Untrusted text from scanned sites made inert before it reaches the model (prompt-injection defence): no markup
+     * or scripts, no invisible or control characters (the Persian ZWNJ stays), NFKC so look-alike characters cannot
+     * hide words, no way to close the <scan_data> fence, single spaces. Always applied, whatever ai_mask_pii says.
+     */
+    public static function clean(string $s): string
+    {
+        $s = preg_replace('~<(script|style)\b.*?</\1\s*>~is', ' ', $s) ?? $s;
+        $s = strip_tags($s);
+        $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        if (class_exists('Normalizer')) {
+            $n = \Normalizer::normalize($s, \Normalizer::FORM_KC);
+            $s = is_string($n) ? $n : $s;
+        }
+        $s = preg_replace('~(?!\x{200C})[\p{Cf}\p{Co}]~u', '', $s) ?? $s;
+        $s = preg_replace('~[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]~', '', $s) ?? $s;
+        $s = preg_replace('~[\p{Zl}\p{Zp}\x{00A0}\x{2000}-\x{200A}\x{202F}\x{205F}\x{3000}]~u', ' ', $s) ?? $s;
+        $s = preg_replace('~</?\s*scan_data\s*>~i', '', $s) ?? $s;
+        $s = preg_replace('~[ \t]{2,}~', ' ', $s) ?? $s;
+        return trim($s);
+    }
+
+    /** Cleans (clean()) and hides e-mail addresses, phone numbers, long secrets and tokens before data leaves for the model. */
     public static function mask(string $s): string
     {
+        $s = self::clean($s);
         if (!Settings::bool('ai_mask_pii')) {
             return $s;
         }

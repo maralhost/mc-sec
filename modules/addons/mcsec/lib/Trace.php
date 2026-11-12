@@ -15,7 +15,7 @@ final class Trace
     public const LEVELS = ['info' => 'اطلاع', 'warn' => 'هشدار', 'error' => 'خطا'];
     public const AREAS = [
         'whmcs' => 'فراخوانی WHMCS', 'hook' => 'هوک', 'worker' => 'کار پس‌زمینه', 'credit' => 'اعتبار', 'engine' => 'موتور اسکن',
-        'verify' => 'تأیید مالکیت', 'ai' => 'هوش مصنوعی', 'notify' => 'اعلان', 'client' => 'ناحیه‌ی کاربری', 'admin' => 'پنل مدیر', 'plan' => 'پلن',
+        'verify' => 'تأیید مالکیت', 'ai' => 'هوش مصنوعی', 'notify' => 'اعلان', 'client' => 'ناحیه‌ی کاربری', 'admin' => 'پنل مدیر', 'plan' => 'پلن', 'intel' => 'KEV و EPSS', 'monitor' => 'پایش',
     ];
 
     /** Who the current request is about (the client controller sets it once it knows the person). */

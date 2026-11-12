@@ -74,6 +74,7 @@ final class FindingViews
         foreach ($res['rows'] as $r) {
             $rows .= '<tr>' . Ui::td('شدت', Ui::sev((string) $r->severity))
                 . Ui::td('یافته', '<a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $r->id . '" class="mcs-finding-link">' . self::e($r->title) . '</a>'
+                    . ((int) ($r->kev ?? 0) === 1 && $r->status === 'open' ? ' ' . Ui::chip('در حال بهره‌برداری', 'err') : '')
                     . ((int) $r->first_seen_at > \McSec\Clock::now() - 7 * 86400 && $r->status === 'open' ? ' ' . Ui::chip('تازه', 'warn') : ''))
                 . Ui::td('محل', Ui::ltr($r->location) . '<small class="mcs-muted">' . self::e($r->asset_label !== '' ? $r->asset_label : '') . '</small>')
                 . Ui::td('وضعیت', self::statusChip($r))
@@ -98,13 +99,18 @@ final class FindingViews
         } elseif ($f->status === 'fixed') {
             $out .= Ui::alert('success', 'این مشکل در اسکن ' . self::e(Text::date((int) $f->fixed_at)) . ' دیگر دیده نشد و رفع‌شده است.', 'check');
         }
+        if ((int) ($f->kev ?? 0) === 1 && $f->status === 'open') {
+            $out .= Ui::alert('danger', '<strong>مهاجمان همین حالا از این آسیب‌پذیری استفاده می‌کنند.</strong> سازمان امنیت سایبری آمریکا (CISA) آن را در فهرست آسیب‌پذیری‌های در حال بهره‌برداری فعال (KEV) گذاشته است. رفعش را به هیچ کار دیگری عقب نیندازید.', 'alert');
+        }
         // what & where
         $facts = Ui::facts([
             'محل' => Ui::ltr($f->location),
             'دارایی' => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $f->asset_id . '">' . Ui::ltr($asset->value ?? '') . '</a>',
             'شناسه‌ها' => trim($f->cve . ' ' . $f->cwe) !== '' ? implode(' ', array_map(fn ($x) => Ui::ltr($x, 'mcs-tag'), array_filter(array_merge(explode(',', (string) $f->cve), explode(',', (string) $f->cwe))))) : '',
             'CVSS' => $f->cvss !== null ? Ui::ltr((string) $f->cvss) : '',
-            'احتمال سوءاستفاده (EPSS)' => $f->epss !== null ? self::e(Text::fa(round((float) $f->epss * 100, 1)) . '٪') : '',
+            'احتمال سوءاستفاده (EPSS)' => $f->epss !== null ? self::e(Text::fa(round((float) $f->epss * 100, 1)) . '٪') . ' <small class="mcs-muted">احتمال بهره‌برداری در ۳۰ روز آینده</small>' : '',
+            'در حال بهره‌برداری (KEV)' => (int) ($f->kev ?? 0) === 1 ? Ui::chip('بله', 'err') : '',
+            'اولویت' => (int) ($f->priority ?? 0) > 0 && $f->status === 'open' ? self::e(Text::fa((int) $f->priority) . ' از ۱۰۰') . ' <small class="mcs-muted">از شدت، احتمال و بهره‌برداری فعال</small>' : '',
             'پیدا شده با' => self::e((Catalog::all(true)[$f->profile]['label'] ?? '') . ' (' . Catalog::engineLabel((string) $f->engine) . ')'),
             'اولین بار' => self::e(Text::date((int) $f->first_seen_at)),
             'آخرین بار' => self::e(Text::date((int) $f->last_seen_at)) . ((int) $f->reopened > 0 ? ' — ' . self::e(Text::fa((int) $f->reopened)) . ' بار پس از رفع دوباره دیده شد' : ''),
@@ -128,6 +134,9 @@ final class FindingViews
                 . (!empty($kb['effort']) ? '<p class="mcs-small mcs-muted">' . Ui::ico('clock') . 'زمان تقریبی: ' . self::e($kb['effort']) . '</p>' : '')
                 . (!empty($kb['maral']) ? Ui::alert('info', self::e($kb['maral']), 'shield') : '')
                 . ($refs !== '' ? '<details class="mcs-how"><summary>منبع‌ها</summary><ul class="mcs-plain">' . $refs . '</ul></details>' : ''), 'راه رفع: ' . $kb['title'], 'check');
+        }
+        if ($f->status === 'open') {
+            $out .= self::offer($kbKey) . self::supportCard($f, (string) ($asset->value ?? ''));
         }
         $ai = Reports::cachedFix($f);
         $aiOk = Ai::configured() && Plans::limits($cid)['ai'];
@@ -165,6 +174,39 @@ final class FindingViews
             }
         }
         return $out;
+    }
+
+    /**
+     * A Maral service that solves this kind of finding (setting offers: "kb key | text | URL" per line), shown next
+     * to the fix only. Empty setting = nothing.
+     */
+    public static function offer(string $kbKey): string
+    {
+        foreach (preg_split('~\r\n|\r|\n~', Settings::get('offers')) ?: [] as $line) {
+            $p = array_map('trim', explode('|', $line));
+            if (count($p) < 3 || $p[0] === '' || strcasecmp($p[0], $kbKey) !== 0 || !preg_match('~^https?://[^\s"<>]+$~i', $p[2])) {
+                continue;
+            }
+            return Ui::card('<p>' . self::e(Text::name($p[1], 200)) . '</p><a class="btn btn-default" href="' . self::e($p[2]) . '" target="_blank" rel="noopener">' . Ui::ico('link') . 'دیدن</a>', 'راه آسان‌تر', 'sparkle');
+        }
+        return '';
+    }
+
+    /**
+     * "Ask support": opens WHMCS's ticket form of the chosen department with the finding's title and summary filled
+     * in (subject and message in the address). Nothing is sent until the customer submits the form.
+     */
+    public static function supportCard(object $f, string $assetValue): string
+    {
+        $dept = Settings::int('support_dept');
+        if ($dept <= 0) {
+            return '';
+        }
+        $sev = Findings::SEVERITIES[(string) $f->severity]['label'] ?? '';
+        $msg = "سلام، برای رفع این یافته‌ی امنیتی کمک می‌خواهم:\n\n" . 'عنوان: ' . $f->title . "\n" . 'شدت: ' . $sev . "\n" . 'دارایی: ' . $assetValue . "\n" . 'محل: ' . mb_substr((string) $f->location, 0, 200)
+            . ((string) $f->cve !== '' ? "\nCVE: " . $f->cve : '') . "\n" . 'پیوند: ' . \McSec\Whmcs::systemUrl() . 'index.php?m=mcsec&p=finding&id=' . (int) $f->id;
+        $url = 'submitticket.php?' . http_build_query(['step' => 2, 'deptid' => $dept, 'subject' => 'کمک برای رفع: ' . mb_substr((string) $f->title, 0, 150), 'message' => $msg]);
+        return Ui::card('<p>اگر رفع این مورد از توانتان بیرون است، تیکت آماده‌ای با خلاصه‌ی همین یافته باز می‌شود؛ پیش از فرستادن می‌توانید آن را ویرایش کنید.</p><a class="btn btn-default" href="' . self::e($url) . '">' . Ui::ico('send') . 'از پشتیبانی کمک بخواهید</a>', 'کمک از پشتیبانی', 'heart');
     }
 
     public static function aiCard(array $ai): string

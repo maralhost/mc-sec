@@ -21,6 +21,8 @@ use McSec\Whmcs;
 final class Views
 {
     public static string $link = 'addonmodules.php?module=mcsec';
+    /** Text settings that hold rule lists (domains, IPs, URLs): left-to-right, taller boxes. */
+    private const LTR_LISTS = ['blocklist', 'cdn_list', 'reputation_lists', 'scanner_ips'];
 
     private static function e($s): string
     {
@@ -133,7 +135,7 @@ final class Views
                 'bool' => '<input type="hidden" name="has_' . $k . '" value="1"><label class="mcsa-switch"><input type="checkbox" id="' . $id . '" name="set_' . $k . '" value="1"' . ($val === '1' ? ' checked' : '') . '> روشن</label>',
                 'secret' => '<input class="form-control" type="password" autocomplete="new-password" id="' . $id . '" name="set_' . $k . '" placeholder="' . ($val !== '' ? '•••••• (ذخیره شده؛ خالی بگذارید تا بماند)' : 'تنظیم نشده') . '" dir="ltr">'
                     . ($val !== '' ? '<label class="mcsa-inline"><input type="checkbox" name="clear_' . $k . '" value="1"> پاک شود</label>' : ''),
-                'text', 'json' => '<textarea class="form-control" id="' . $id . '" name="set_' . $k . '" rows="' . ($type === 'json' ? 5 : (in_array($k, ['blocklist', 'cdn_list'], true) ? 8 : 3)) . '" dir="' . ($type === 'json' || in_array($k, ['blocklist', 'cdn_list'], true) ? 'ltr' : 'auto') . '">' . self::e($val) . '</textarea>',
+                'text', 'json' => '<textarea class="form-control" id="' . $id . '" name="set_' . $k . '" rows="' . ($type === 'json' ? 5 : (in_array($k, self::LTR_LISTS, true) ? 8 : 3)) . '" dir="' . ($type === 'json' || in_array($k, self::LTR_LISTS, true) ? 'ltr' : 'auto') . '">' . self::e($val) . '</textarea>',
                 default => '<input class="form-control" id="' . $id . '" name="set_' . $k . '" value="' . self::e($val) . '" dir="' . (in_array($type, ['int', 'csv'], true) || str_ends_with($k, '_url') || str_contains($k, 'email') || str_contains($k, 'model') ? 'ltr' : 'auto') . '">',
             };
             $h .= '<div class="mcsa-field"><label for="' . $id . '">' . self::e($label) . ' <span class="mcsa-i" title="' . self::e($help . ($type !== 'secret' && $def !== '' && strlen($def) < 60 ? ' پیش‌فرض: ' . $def : '')) . '">ⓘ</span></label>' . $control
@@ -268,13 +270,25 @@ final class Views
     private static function settings(): string
     {
         $out = self::guide('<p>هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است. روال پیشنهادی: «چه کسانی» = list با چند حساب آزمایشی ← آزمودن ← groups یا all.</p>');
-        foreach (['general' => 'عمومی و دسترسی', 'scope' => 'محدوده‌ی اسکن: فهرست ممنوع و CDN', 'scans' => 'ظرفیت و اسکن', 'credits' => 'اعتبار', 'system' => 'سامانه'] as $g => $l) {
+        foreach (['general' => 'عمومی و دسترسی', 'scope' => 'محدوده‌ی اسکن: فهرست ممنوع و CDN', 'scans' => 'ظرفیت و اسکن', 'checks' => 'فهرست سیاه، پایش و اولویت آسیب‌پذیری‌ها',
+            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'credits' => 'اعتبار', 'system' => 'سامانه'] as $g => $l) {
             $out .= self::box($l, self::form('settings', 'save_settings', self::fields($g) . '<button class="btn btn-primary">ذخیره</button>')
+                . ($g === 'checks' ? self::intelStatus() : '')
                 . ($g === 'scope' ? '<hr>' . self::form('settings', 'scope_test', '<div class="mcsa-field"><label for="mcsa-scope-t">این دامنه یا IP اسکن می‌شود؟</label>'
                     . '<div class="mcsa-search"><input class="form-control" id="mcsa-scope-t" name="target" dir="ltr" placeholder="shop.example.com یا 203.0.113.10"><button class="btn btn-default">بسنج</button></div>'
                     . '<small>با قاعده‌های ذخیره‌شده‌ی بالا می‌سنجد: IPهای دامنه، قاعده‌ی ممنوعی که به آن می‌خورد و CDN جلوی آن. چیزی را تغییر نمی‌دهد.</small></div>') : ''));
         }
         return $out;
+    }
+
+    /** Last KEV/EPSS refresh and how many monitored sites are down, under the "checks" settings. */
+    private static function intelStatus(): string
+    {
+        $i = json_decode(Settings::get('intel_last'), true);
+        $line = is_array($i) ? 'آخرین به‌روزرسانی KEV/EPSS: ' . Text::ago((int) ($i['at'] ?? 0)) . ' — KEV: ' . (is_numeric($i['kev'] ?? null) ? Text::fa((int) $i['kev']) . ' CVE' : 'خطا (گزارش فنی را ببینید)')
+            . '، EPSS تازه: ' . Text::fa((int) ($i['epss'] ?? 0)) . '، یافته‌ی به‌روزشده: ' . Text::fa((int) ($i['findings'] ?? 0)) : 'KEV/EPSS هنوز گرفته نشده است (پس از روشن کردن، در اجرای بعدی کار پس‌زمینه).';
+        $down = Settings::bool('monitor_enabled') ? Db::table('mod_mcsec_assets')->where('mon_status', 'down')->where('status', 'verified')->count() : 0;
+        return '<p class="mcsa-muted">' . self::e($line) . (Settings::bool('monitor_enabled') ? ' · ' . self::e('سایت‌های از دسترس خارج: ' . Text::fa($down)) : '') . '</p>';
     }
 
     private static function log(): string

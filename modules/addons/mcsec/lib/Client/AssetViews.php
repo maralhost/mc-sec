@@ -9,6 +9,7 @@ use McSec\Assets;
 use McSec\Catalog;
 use McSec\Db;
 use McSec\Findings;
+use McSec\Monitor;
 use McSec\Net;
 use McSec\Plans;
 use McSec\Scans;
@@ -71,7 +72,9 @@ final class AssetViews
             $sched = array_merge($schedules[(int) $a->id] ?? [], $a->status === 'verified' ? ($schedules[0] ?? []) : []);
             $rows .= '<tr>' . Ui::td('دارایی', '<a class="mcs-asset-link' . ($isSub ? ' is-sub' : '') . '" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '">'
                     . Ui::ico($a->kind === 'domain' ? 'globe' : 'server') . Ui::ltr($a->value) . '</a>' . (trim((string) $a->label) !== '' ? '<small class="mcs-muted">' . self::e($a->label) . '</small>' : ''))
-                . Ui::td('وضعیت', self::statusChip($a) . ((string) ($a->cdn ?? '') !== '' ? ' ' . Ui::chip('پشت CDN', 'muted') : '') . ($a->status === 'pending' ? ' <a class="mcs-small" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '#verify">ادامه‌ی تأیید</a>' : ''))
+                . Ui::td('وضعیت', self::statusChip($a) . ((string) ($a->cdn ?? '') !== '' ? ' ' . Ui::chip('پشت CDN', 'muted') : '')
+                    . (trim((string) ($a->partial ?? '')) !== '' && $a->status === 'verified' ? ' <span title="' . self::e((string) $a->partial) . '">' . Ui::chip('ارزیابی ناقص', 'warn') . '</span>' : '')
+                    . ((($m = Monitor::status($a)) !== null && $m[1] === 'err') ? ' ' . Ui::chip($m[0], 'err') : '') . ($a->status === 'pending' ? ' <a class="mcs-small" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '#verify">ادامه‌ی تأیید</a>' : ''))
                 . Ui::td('امتیاز', (int) $a->last_scan_at > 0 && (int) $a->score >= 0 ? '<span class="mcs-score-pill mcs-tone-' . Score::tone((int) $a->score) . '">' . self::e(Text::fa((int) $a->score)) . '</span>' : '<span class="mcs-muted">—</span>')
                 . Ui::td('یافته‌های باز', (int) $a->last_scan_at > 0 ? Ui::sevCounts(Assets::counts($a), 'index.php?m=mcsec&p=findings&asset=' . (int) $a->id, true) : '<span class="mcs-muted">هنوز اسکن نشده</span>')
                 . Ui::td('آخرین اسکن', self::e(Views::when((int) $a->last_scan_at)))
@@ -124,9 +127,17 @@ final class AssetViews
         }
         $counts = Assets::counts($a);
         $score = (int) $a->last_scan_at > 0 ? (int) $a->score : -1;
-        $out .= '<div class="mcs-grid2">' . Ui::card(Ui::gauge($score, $score < 0 ? 'هنوز اسکنی تمام نشده است.' : self::e('آخرین اسکن: ' . Views::when((int) $a->last_scan_at))), 'امتیاز این دارایی', 'shield-check')
+        $partial = trim((string) ($a->partial ?? ''));
+        $mon = Monitor::status($a);
+        if ($mon !== null && $mon[1] === 'err') {
+            $out .= Ui::alert('danger', Ui::plain('این سایت از دسترس خارج است (' . $mon[2] . '). وقتی برگردد خبرتان می‌کنیم.'), 'alert');
+        }
+        $out .= '<div class="mcs-grid2">' . Ui::card(Ui::gauge($score, $score < 0 ? 'هنوز اسکنی تمام نشده است.' : self::e('آخرین اسکن: ' . Views::when((int) $a->last_scan_at)), $partial !== '')
+                . ($partial !== '' && $score >= 0 ? '<p class="mcs-small">' . Ui::plain($partial) . '</p>' : ''), 'امتیاز این دارایی', 'shield-check')
             . Ui::card(Ui::sevCounts($counts, 'index.php?m=mcsec&p=findings&asset=' . (int) $a->id) . Ui::facts([
                 'نوع' => self::e(Assets::KINDS[$a->kind] ?? $a->kind),
+                'در دسترس بودن' => $mon !== null ? Ui::chip($mon[0], $mon[1]) . ' <small class="mcs-muted">' . Ui::plain($mon[2]) . '</small>' : '',
+                'گواهی SSL تا' => $mon !== null && (string) ($a->mon_cert_end ?? '') !== '' ? self::e(Text::ymd((string) $a->mon_cert_end)) : '',
                 'سرور اصلی برای' => $a->kind === 'ip' ? implode(' ', array_map(fn ($d) => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $d->id . '">' . Ui::ltr($d->value) . '</a>',
                     Db::rows(Db::table('mod_mcsec_assets')->where('client_id', $cid)->where('origin_id', $a->id)->where('status', '!=', 'removed')->limit(10)))) : '',
                 'روش تأیید' => $a->status === 'verified' ? self::e(Verify::METHODS[$a->method] ?? $a->method) . ' — ' . self::e(Text::date((int) $a->verified_at, false)) : '',
@@ -136,7 +147,7 @@ final class AssetViews
 
         // top open findings
         $rank = "CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
-        $top = Db::rows(Db::table('mod_mcsec_findings')->where('asset_id', $a->id)->where('status', 'open')->orderByRaw($rank . ' DESC')->orderByDesc('last_seen_at')->limit(8));
+        $top = Db::rows(Db::table('mod_mcsec_findings')->where('asset_id', $a->id)->where('status', 'open')->orderByDesc('priority')->orderByRaw($rank . ' DESC')->orderByDesc('last_seen_at')->limit(8));
         if ($top) {
             $list = '';
             foreach ($top as $f) {

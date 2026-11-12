@@ -253,7 +253,7 @@ final class Reports
     {
         $items = [];
         foreach (array_slice($data['findings'], 0, self::AI_FINDINGS) as $f) {
-            $items[] = ['id' => $f['id'], 'title' => $f['title'], 'severity' => $f['severity'], 'location' => Ai::mask($f['location']), 'asset' => $f['asset'],
+            $items[] = ['id' => $f['id'], 'title' => Ai::clean((string) $f['title']), 'severity' => $f['severity'], 'location' => Ai::mask($f['location']), 'asset' => $f['asset'],
                 'description' => Ai::mask(mb_substr($f['description'], 0, 400)), 'evidence' => Ai::mask(mb_substr($f['evidence'], 0, 200)), 'cve' => $f['cve'], 'is_new' => $f['new']];
         }
         $payload = ['report_kind' => $data['kind'], 'score' => $data['score'], 'open_counts' => $data['counts'], 'open_total' => $data['open_total'],

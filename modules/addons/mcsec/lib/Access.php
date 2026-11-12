@@ -22,9 +22,29 @@ final class Access
         if (!$c || (string) $c->status === 'Closed') {
             return false;
         }
+        return self::modeAllows($clientId, (int) $c->groupid);
+    }
+
+    /** clientAllowed() for many accounts with one batched read (worker loops). @param int[] $ids @return int[] */
+    public static function allowedIds(array $ids): array
+    {
+        if (!Settings::bool('enabled') || !$ids) {
+            return [];
+        }
+        $out = [];
+        foreach (Whmcs::clientFlags($ids) as $id => $c) {
+            if ((string) $c->status !== 'Closed' && self::modeAllows((int) $id, (int) $c->groupid)) {
+                $out[] = (int) $id;
+            }
+        }
+        return $out;
+    }
+
+    private static function modeAllows(int $clientId, int $groupId): bool
+    {
         return match (Settings::get('access_mode')) {
             'all' => true,
-            'groups' => in_array((int) $c->groupid, Settings::ints('access_groups'), true),
+            'groups' => in_array($groupId, Settings::ints('access_groups'), true),
             default => in_array($clientId, Settings::ints('access_clients'), true),
         };
     }

@@ -12,6 +12,8 @@ use McSec\Credits;
 use McSec\Db;
 use McSec\Findings;
 use McSec\Kb;
+use McSec\Monitor;
+use McSec\Net;
 use McSec\Notify;
 use McSec\Scans;
 use McSec\Schedules;
@@ -169,6 +171,27 @@ final class Views
         return self::wrap($ctx, $p, $body);
     }
 
+    /**
+     * The public "about this scanner" page (no login): what MC-Sec is, how it behaves, its User-Agent and IPs, and
+     * whom to write to so a domain or IP is never scanned again. The User-Agent of every request links here.
+     */
+    public static function scanner(): string
+    {
+        $ips = array_values(array_filter(array_map('trim', preg_split('~[ \t\r\n,]+~', Settings::get('scanner_ips')) ?: []), fn ($ip) => filter_var($ip, FILTER_VALIDATE_IP) !== false || Net::ipRange($ip) !== null));
+        $abuse = trim(Settings::get('abuse_email'));
+        $abuse = filter_var($abuse, FILTER_VALIDATE_EMAIL) ? $abuse : '';
+        $contact = $abuse !== '' ? 'به ' . '<a href="mailto:' . self::e($abuse) . '" dir="ltr">' . self::e($abuse) . '</a> بنویسید' : 'از راه <a href="contact.php">فرم تماس</a> همین سایت به ما خبر دهید';
+        $body = '<div class="mcs-page mcs-public"><div class="mcs-pagehead"><div><h2>درباره‌ی اسکنر امنیتی مارال کلاد</h2><p>اگر در لاگ سرور یا فایروال خود درخواست‌هایی با شناسه‌ی MC-Sec دیده‌اید، این صفحه برای شماست.</p></div></div>'
+            . Ui::card('<p>«امنیت سایبری» بخشی از ناحیه‌ی کاربری مارال کلاد است که مشتریان با آن سایت‌ها و سرورهای خودشان را از نظر امنیتی می‌سنجند. هر مشتری <strong>فقط دارایی‌ای را اسکن می‌کند که مالکیتش را ثابت کرده است</strong>: با رکورد DNS، فایلی روی همان سایت، یا سرویسی که خودش در مارال کلاد دارد. دامنه‌ها و IPهای فهرست ممنوع (از جمله نشانی‌های دولتی، نظامی و آموزشی) هرگز اسکن نمی‌شوند و سرورهای CDN درگاه‌کاوی نمی‌شوند.</p>'
+                . '<ul><li>بررسی‌ها غیرتهاجمی‌اند: هیچ رمزی حدس زده نمی‌شود، از هیچ آسیب‌پذیری‌ای بهره‌برداری نمی‌شود و شمار درخواست‌ها کم است.</li><li>پایش در دسترس بودن، اگر روشن باشد، هر چند دقیقه فقط صفحه‌ی اول سایت را یک بار باز می‌کند.</li></ul>', 'این درخواست‌ها از کجاست؟', 'shield')
+            . Ui::card(Ui::facts(['شناسه‌ی مرورگر (User-Agent)' => Ui::code(\McSec\Http::ua(), '', false), 'IPهای اسکنر' => $ips ? implode(' ', array_map(fn ($ip) => Ui::ltr($ip, 'mcs-tag'), $ips)) : '<span class="mcs-muted">اعلام نشده</span>'])
+                . '<p class="mcs-small mcs-muted">اگر مشتری مارال کلاد هستید و فایروال یا WAF جلوی بررسی را می‌گیرد (اسکن «ناقص» می‌شود)، همین IPها یا شناسه را مجاز کنید.</p>', 'شناسه و نشانی‌ها', 'info')
+            . Ui::card('<p>اگر این دامنه یا IP مال شماست و اجازه‌ی اسکن نداده‌اید، ' . $contact . ': نشانی دامنه یا IP، زمان تقریبی و اگر می‌شود بخشی از لاگ. بررسی می‌کنیم و آن را در فهرست ممنوع می‌گذاریم تا دیگر اسکن نشود.</p>', 'توقف اسکن یا گزارش سوءاستفاده', 'alert')
+            . '</div>';
+        self::$view = $body;
+        return self::root($body, false);
+    }
+
     public static function closed(array $who): string
     {
         $msg = 'بخش امنیت سایبری هنوز برای حساب شما باز نشده است. اگر می‌خواهید از آن استفاده کنید، به پشتیبانی مارال کلاد پیام بدهید.';
@@ -207,6 +230,13 @@ final class Views
             $out .= Ui::alert('info', 'اسکن «' . self::e(\McSec\Catalog::all(true)[$s->profile]['label'] ?? $s->profile) . '» روی ' . Ui::ltr($s->value) . ' '
                 . ($s->status === 'queued' ? 'در صف است' : 'در حال اجراست (' . self::e(Text::fa((int) $s->progress)) . '٪)') . '. <a href="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '">دیدن پیشرفت</a>', 'radar');
         }
+        // sites the light monitoring sees as down
+        foreach ($verified as $a) {
+            $m = Monitor::status($a);
+            if ($m !== null && $m[1] === 'err') {
+                $out .= Ui::alert('danger', Ui::ltr($a->value) . ' از دسترس خارج است (' . Ui::plain($m[2]) . '). <a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '">جزئیات</a>', 'alert');
+            }
+        }
         // row 1: score, open findings, changes in 7 days
         $week = Clock::now() - 7 * 86400;
         $new = Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('first_seen_at', '>=', $week)->count();
@@ -218,8 +248,10 @@ final class Views
             $d = $score['score'] - (int) $trend[max(0, count($trend) - 8)]['score'];
             $delta = $d === 0 ? 'بی‌تغییر نسبت به هفته‌ی پیش' : ($d > 0 ? Text::fa($d) . '+ از هفته‌ی پیش' : Text::fa(abs($d)) . '− از هفته‌ی پیش');
         }
-        $scoreCard = Ui::card(Ui::gauge($score['score'], $score['score'] < 0 ? 'اولین اسکن را بگیرید تا امتیاز ساخته شود.' : self::e($delta))
-            . '<details class="mcs-how"><summary>امتیاز چطور حساب می‌شود؟</summary><p>از ۱۰۰ شروع می‌شود و هر یافته‌ی باز به اندازه‌ی اهمیتش کم می‌کند. یک یافته‌ی بحرانیِ باز امتیاز را حداکثر ۴۹ و یک یافته‌ی مهم حداکثر ۷۹ نگه می‌دارد، تا مشکل جدی پشت چند مورد سالم پنهان نماند.</p></details>',
+        $partialNote = $score['partial'] > 0 ? '<p class="mcs-small">' . Ui::chip('ارزیابی ناقص', 'warn') . ' ' . self::e(Text::fa($score['partial']) . ' دارایی در آخرین بررسی کامل سنجیده نشد؛ امتیاز آن‌ها قطعی نیست.') . ' <a href="index.php?m=mcsec&amp;p=assets">کدام؟</a></p>' : '';
+        $scoreCard = Ui::card(Ui::gauge($score['score'], $score['score'] < 0 ? 'اولین اسکن را بگیرید تا امتیاز ساخته شود.' : self::e($delta)) . $partialNote
+            . '<details class="mcs-how"><summary>امتیاز چطور حساب می‌شود؟</summary><p>از ۱۰۰ شروع می‌شود و هر یافته‌ی باز به اندازه‌ی اهمیتش کم می‌کند. یک یافته‌ی بحرانیِ باز، یا آسیب‌پذیری‌ای که مهاجمان همین حالا از آن استفاده می‌کنند (فهرست KEV)، امتیاز را حداکثر ۴۹ و یک یافته‌ی مهم حداکثر ۷۹ نگه می‌دارد، تا مشکل جدی پشت چند مورد سالم پنهان نماند.</p>'
+            . '<p>اگر فایروال یا خطای سایت جلوی بخشی از بررسی را بگیرد، اسکن «ارزیابی ناقص» است، نه «سالم»؛ یافته‌هایی که این بار سنجیده نشدند باز می‌مانند.</p></details>',
             'امتیاز امنیت', 'shield-check', '', 'mcs-scorecard');
         $openCard = Ui::card(Ui::sevCounts($counts, 'index.php?m=mcsec&p=findings') . '<p class="mcs-small mcs-muted">' . self::e(Text::fa(array_sum($counts))) . ' یافته‌ی باز در ' . self::e(Text::fa(count($verified))) . ' دارایی تأییدشده</p>',
             'یافته‌های باز', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings">همه</a>');
@@ -231,7 +263,7 @@ final class Views
         // row 2: what to do now
         $rank = "CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
         $top = Db::rows(Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('status', 'open')->whereIn('severity', ['critical', 'high', 'medium'])
-            ->orderByRaw($rank . ' DESC')->orderByDesc('last_seen_at')->limit(20));
+            ->orderByDesc('priority')->orderByRaw($rank . ' DESC')->orderByDesc('last_seen_at')->limit(20));
         // one line per issue: the same port on the same IP reached through two assets is one job
         $seen = [];
         $top = array_slice(array_values(array_filter($top, function ($f) use (&$seen) {
@@ -245,7 +277,7 @@ final class Views
             $items = '';
             foreach ($top as $f) {
                 $kb = Kb::get((string) $f->kb) ?? null;
-                $items .= '<li><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '">' . Ui::sev((string) $f->severity) . '<span class="mcs-todo-title">' . self::e($f->title) . '</span></a>'
+                $items .= '<li><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '">' . Ui::sev((string) $f->severity) . '<span class="mcs-todo-title">' . self::e($f->title) . '</span>' . ((int) ($f->kev ?? 0) === 1 ? ' ' . Ui::chip('در حال بهره‌برداری', 'err') : '') . '</a>'
                     . '<span class="mcs-todo-meta">' . Ui::ltr($f->location) . ($kb && !empty($kb['effort']) ? ' · ' . self::e($kb['effort']) : '') . '</span></li>';
             }
             $out .= Ui::card('<ol class="mcs-todo">' . $items . '</ol>', 'مهم‌ترین کارهای الان', 'check', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings">همه‌ی یافته‌ها</a>');

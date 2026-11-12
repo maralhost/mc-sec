@@ -117,18 +117,32 @@ final class Ui
         return $h . '</ul>';
     }
 
-    /** The score: a ring with the number and its word. */
-    public static function gauge(int $score, string $sub = ''): string
+    /**
+     * Escaped plain text with technical tokens kept whole and left-to-right (e.g. "HTTP 403" inside a Persian
+     * sentence would otherwise break across lines and swap its parentheses).
+     */
+    public static function plain(string $s): string
     {
-        $tone = Score::tone($score);
+        return (string) preg_replace('~\b(HTTP) (\d{3})\b~', '<bdi dir="ltr">$1&nbsp;$2</bdi>', self::e($s));
+    }
+
+    /**
+     * The score: a ring with the number and its word. $partial: the last check was incomplete, so the word is
+     * "incomplete" in a warning tone, never "excellent".
+     */
+    public static function gauge(int $score, string $sub = '', bool $partial = false): string
+    {
+        $partial = $partial && $score >= 0;
+        $tone = $partial ? 'warn' : Score::tone($score);
+        $word = $partial ? 'ارزیابی ناقص' : Score::label($score);
         $pct = $score < 0 ? 0 : $score;
         $r = 52;
         $len = 2 * M_PI * $r;
         $dash = round($len * $pct / 100, 1);
-        return '<div class="mcs-gauge mcs-tone-' . $tone . '" role="img" aria-label="' . self::e('امتیاز امنیت ' . ($score < 0 ? 'ندارد' : Text::fa($score) . ' از ۱۰۰، ' . Score::label($score))) . '">'
+        return '<div class="mcs-gauge mcs-tone-' . $tone . '" role="img" aria-label="' . self::e('امتیاز امنیت ' . ($score < 0 ? 'ندارد' : Text::fa($score) . ' از ۱۰۰، ' . $word)) . '">'
             . '<svg viewBox="0 0 120 120" aria-hidden="true"><circle class="mcs-gauge-track" cx="60" cy="60" r="' . $r . '"/>'
             . '<circle class="mcs-gauge-bar" cx="60" cy="60" r="' . $r . '" stroke-dasharray="' . $dash . ' ' . round($len, 1) . '" transform="rotate(-90 60 60)"/></svg>'
-            . '<div class="mcs-gauge-text"><strong>' . ($score < 0 ? '—' : self::e(Text::fa($score))) . '</strong><span>' . self::e(Score::label($score)) . '</span></div>'
+            . '<div class="mcs-gauge-text"><strong>' . ($score < 0 ? '—' : self::e(Text::fa($score))) . '</strong><span>' . self::e($word) . '</span></div>'
             . ($sub !== '' ? '<p class="mcs-gauge-sub">' . $sub . '</p>' : '') . '</div>';
     }
 

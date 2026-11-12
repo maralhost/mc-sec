@@ -759,6 +759,29 @@ nslookup -type=CNAME shop.example.com'],
             'effort' => 'حدود ۱۰ دقیقه',
             'refs' => ['https://developer.mozilla.org/en-US/docs/Web/Security/Subdomain_takeovers', 'https://github.com/EdOverflow/can-i-take-over-xyz', 'https://owasp.org/www-project-web-security-testing-guide/latest/4-Web_Application_Security_Testing/02-Configuration_and_Deployment_Management_Testing/10-Test_for_Subdomain_Takeover'],
         ],
+        'blocklisted' => [
+            'title' => 'پاک‌سازی و خارج شدن از فهرست سیاه',
+            'why' => 'دامنه یا IP شما در یک فهرست سیاه عمومی (DNSBL) ثبت شده است. سرویس‌های ایمیل، مرورگرها، فایروال‌ها و ضدبدافزارها از همین فهرست‌ها استفاده می‌کنند؛ نتیجه‌اش رسیدن ایمیل‌ها به پوشه‌ی هرزنامه یا رد شدنشان، هشدار «سایت خطرناک» در مرورگر و از دست رفتن اعتماد مشتری است. معمولاً علت یک آلودگی است: سایت هک‌شده که بدافزار یا صفحه‌ی فیشینگ میزبانی می‌کند، فرم یا اسکریپتی که هرزنامه می‌فرستد، یا حساب ایمیلی که رمزش لو رفته است.',
+            'steps' => [
+                'اول علت را پیدا و رفع کنید؛ درخواست خروج پیش از پاک‌سازی معمولاً رد می‌شود و دوباره در فهرست می‌روید.',
+                'سایت را برای فایل‌های ناآشنا، کاربر مدیر ناشناس، افزونه‌ها و قالب‌های قدیمی بررسی کنید. اگر آلودگی پیدا شد، از پشتیبان سالم برگردانید، همه‌ی افزونه‌ها را به‌روز و رمز همه‌ی کاربران مدیر، FTP و پایگاه داده را عوض کنید.',
+                'اگر IP در فهرست است، صف ایمیل سرور و لاگ ایمیل‌های خروجی را ببینید: حساب ایمیلی که ناگهان هزاران ایمیل فرستاده، یا فرم تماسی که بی‌کپچا رها شده، علت رایج است.',
+                'در صفحه‌ی همان فهرست (نامش در عنوان یافته آمده) نام یا IP را جستجو کنید؛ دلیل ثبت و روش درخواست خروج (delisting) آن‌جا نوشته شده است. فهرست‌هایی مثل SpamCop پس از قطع هرزنامه خودشان در ۲۴ ساعت پاک می‌کنند.',
+                'پس از خروج، «رفع کردم، دوباره بسنج» را بزنید. اگر یافته برگشت، آلودگی هنوز هست.',
+            ],
+            'snippets' => [
+                ['label' => 'پرسیدن دستی از فهرست', 'code' => '# domain: ask for <domain>.<zone>
+dig +short example.com.multi.surbl.org
+# IPv4: reverse the octets: 203.0.113.10 -> 10.113.0.203
+dig +short 10.113.0.203.bl.spamcop.net
+# no answer = not listed'],
+                ['label' => 'صف ایمیل سرور (Exim/cPanel)', 'code' => 'exim -bpc
+exim -bp | exiqsumm | head -20'],
+            ],
+            'effort' => 'از نیم ساعت تا چند روز (بسته به آلودگی و فهرست)',
+            'refs' => ['https://check.spamhaus.org/', 'https://www.spamcop.net/bl.shtml', 'https://www.surbl.org/surbl-analysis'],
+            'maral' => 'اگر سرور یا هاستتان در مارال کلاد است، پشتیبانی می‌تواند لاگ ایمیل و فایل‌های مشکوک را با شما بررسی کند.',
+        ],
         'exposed-backup' => [
             'title' => 'حذف فایل‌های پشتیبان از پوشه‌ی عمومی سایت',
             'why' => 'یک فایل پشتیبان یا خروجی پایگاه داده (مثل .zip، .sql، .bak یا .tar.gz) از روی وب دانلودشدنی است. این فایل‌ها معمولاً کل کد سایت، رمز پایگاه داده و اطلاعات مشتریان را دارند؛ دانلود یکی از آن‌ها برای مهاجم یعنی یک نسخه‌ی کامل از سایت شما.',
@@ -1310,6 +1333,9 @@ curl -s -o /dev/null -w "%{http_code}\n" https://example.com/path'],
         'port' => 'port-exposed',
         'mail.spf' => 'mail-spf',
         'mail.dmarc' => 'mail-dmarc',
+        'dns.takeover' => 'subdomain-takeover',
+        'dns.dangling' => 'subdomain-takeover',
+        'rep' => 'blocklisted',
     ];
 
     /**

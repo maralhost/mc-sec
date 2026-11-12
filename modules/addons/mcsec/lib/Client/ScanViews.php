@@ -144,6 +144,11 @@ final class ScanViews
         }
         if ($s->status === 'completed') {
             $sum = Scans::summary($s);
+            $partial = trim((string) ($sum['partial'] ?? ''));
+            if ($partial !== '') {
+                $out .= Ui::alert('warning', '<strong>ارزیابی ناقص.</strong> ' . Ui::plain($partial) . ' این اسکن «سالم» به حساب نمی‌آید و یافته‌هایی که این بار سنجیده نشدند باز می‌مانند تا اسکن کامل بعدی.'
+                    . (trim(Settings::get('scanner_ips')) !== '' ? ' <a href="index.php?m=mcsec&amp;p=scanner" target="_blank" rel="noopener">IPهای اسکنر برای مجاز کردن</a>' : ''), 'alert');
+            }
             $out .= '<div class="mcs-grid3">' . Ui::card('<ul class="mcs-diff"><li><strong>' . self::e(Text::fa((int) ($sum['new'] ?? 0))) . '</strong><span>تازه</span></li><li class="is-ok"><strong>' . self::e(Text::fa((int) ($sum['fixed'] ?? 0)))
                 . '</strong><span>رفع‌شده</span></li><li class="is-warn"><strong>' . self::e(Text::fa((int) ($sum['reopened'] ?? 0))) . '</strong><span>دوباره دیده‌شده</span></li></ul>', 'نسبت به قبل', 'activity')
                 . Ui::card(Ui::sevCounts((array) ($sum['open'] ?? []), 'index.php?m=mcsec&p=findings&asset=' . (int) $s->asset_id), 'یافته‌های باز این دارایی', 'bug')
@@ -159,6 +164,9 @@ final class ScanViews
             } elseif ((int) ($sum['seen'] ?? 0) === 0 && $s->profile === 'surface') {
                 // discovery does not look for vulnerabilities: "no problem found" would be a false reassurance
                 $out .= Ui::card(Ui::emptyState('radar', 'نقشه‌ی سطح حمله آماده است', 'درگاه پرخطری باز نبود. این اسکن دنبال آسیب‌پذیری نمی‌گردد؛ برای آن، «اسکن آسیب‌پذیری» بگیرید.'));
+            } elseif ((int) ($sum['seen'] ?? 0) === 0 && $partial !== '') {
+                // an incomplete assessment is never "healthy"
+                $out .= Ui::card(Ui::emptyState('alert', 'در بخشی که سنجیده شد مشکلی دیده نشد', 'ولی همه‌چیز سنجیده نشد (بالا را ببینید). پس از رفع مانع، «اسکن تازه» بگیرید.'));
             } elseif ((int) ($sum['seen'] ?? 0) === 0) {
                 $out .= Ui::card(Ui::emptyState('shield-check', 'این اسکن مشکلی پیدا نکرد', 'آفرین. با زمان‌بندی، اسکن‌های بعدی را خودکار بگیرید.'));
             }

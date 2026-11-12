@@ -12,8 +12,11 @@ use McSec\Settings;
 /**
  * Built-in hygiene checks, run by the worker itself (no backend): DNS, TLS certificate and protocol, HTTPS redirect,
  * security headers, cookie flags, information leaks in headers, a few well-known exposed files, e-mail spoofing
- * protection (SPF, DMARC), CAA, and high-risk ports reachable from the internet. Gentle: a handful of requests
- * per asset, short timeouts, never an exploit. Every finding carries a kb key with the Persian fix (Kb).
+ * protection (SPF, DMARC), CAA, high-risk ports reachable from the internet, DNS blocklists (reputation_lists) and
+ * dangling CNAMEs that let others take a subdomain over. Gentle: a handful of requests per asset, short timeouts,
+ * never an exploit. Every finding carries a kb key with the Persian fix (Kb).
+ * When the web part could not be judged (no answer, a WAF block, a server error) the result says so in 'partial':
+ * the scan is an incomplete assessment, never "healthy", and findings it could not see stay open.
  */
 final class Builtin implements Engine
 {
@@ -40,7 +43,7 @@ final class Builtin implements Engine
 
     public function start(object $scan, object $asset, array $profile): array
     {
-        $res = $this->run((string) $asset->kind, (string) $asset->value, self::portScopeFor($asset));
+        $res = $this->run((string) $asset->kind, (string) $asset->value, self::portScopeFor($asset), self::subdomainsOf($asset));
         return ['ok' => true, 'ref' => 'builtin-' . $scan->id, 'meta' => ['result' => $res], 'progress' => 100, 'stage' => 'تمام شد'];
     }
 
@@ -53,7 +56,8 @@ final class Builtin implements Engine
     {
         $meta = json_decode((string) $scan->backend_meta, true);
         $res = is_array($meta['result'] ?? null) ? $meta['result'] : ['findings' => [], 'surface' => []];
-        return ['findings' => $res['findings'], 'surface' => $res['surface'], 'kinds' => [], 'complete' => true];
+        $partial = (string) ($res['partial'] ?? '');
+        return ['findings' => $res['findings'], 'surface' => $res['surface'], 'kinds' => [], 'complete' => $partial === '', 'partial' => $partial];
     }
 
     public function cancel(object $scan, object $asset): bool
@@ -83,27 +87,69 @@ final class Builtin implements Engine
         return array_values(array_unique($ips));
     }
 
-    /** @param string[]|null $portScope see portScopeFor() @return array{findings:array,surface:array} */
-    public function run(string $kind, string $value, ?array $portScope = null): array
+    /**
+     * Subdomains seen under a domain asset by earlier discovery scans (still present), for the dangling-CNAME check.
+     * @return string[]
+     */
+    public static function subdomainsOf(object $asset, int $max = 25): array
+    {
+        if ($asset->kind !== 'domain') {
+            return [];
+        }
+        $out = [];
+        $rows = Db::rows(Db::table('mod_mcsec_surface')->where('asset_id', $asset->id)->where('kind', 'host')->where('gone_at', 0)->orderByDesc('last_seen_at')->limit(200)->select(['value']));
+        foreach ($rows as $r) {
+            $v = strtolower(trim((string) $r->value));
+            if ($v !== $asset->value && !filter_var($v, FILTER_VALIDATE_IP) && Net::within($v, (string) $asset->value) && !Net::blocked('domain', $v)) {
+                $out[$v] = true;
+            }
+            if (count($out) >= $max) {
+                break;
+            }
+        }
+        return array_keys($out);
+    }
+
+    /**
+     * @param string[]|null $portScope see portScopeFor()
+     * @param string[] $subdomains discovered names under this domain, checked for dangling CNAMEs only (DNS, no HTTP)
+     * @return array{findings:array,surface:array,partial:string} partial: why the web part was not judged ('' = complete)
+     */
+    public function run(string $kind, string $value, ?array $portScope = null, array $subdomains = []): array
     {
         $f = [];
         $s = [];
         $host = $value;
         $ips = $kind === 'ip' ? [$value] : Net::ips($value);
+        $chain = $kind === 'domain' ? self::cnameChain($value) : [];
+        foreach ($subdomains as $sub) {
+            $f = array_merge($f, $this->takeover((string) $sub, self::cnameChain((string) $sub), null));
+        }
         if ($kind === 'domain') {
             if (!$ips) {
-                $f[] = $this->finding('dns.no_address', 'دامنه به هیچ IPی اشاره نمی‌کند', 'info', $host, 'رکورد A یا AAAA برای این نام پیدا نشد؛ بقیه‌ی بررسی‌های وب انجام نشد.', '', 'dns-no-address');
-                return ['findings' => array_merge($f, $this->email($value)), 'surface' => $s];
+                $tk = $this->takeover($value, $chain, null);
+                if (!$tk) {
+                    $f[] = $this->finding('dns.no_address', 'دامنه به هیچ IPی اشاره نمی‌کند', 'info', $host, 'رکورد A یا AAAA برای این نام پیدا نشد؛ بقیه‌ی بررسی‌های وب انجام نشد.', '', 'dns-no-address');
+                }
+                return ['findings' => array_merge($f, $tk, $this->email($value), $this->reputation($value, [])), 'surface' => $s, 'partial' => ''];
             }
             foreach ($ips as $ip) {
                 $s[] = ['kind' => 'host', 'value' => $ip, 'meta' => ['from' => $host]];
             }
         }
         $publicIps = array_values(array_filter($ips, fn ($ip) => Net::isPublicIp($ip) || Settings::bool('allow_private_ips')));
+        $owned = $portScope === null ? $publicIps : array_values(array_filter($publicIps, fn ($ip) => in_array(strtolower($ip), $portScope, true)));
+        $partial = '';
 
         // web: HTTPS, certificate, redirect, headers, cookies, leaks, exposed files
         $https = $this->get('https://' . $this->urlHost($host) . '/', $publicIps[0] ?? '', $host, true);
         $http = $this->get('http://' . $this->urlHost($host) . '/', $publicIps[0] ?? '', $host, false);
+        if ($kind === 'domain') {
+            $f = array_merge($f, $this->takeover($value, $chain, $https ?? $http));
+        }
+        if ($https === null && $http === null && $publicIps) {
+            $partial = 'سایت به درخواست‌های بررسی (HTTP و HTTPS) پاسخ نداد؛ بررسی‌های وب انجام نشد.';
+        }
         if ($https !== null || $http !== null) {
             $cert = $this->cert($host, $publicIps[0] ?? $host);
             if ($cert !== null) {
@@ -131,13 +177,21 @@ final class Builtin implements Engine
                 $f[] = $this->finding('web.no_redirect', 'نسخه‌ی HTTP به HTTPS هدایت نمی‌شود', 'low', 'http://' . $host, 'بازدیدکننده‌ای که http:// را باز کند، روی اتصال بی‌رمز می‌ماند.', 'HTTP ' . $http['status'], 'web-no-redirect');
             }
             $main = $https ?? $http;
-            $f = array_merge($f, $this->headers($main, $host, $https !== null));
+            $st = (int) $main['status'];
             foreach (['server', 'x-powered-by'] as $h) {
                 foreach ($main['headers'][$h] ?? [] as $v) {
                     $s[] = ['kind' => 'tech', 'value' => mb_substr($v, 0, 120), 'meta' => ['header' => $h, 'host' => $host]];
                 }
             }
-            $f = array_merge($f, $this->exposedFiles(($https !== null ? 'https://' : 'http://') . $this->urlHost($host), $publicIps[0] ?? '', $host, $https !== null));
+            if ($st === 403 || $st === 429) {
+                // a WAF, a rate limit or an IP block answered instead of the site: its headers say nothing about the site
+                $partial = 'فایروال یا محدودیت نرخ جلوی بررسی را گرفت (HTTP ' . $st . ')؛ هدرها و فایل‌های لورفته سنجیده نشدند. IP اسکنر را در فایروال یا WAF خود مجاز کنید و دوباره بسنجید.';
+            } elseif ($st >= 500) {
+                $partial = 'سایت هنگام بررسی خطای سرور داد (HTTP ' . $st . ')؛ هدرها و فایل‌های لورفته سنجیده نشدند.';
+            } else {
+                $f = array_merge($f, $this->headers($main, $host, $https !== null));
+                $f = array_merge($f, $this->exposedFiles(($https !== null ? 'https://' : 'http://') . $this->urlHost($host), $publicIps[0] ?? '', $host, $https !== null));
+            }
         }
 
         // ports (first public address only: a gentle check, not a port scan), and only on an address this account owns
@@ -162,7 +216,163 @@ final class Builtin implements Engine
                 $f[] = $this->finding('dns.no_caa', 'رکورد CAA تعریف نشده است', 'info', $value, 'بدون CAA هر مرجع صدور گواهی می‌تواند برای این دامنه گواهی صادر کند.', '', 'dns-caa');
             }
         }
-        return ['findings' => $f, 'surface' => $s];
+        $f = array_merge($f, $this->reputation($kind === 'domain' ? $value : '', $owned));
+        return ['findings' => $f, 'surface' => $s, 'partial' => $partial];
+    }
+
+    /**
+     * Services where an unclaimed name can be registered by anyone, so a CNAME left pointing at them hands the
+     * subdomain to whoever claims it (EdOverflow/can-i-take-over-xyz, "vulnerable" entries). CNAME suffix =>
+     * [service, text its "nothing here" page shows]; '' = judged only by a CNAME target that no longer resolves.
+     */
+    private const TAKEOVER = [
+        'github.io' => ['GitHub Pages', "There isn't a GitHub Pages site here"],
+        'herokuapp.com' => ['Heroku', 'No such app'],
+        'herokudns.com' => ['Heroku', 'No such app'],
+        's3.amazonaws.com' => ['Amazon S3', 'NoSuchBucket'],
+        'amazonaws.com' => ['Amazon S3', 'NoSuchBucket'],
+        'elasticbeanstalk.com' => ['AWS Elastic Beanstalk', ''],
+        'cloudapp.net' => ['Microsoft Azure', ''],
+        'cloudapp.azure.com' => ['Microsoft Azure', ''],
+        'azurewebsites.net' => ['Microsoft Azure', ''],
+        'blob.core.windows.net' => ['Microsoft Azure', ''],
+        'trafficmanager.net' => ['Microsoft Azure', ''],
+        'azure-api.net' => ['Microsoft Azure', ''],
+        'azurefd.net' => ['Microsoft Azure', ''],
+        'azureedge.net' => ['Microsoft Azure', ''],
+        'bitbucket.io' => ['Bitbucket', 'Repository not found'],
+        'pantheonsite.io' => ['Pantheon', 'The gods are wise'],
+        'surge.sh' => ['Surge.sh', 'project not found'],
+        'helpscoutdocs.com' => ['Help Scout', 'No settings were found for this company'],
+        'readme.io' => ['ReadMe', 'Project doesnt exist... yet!'],
+        'myshopify.com' => ['Shopify', 'Sorry, this shop is currently unavailable'],
+        'domains.tumblr.com' => ['Tumblr', "Whatever you were looking for doesn't currently exist at this address"],
+        'agilecrm.com' => ['Agile CRM', 'Sorry, this page is no longer available'],
+        'fly.dev' => ['Fly.io', ''],
+    ];
+
+    /** CNAME targets of a name, in order (at most 5 hops). @return string[] */
+    public static function cnameChain(string $name): array
+    {
+        $out = [];
+        $n = strtolower($name);
+        for ($hop = 0; $hop < 5; $hop++) {
+            $t = strtolower(rtrim((string) (Net::dns($n, 'CNAME')[0]['target'] ?? ''), '.'));
+            if ($t === '' || $t === $n || in_array($t, $out, true)) {
+                break;
+            }
+            $out[] = $t;
+            $n = $t;
+        }
+        return $out;
+    }
+
+    /**
+     * A CNAME whose target no longer exists (dangling), or that points at a service showing its "unclaimed" page:
+     * anyone could claim the name there and serve content under this domain.
+     * @param string[] $chain cnameChain() of $name
+     */
+    private function takeover(string $name, array $chain, ?array $page): array
+    {
+        if (!$chain) {
+            return [];
+        }
+        $last = (string) end($chain);
+        $service = null;
+        foreach ($chain as $t) {
+            foreach (self::TAKEOVER as $suffix => $def) {
+                if (Net::within($t, $suffix)) {
+                    $service = $def;
+                    break 2;
+                }
+            }
+        }
+        $path = $name . ' → ' . implode(' → ', $chain);
+        if (!Net::ips($last)) {
+            if ($service !== null) {
+                return [$this->finding('dns.takeover', 'خطر تصاحب زیردامنه (' . $service[0] . ')', 'high', $name,
+                    'این نام با CNAME به ' . $service[0] . ' اشاره می‌کند ولی آن منبع دیگر وجود ندارد. هر کسی می‌تواند همین نام را در ' . $service[0] . ' برای خودش بسازد و زیر نام دامنه‌ی شما محتوا نشان دهد.',
+                    $path . ' (no A/AAAA)', 'subdomain-takeover')];
+            }
+            return [$this->finding('dns.dangling', 'رکورد CNAME به نامی اشاره می‌کند که وجود ندارد', 'medium', $name,
+                'مقصد این رکورد پاسخی ندارد. اگر مقصد سرویسی است که دیگری بتواند همان نام را در آن بگیرد، زیردامنه‌ی شما تصاحب می‌شود؛ رکوردی را که استفاده نمی‌شود پاک کنید.',
+                $path . ' (no A/AAAA)', 'subdomain-takeover')];
+        }
+        if ($service !== null && $service[1] !== '' && $page !== null && str_contains(substr((string) $page['body'], 0, 50000), $service[1])) {
+            return [$this->finding('dns.takeover', 'خطر تصاحب زیردامنه (' . $service[0] . ')', 'high', $name,
+                'این نام به ' . $service[0] . ' اشاره می‌کند ولی آن‌جا صفحه‌ی «چیزی این‌جا نیست» نشان داده می‌شود؛ یعنی منبع شما در آن سرویس حذف شده و دیگری می‌تواند آن را بگیرد.',
+                $path . '; page: "' . $service[1] . '"', 'subdomain-takeover')];
+        }
+        return [];
+    }
+
+    /**
+     * DNS blocklists (setting reputation_lists): the domain name, and only the IPs this account owns (a shared
+     * hosting IP on a spam list is the hosting company's matter, not the customer's).
+     * @param string[] $ips public IPs owned by the account
+     */
+    private function reputation(string $domain, array $ips): array
+    {
+        $f = [];
+        foreach (self::reputationLists() as [$type, $zone, $name]) {
+            $targets = $type === 'domain'
+                ? ($domain === '' ? [] : array_values(array_unique([$domain, Net::apex($domain)])))
+                : array_values(array_filter($ips, fn ($ip) => filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV4) !== false));
+            foreach ($targets as $t) {
+                $q = $type === 'domain' ? $t . '.' . $zone : implode('.', array_reverse(explode('.', $t))) . '.' . $zone;
+                $answers = array_values(array_filter(Net::ips($q), fn ($a) => str_starts_with($a, '127.')));
+                $sev = self::listedSeverity($type, $zone, $answers);
+                if ($sev === '') {
+                    continue;
+                }
+                $f[] = $type === 'domain'
+                    ? $this->finding('rep.domain.' . $zone, 'دامنه در فهرست سیاه ' . $name . ' است', $sev, $t,
+                        $sev === 'critical' ? 'این دامنه در فهرست دامنه‌های بدافزار یا فیشینگ است: احتمالاً سایت آلوده شده یا برای فریب کاربران به کار رفته است. مرورگرها، ایمیل‌ها و سامانه‌های امنیتی آن را مسدود می‌کنند.'
+                            : 'این دامنه در فهرست سیاه است و ایمیل‌ها و پیوندهایش ممکن است مسدود شوند.', implode(', ', $answers) . ' @ ' . $zone, 'blocklisted')
+                    : $this->finding('rep.ip.' . $zone, 'IP سرور در فهرست سیاه ' . $name . ' است', $sev, $t,
+                        'این IP به‌عنوان فرستنده‌ی هرزنامه یا دستگاه آلوده ثبت شده است؛ ایمیل‌های این سرور احتمالاً رد می‌شوند و ممکن است سرور آلوده باشد.', implode(', ', $answers) . ' @ ' . $zone, 'blocklisted');
+            }
+        }
+        return $f;
+    }
+
+    /** @return array<int,array{0:string,1:string,2:string}> [type, zone, name] */
+    public static function reputationLists(): array
+    {
+        $out = [];
+        foreach (preg_split('~\r\n|\r|\n~', Settings::get('reputation_lists')) ?: [] as $line) {
+            $line = trim((string) preg_replace('~#.*$~', '', $line));
+            $p = preg_split('~[ \t]+~', $line, 3) ?: [];
+            if (count($p) < 2 || !in_array(strtolower($p[0]), ['domain', 'ip'], true) || !preg_match('~^[a-z0-9-]+(\.[a-z0-9-]+)+$~i', $p[1])) {
+                continue;
+            }
+            $out[] = [strtolower($p[0]), strtolower($p[1]), trim((string) ($p[2] ?? '')) !== '' ? trim((string) $p[2]) : strtolower($p[1])];
+        }
+        return $out;
+    }
+
+    /**
+     * Severity of a blocklist answer, '' = not listed or the list refused to answer. Spamhaus: 127.255.255.x are
+     * errors (public resolver, quota), 127.0.0.10/11 the PBL policy list (not an incident); DBL 127.0.1.4–6 and
+     * 127.0.1.104–106 are phishing, malware and botnet domains. SURBL/URIBL: 127.0.0.1 means "query blocked".
+     * @param string[] $answers
+     */
+    public static function listedSeverity(string $type, string $zone, array $answers): string
+    {
+        $real = [];
+        foreach ($answers as $a) {
+            if (str_starts_with($a, '127.255.255.') || $a === '127.0.0.1' || (str_contains($zone, 'spamhaus') && in_array($a, ['127.0.0.10', '127.0.0.11'], true))) {
+                continue;
+            }
+            $real[] = $a;
+        }
+        if (!$real) {
+            return '';
+        }
+        if ($type === 'domain') {
+            return array_intersect($real, ['127.0.1.4', '127.0.1.5', '127.0.1.6', '127.0.1.104', '127.0.1.105', '127.0.1.106']) ? 'critical' : 'high';
+        }
+        return array_intersect($real, ['127.0.0.4', '127.0.0.5', '127.0.0.6', '127.0.0.7']) ? 'high' : 'medium';
     }
 
     private function finding(string $key, string $title, string $sev, string $loc, string $desc, string $evidence, string $kb): array
@@ -266,6 +476,12 @@ final class Builtin implements Engine
             $f[] = $this->finding('mail.dmarc_none', 'سیاست DMARC فقط نظارتی است (p=none)', 'low', $domain, 'ایمیل‌های جعلی گزارش می‌شوند ولی رد نمی‌شوند.', mb_substr($dmarc[0], 0, 200), 'mail-dmarc');
         }
         return $f;
+    }
+
+    /** cert() for other parts (light monitoring). */
+    public static function certInfo(string $host, string $connectTo): ?array
+    {
+        return (new self())->cert($host, $connectTo);
     }
 
     /** Certificate facts from a TLS handshake (no verification, so expired or self-signed ones are still read). */

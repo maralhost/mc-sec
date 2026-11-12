@@ -343,9 +343,14 @@ final class Scans
         $counts = Findings::openCounts(0, (int) $asset->id);
         $summary = ['new' => count($diff['new']), 'reopened' => count($diff['reopened']), 'fixed' => count($diff['fixed']), 'seen' => $diff['seen'],
             'open' => $counts, 'surface_new' => count($surf['new']), 'surface_seen' => $surf['seen'], 'surface_gone' => $surf['gone']];
-        Db::table('mod_mcsec_scans')->where('id', $s->id)->update(['status' => 'completed', 'finished_at' => Clock::now(), 'progress' => 100, 'stage' => 'تمام شد',
+        $partial = mb_substr((string) ($res['partial'] ?? ''), 0, 255);
+        if ($partial !== '') {
+            $summary['partial'] = $partial;
+        }
+        Db::table('mod_mcsec_scans')->where('id', $s->id)->update(['status' => 'completed', 'finished_at' => Clock::now(), 'progress' => 100, 'stage' => $partial !== '' ? 'تمام شد (ارزیابی ناقص)' : 'تمام شد',
             'summary' => Db::json($summary), 'error' => '']);
-        Db::table('mod_mcsec_assets')->where('id', $asset->id)->update(['last_scan_at' => Clock::now()]);
+        // engines that judge completeness (built-in) set the asset's "incomplete" mark; others leave it as it is
+        Db::table('mod_mcsec_assets')->where('id', $asset->id)->update(['last_scan_at' => Clock::now()] + (array_key_exists('partial', $res) ? ['partial' => $partial] : []));
         $s = Db::table('mod_mcsec_scans')->where('id', $s->id)->first();
         try {
             self::announce($s, $asset, $profile, $diff, $surf);

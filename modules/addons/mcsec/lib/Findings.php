@@ -12,6 +12,7 @@ namespace McSec;
  *  open ⇄ accepted        risk accepted by the customer, with a reason;
  *  open ⇄ false_positive  with a reason.
  * Accepted and false-positive findings stay out of the score and of alerts, but are still updated when seen.
+ * Each finding has a priority (Intel::priority: CVSS or severity, EPSS, CISA KEV); lists are sorted by it.
  * Engines hand normalized arrays to ingest() (see Engines\Engine::collect).
  */
 final class Findings
@@ -61,6 +62,11 @@ final class Findings
         $now = Clock::now();
         $out = ['new' => [], 'reopened' => [], 'fixed' => [], 'seen' => 0];
         $seenFps = [];
+        $cves = [];
+        foreach ($items as $it) {
+            $cves = array_merge($cves, Intel::cves(implode(',', array_map('strval', (array) ($it['cve'] ?? [])))));
+        }
+        $facts = $cves ? Intel::lookup($cves) : [];
         foreach ($items as $it) {
             $title = Text::name((string) ($it['title'] ?? ''), 255);
             $key = mb_substr((string) ($it['key'] ?? $title), 0, 160);
@@ -81,9 +87,14 @@ final class Findings
                 'refs' => Db::json(array_slice(array_values(array_filter((array) ($it['refs'] ?? []), 'is_string')), 0, 12)),
                 'cve' => mb_substr(implode(',', array_slice((array) ($it['cve'] ?? []), 0, 10)), 0, 255), 'cwe' => mb_substr(implode(',', array_slice((array) ($it['cwe'] ?? []), 0, 10)), 0, 255),
                 'cvss' => is_numeric($it['cvss'] ?? null) ? round((float) $it['cvss'], 1) : null, 'epss' => is_numeric($it['epss'] ?? null) ? round((float) $it['epss'], 5) : null,
+                'kev' => 0, 'priority' => 0,
                 'tags' => mb_substr(implode(',', array_slice((array) ($it['tags'] ?? []), 0, 12)), 0, 255),
                 'last_scan_id' => (int) $scan->id, 'last_seen_at' => $now,
             ];
+            $j = Intel::judge($row['severity'], $row['cvss'], $row['epss'], $row['cve'], $facts);
+            $row['kev'] = $j['kev'];
+            $row['epss'] = $j['epss'] === null ? null : round($j['epss'], 5);
+            $row['priority'] = $j['priority'];
             $old = Db::table('mod_mcsec_findings')->where('client_id', $asset->client_id)->where('fp', $fp)->first();
             if ($old) {
                 if ($old->status === 'fixed') {
@@ -135,11 +146,14 @@ final class Findings
             $q->where('client_id', $clientId)->whereIn('asset_id', Db::table('mod_mcsec_assets')->where('client_id', $clientId)->where('status', '!=', 'removed')->select('id'));
         }
         $c = self::emptyCounts();
+        $kev = (clone $q)->where('kev', 1)->count();
         foreach (Db::rows($q->selectRaw('severity, COUNT(*) AS n')->groupBy('severity')) as $r) {
             if (isset($c[$r->severity])) {
                 $c[$r->severity] = (int) $r->n;
             }
         }
+        // open findings in CISA's KEV list (exploited in the wild): they cap the score like a critical one
+        $c['kev'] = (int) $kev;
         return $c;
     }
 
@@ -179,7 +193,7 @@ final class Findings
         $pages = max(1, (int) ceil($total / $per));
         $page = min($page, $pages);
         $rank = "CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
-        $rows = Db::rows($q->select(['f.*', 'a.value as asset_value', 'a.label as asset_label'])->orderByRaw($rank . ' DESC')->orderByDesc('f.last_seen_at')
+        $rows = Db::rows($q->select(['f.*', 'a.value as asset_value', 'a.label as asset_label'])->orderByDesc('f.priority')->orderByRaw($rank . ' DESC')->orderByDesc('f.last_seen_at')
             ->offset(($page - 1) * $per)->limit($per));
         return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages];
     }

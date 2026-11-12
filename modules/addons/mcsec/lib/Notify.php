@@ -26,7 +26,13 @@ final class Notify
         'credits_added' => ['افزوده شدن اعتبار', ['email']],
         'report_ready' => ['آماده شدن گزارش', []],
         'digest' => ['گزارش دوره‌ای', ['email', 'telegram', 'bale']],
+        'kev_alert' => ['آسیب‌پذیری در حال بهره‌برداری (KEV)', ['email', 'telegram', 'bale', 'webhook']],
+        'site_down' => ['از دسترس خارج شدن سایت', ['email', 'telegram', 'bale', 'webhook']],
+        'site_up' => ['برگشتن سایت', ['email', 'telegram', 'bale', 'webhook']],
+        'ssl_expiring' => ['نزدیک شدن انقضای گواهی SSL', ['email', 'telegram', 'bale', 'webhook']],
     ];
+    /** Events that existed before 0.2.0: preferences saved earlier know only these; newer ones get their defaults. */
+    private const LEGACY_EVENTS = ['new_findings', 'new_exposure', 'scan_completed', 'scan_failed', 'findings_fixed', 'asset_verified', 'asset_lapsed', 'schedule_paused', 'credits_low', 'credits_added', 'report_ready', 'digest'];
     public const CHANNELS = ['email' => 'ایمیل', 'telegram' => 'تلگرام', 'bale' => 'بله', 'webhook' => 'وب‌هوک'];
     public const DIGEST = ['off' => 'نفرست', 'weekly' => 'هفتگی', 'monthly' => 'ماهانه'];
 
@@ -45,7 +51,23 @@ final class Notify
     {
         $acc = Accounts::get($clientId);
         $p = $acc ? json_decode((string) $acc->prefs, true) : null;
-        return is_array($p) ? $p + self::defaultPrefs() : self::defaultPrefs();
+        if (!is_array($p)) {
+            return self::defaultPrefs();
+        }
+        $p += self::defaultPrefs();
+        // events added after these preferences were saved start with their default channels
+        $known = array_map('strval', (array) ($p['known'] ?? self::LEGACY_EVENTS));
+        foreach (self::EVENTS as $ev => [, $def]) {
+            if (in_array($ev, $known, true)) {
+                continue;
+            }
+            foreach ($def as $c) {
+                if (!in_array($ev, (array) ($p['channels'][$c] ?? []), true)) {
+                    $p['channels'][$c][] = $ev;
+                }
+            }
+        }
+        return $p;
     }
 
     public static function savePrefs(array $who, array $matrix, string $minSeverity, string $digest): array
@@ -54,7 +76,7 @@ final class Notify
         foreach (self::CHANNELS as $c => $_) {
             $ch[$c] = array_values(array_intersect(array_keys(self::EVENTS), array_map('strval', (array) ($matrix[$c] ?? []))));
         }
-        $p = ['channels' => $ch, 'min_severity' => isset(Findings::SEVERITIES[$minSeverity]) ? $minSeverity : 'medium', 'digest' => isset(self::DIGEST[$digest]) ? $digest : 'weekly'];
+        $p = ['channels' => $ch, 'min_severity' => isset(Findings::SEVERITIES[$minSeverity]) ? $minSeverity : 'medium', 'digest' => isset(self::DIGEST[$digest]) ? $digest : 'weekly', 'known' => array_keys(self::EVENTS)];
         Accounts::update($who['client_id'], ['prefs' => Db::json($p)]);
         Audit::log($who['client_id'], 'notify_save', '', $p, $who['user_id']);
         return ['ok' => true];
@@ -148,6 +170,9 @@ final class Notify
                 if (!empty($d['retest'])) {
                     $lines[] = 'این اسکن برای سنجیدن دوباره‌ی یک یافته بود.';
                 }
+                if (!empty($s['partial'])) {
+                    $lines[] = 'ارزیابی ناقص: ' . $s['partial'];
+                }
                 return ['title' => '«' . $d['profile'] . '» روی ' . $asset . ' تمام شد', 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=scan&id=' . (int) ($d['scan_id'] ?? 0), 'tone' => 'ok'];
             case 'scan_failed':
                 $lines = [(string) ($d['error'] ?? '')];
@@ -172,6 +197,30 @@ final class Notify
                 return ['title' => Text::fa((int) ($d['credits'] ?? 0)) . ' اعتبار اسکن افزوده شد', 'lines' => !empty($d['note']) ? [(string) $d['note']] : ['ممنون از خریدتان.'], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'];
             case 'report_ready':
                 return ['title' => 'گزارش «' . ($d['title'] ?? '') . '» آماده است', 'lines' => [], 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
+            case 'kev_alert':
+                $f = (array) ($d['findings'] ?? []);
+                if (!$f) {
+                    return null;
+                }
+                $lines = [];
+                foreach (array_slice($f, 0, 8) as $x) {
+                    $lines[] = '• ' . $x['title'] . ' — ' . $x['location'] . ' (' . $x['cve'] . ')';
+                }
+                $lines[] = 'سازمان امنیت سایبری آمریکا (CISA) این آسیب‌پذیری را در فهرست «در حال بهره‌برداری فعال» (KEV) گذاشته است: مهاجمان همین حالا از آن استفاده می‌کنند. همین امروز رفعش کنید.';
+                return ['title' => count($f) === 1 ? 'یک آسیب‌پذیری باز شما اکنون در حال بهره‌برداری فعال است' : Text::fa(count($f)) . ' آسیب‌پذیری باز شما اکنون در حال بهره‌برداری فعال‌اند',
+                    'lines' => $lines, 'link' => count($f) === 1 ? 'index.php?m=mcsec&p=finding&id=' . (int) $f[0]['id'] : 'index.php?m=mcsec&p=findings', 'tone' => 'err'];
+            case 'site_down':
+                return ['title' => $asset . ' از دسترس خارج شد', 'lines' => ['دو بررسی پشت سر هم پاسخی نگرفت' . (!empty($d['note']) ? ': ' . $d['note'] : '') . '.', 'وقتی دوباره در دسترس شد خبر می‌دهیم.'],
+                    'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'err'];
+            case 'site_up':
+                $m = intdiv(max(0, (int) ($d['down_for'] ?? 0)), 60);
+                return ['title' => $asset . ' دوباره در دسترس است', 'lines' => ['حدود ' . ($m >= 120 ? Text::fa(intdiv($m, 60)) . ' ساعت' : Text::fa(max(1, $m)) . ' دقیقه') . ' از دسترس خارج بود.'],
+                    'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'ok'];
+            case 'ssl_expiring':
+                $days = (int) ($d['days'] ?? 0);
+                return ['title' => $days < 0 ? 'گواهی SSL ' . $asset . ' منقضی شده است' : 'گواهی SSL ' . $asset . ' ' . ($days === 0 ? 'امروز' : Text::fa($days) . ' روز دیگر') . ' منقضی می‌شود',
+                    'lines' => ['تاریخ انقضا: ' . Text::ymd((string) ($d['end'] ?? '')), $days < 0 ? 'مرورگرها اکنون برای بازدیدکنندگان هشدار امنیتی نشان می‌دهند.' : 'اگر تمدید خودکار دارید، بررسی کنید که کار می‌کند؛ وگرنه همین حالا تمدید کنید.'],
+                    'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => $days < 0 ? 'err' : 'warn'];
             case 'digest':
                 return ['title' => (string) ($d['title'] ?? 'گزارش دوره‌ای امنیت'), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
         }

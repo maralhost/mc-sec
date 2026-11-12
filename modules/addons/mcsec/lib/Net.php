@@ -199,7 +199,7 @@ final class Net
     public static function lines(string $list): array
     {
         $out = [];
-        foreach (preg_split('~\R~', $list) ?: [] as $line) {
+        foreach (preg_split('~\r\n|\r|\n~', $list) ?: [] as $line) {
             $p = strtolower(trim(preg_replace('~\s#.*$~', '', Text::toAscii($line)) ?? ''));
             if ($p !== '' && !str_starts_with($p, '#')) {
                 $out[] = $p;

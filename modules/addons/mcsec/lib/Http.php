@@ -64,7 +64,7 @@ final class Http
             CURLOPT_SSL_VERIFYPEER => (bool) ($opt['verify'] ?? true),
             CURLOPT_SSL_VERIFYHOST => ($opt['verify'] ?? true) ? 2 : 0,
             CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS,
-            CURLOPT_USERAGENT => (string) ($opt['ua'] ?? 'MC-Sec/' . (defined('MCSEC_VERSION') ? MCSEC_VERSION : 'dev') . ' (+Maral Cloud security scanner)'),
+            CURLOPT_USERAGENT => (string) ($opt['ua'] ?? self::ua()),
             CURLOPT_ENCODING => '',
             CURLOPT_HEADERFUNCTION => function ($ch, string $line) use (&$respHeaders) {
                 $p = strpos($line, ':');
@@ -111,6 +111,85 @@ final class Http
             'ms' => (int) round((microtime(true) - $start) * 1000),
             'url' => $final !== '' ? $final : $url,
         ];
+    }
+
+    /**
+     * One fixed User-Agent for every request MC-Sec sends, with the public "about this scanner" page, so a site owner
+     * who sees it in a log can find out who scanned and how to allow or stop it (polite scanning).
+     */
+    public static function ua(): string
+    {
+        static $ua = null;
+        if ($ua === null) {
+            $base = '';
+            try {
+                $base = Whmcs::systemUrl();
+            } catch (\Throwable $e) {
+                $base = '';
+            }
+            $ua = 'MC-Sec/' . (defined('MCSEC_VERSION') ? MCSEC_VERSION : 'dev') . ' (+' . (preg_match('~^https?://~i', $base) ? rtrim($base, '/') . '/index.php?m=mcsec&p=scanner' : 'Maral Cloud security scanner') . ')';
+        }
+        return $ua;
+    }
+
+    /**
+     * Several GETs at once (light monitoring): only the status and time matter, the body is read up to 16 KB.
+     * No redirects, no certificate checks (an expired certificate is reported by the certificate check, not as "down").
+     * @param array<int|string,array{url:string,resolve?:string}> $reqs
+     * @return array<int|string,array{ok:bool,status:int,error:string,ms:int}>
+     */
+    public static function multi(array $reqs, int $timeout = 10): array
+    {
+        $out = [];
+        if (self::$mock !== null || !function_exists('curl_multi_init')) {
+            foreach ($reqs as $k => $r) {
+                $x = self::request('GET', $r['url'], ['Accept' => 'text/html,*/*;q=0.8'], null, ['timeout' => $timeout, 'connect' => min(5, $timeout), 'verify' => false, 'max_bytes' => 16384] + $r);
+                $out[$k] = ['ok' => $x['status'] > 0, 'status' => (int) $x['status'], 'error' => (string) $x['error'], 'ms' => (int) $x['ms']];
+            }
+            return $out;
+        }
+        $mh = curl_multi_init();
+        $handles = [];
+        foreach ($reqs as $k => $r) {
+            $ch = curl_init();
+            $got = 0;
+            curl_setopt_array($ch, [
+                CURLOPT_URL => $r['url'], CURLOPT_HTTPGET => true, CURLOPT_HTTPHEADER => ['Accept: text/html,*/*;q=0.8'], CURLOPT_FOLLOWLOCATION => false,
+                CURLOPT_CONNECTTIMEOUT => min(5, $timeout), CURLOPT_TIMEOUT => $timeout, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0,
+                CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS, CURLOPT_USERAGENT => self::ua(), CURLOPT_ENCODING => '',
+                CURLOPT_WRITEFUNCTION => function ($ch, string $chunk) use (&$got) {
+                    $got += strlen($chunk);
+                    return $got > 16384 ? 0 : strlen($chunk);
+                },
+            ]);
+            if (!empty($r['resolve'])) {
+                curl_setopt($ch, CURLOPT_RESOLVE, [(string) $r['resolve']]);
+            }
+            curl_multi_add_handle($mh, $ch);
+            $handles[$k] = [$ch, microtime(true)];
+        }
+        $running = 0;
+        do {
+            $st = curl_multi_exec($mh, $running);
+            if ($running > 0) {
+                curl_multi_select($mh, 1.0);
+            }
+        } while ($running > 0 && $st === CURLM_OK);
+        // per-transfer result codes (curl_error() is empty for handles run by curl_multi)
+        $codes = [];
+        while (($info = curl_multi_info_read($mh)) !== false) {
+            $codes[spl_object_id($info['handle'])] = (int) $info['result'];
+        }
+        foreach ($handles as $k => [$ch, $t0]) {
+            $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $code = $codes[spl_object_id($ch)] ?? 0;
+            $err = $status > 0 ? '' : ($code !== 0 ? curl_strerror($code) : (curl_error($ch) !== '' ? curl_error($ch) : 'no answer'));
+            $out[$k] = ['ok' => $status > 0, 'status' => $status, 'error' => $err, 'ms' => (int) round((float) curl_getinfo($ch, CURLINFO_TOTAL_TIME) * 1000)];
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+        }
+        curl_multi_close($mh);
+        return $out;
     }
 
     /** Cookies set by a response, as "name=value; name2=value2" (engine sessions). */

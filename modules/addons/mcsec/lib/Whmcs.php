@@ -58,6 +58,18 @@ final class Whmcs
         return $out;
     }
 
+    /** Status and group of many clients at once (worker batches). @param int[] $ids @return array<int,object{status:string,groupid:int}> */
+    public static function clientFlags(array $ids): array
+    {
+        $out = [];
+        foreach (array_chunk(array_values(array_unique(array_filter(array_map('intval', $ids)))), 500) as $chunk) {
+            foreach (Db::rows(Db::table('tblclients')->whereIn('id', $chunk)->select(['id', 'status', 'groupid'])) as $c) {
+                $out[(int) $c->id] = $c;
+            }
+        }
+        return $out;
+    }
+
     /** @param int[] $ids @return array<int,string> user id => name (or e-mail) */
     public static function userNames(array $ids): array
     {
