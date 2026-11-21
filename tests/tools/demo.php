@@ -100,6 +100,13 @@ function demo_data(): void
         'queued_at' => Clock::now() - 900, 'started_at' => Clock::now() - 840, 'synced_at' => Clock::now(), 'progress' => 45, 'stage' => 'در حال اجرا: naabu']);
     \McSec\Scans::queue(1, Db::table('mod_mcsec_assets')->where('id', $srv)->first(), 'hygiene', 0, 1);
     \McSec\Scans::dispatch(microtime(true) + 30);
+    // a real screenshot for the visual preview only (MCSEC_DEMO_SHOT=path to a JPEG or PNG); the tests run without it
+    $shotFile = (string) getenv('MCSEC_DEMO_SHOT');
+    if ($shotFile !== '' && is_file($shotFile) && \McSec\Shots::mime((string) file_get_contents($shotFile)) !== '') {
+        foreach ([$shop, $api] as $aid) {
+            Db::table('mod_mcsec_shots')->insert(['asset_id' => (int) $aid, 'client_id' => 1, 'host' => 'demo', 'mime' => \McSec\Shots::mime((string) file_get_contents($shotFile)), 'data' => base64_encode((string) file_get_contents($shotFile)), 'taken_at' => Clock::now()]);
+        }
+    }
     // schedules, notification channels, reports, history
     \McSec\Schedules::save($who, ['asset' => 0, 'profile' => 'hygiene', 'freq' => 'weekly', 'dow' => 6, 'hour' => 3]);
     \McSec\Schedules::save($who, ['asset' => $shop, 'profile' => 'vuln', 'freq' => 'monthly', 'dom' => 1, 'hour' => 2]);

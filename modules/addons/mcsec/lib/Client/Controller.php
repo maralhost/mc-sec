@@ -43,7 +43,7 @@ final class Controller
     /** Actions that create something or cost credits also need the page's one-time nonce. */
     private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
-    private const VIEWER_ACTIONS = ['notice_read'];
+    private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
 
     public static function handle(): array
     {
@@ -61,6 +61,9 @@ final class Controller
         Trace::$ctx = ['client_id' => $who['client_id'], 'user_id' => $who['user_id']];
         if (!Auth::canView($who) || !Access::clientAllowed($who['client_id'], $who['masq'])) {
             return self::out('home', Views::closed($who), $pjax);
+        }
+        if (($_GET['p'] ?? '') === 'shot' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+            return self::shot($who['client_id'], (int) Text::toAscii((string) ($_GET['id'] ?? '0')));
         }
         Accounts::ensure($who['client_id']);
         $ctx = ['who' => $who, 'manage' => Auth::canManage($who) && Auth::mayAct($who), 'buy' => Auth::canBuy($who) && Auth::mayAct($who)];
@@ -106,6 +109,32 @@ final class Controller
         $label = Settings::menuLabel();
         return ['pagetitle' => $label, 'breadcrumb' => ['index.php?m=mcsec' => $label], 'templatefile' => 'templates/page', 'requirelogin' => true, 'forcessl' => true,
             'vars' => ['mcsec_html' => $html]];
+    }
+
+    /**
+     * The stored screenshot of one of this account's assets, as an image (the only route that is not a page).
+     * Bytes are a picture of a customer's site: type from our own check of the bytes, nosniff, private cache.
+     */
+    private static function shot(int $clientId, int $assetId): array
+    {
+        $img = \McSec\Shots::get($clientId, $assetId);
+        if (self::$testMode) {
+            return ['raw' => $img];
+        }
+        if ($img === null) {
+            http_response_code(404);
+            exit;
+        }
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: ' . $img['mime']);
+        header('Content-Length: ' . strlen($img['bytes']));
+        header('X-Content-Type-Options: nosniff');
+        header('Content-Security-Policy: default-src \'none\'');
+        header('Cache-Control: private, max-age=86400');
+        echo $img['bytes'];
+        exit;
     }
 
     private static function json(array $out): array
@@ -201,6 +230,9 @@ final class Controller
             case 'asset_save':
                 $r = Assets::setLabel($who, $int('asset'), $in('label'), $in('tags'));
                 return ['flash' => $r['ok'] ? 'ok:ذخیره شد.' : 'err:' . $r['error']];
+            case 'view_mode':
+                \McSec\Kv::set('view:' . $cid . ':' . (int) $who['user_id'], $in('view') === 'advanced' ? 'advanced' : 'simple');
+                return ['redirect' => 'index.php?m=mcsec'];
             case 'asset_origin':
                 $r = Assets::setOrigin($who, $int('asset'), $in('origin'));
                 if (!$r['ok']) {

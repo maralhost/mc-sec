@@ -129,6 +129,7 @@ final class Assets
         }
         Db::tx(function () use ($a) {
             Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['status' => 'removed', 'removed_at' => Clock::now()]);
+            Shots::forget((int) $a->id);
             Db::table('mod_mcsec_schedules')->where('client_id', $a->client_id)->where('asset_id', $a->id)->delete();
             Db::table('mod_mcsec_scans')->where('asset_id', $a->id)->where('status', 'queued')->update(['status' => 'cancelled', 'finished_at' => Clock::now(), 'error' => 'دارایی حذف شد']);
         });

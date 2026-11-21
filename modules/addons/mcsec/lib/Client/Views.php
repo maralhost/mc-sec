@@ -237,66 +237,9 @@ final class Views
                 $out .= Ui::alert('danger', Ui::ltr($a->value) . ' از دسترس خارج است (' . Ui::plain($m[2]) . '). <a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '">جزئیات</a>', 'alert');
             }
         }
-        // row 1: score, open findings, changes in 7 days
-        $week = Clock::now() - 7 * 86400;
-        $new = Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('first_seen_at', '>=', $week)->count();
-        $fixed = Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('status', 'fixed')->where('fixed_at', '>=', $week)->count();
-        $reopened = Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('status', 'open')->where('reopened', '>', 0)->where('last_seen_at', '>=', $week)->count();
-        $trend = Score::trend($cid, 60);
-        $delta = '';
-        if (count($trend) >= 2 && $score['score'] >= 0) {
-            $d = $score['score'] - (int) $trend[max(0, count($trend) - 8)]['score'];
-            $delta = $d === 0 ? 'بی‌تغییر نسبت به هفته‌ی پیش' : ($d > 0 ? Text::fa($d) . '+ از هفته‌ی پیش' : Text::fa(abs($d)) . '− از هفته‌ی پیش');
-        }
-        $partialNote = $score['partial'] > 0 ? '<p class="mcs-small">' . Ui::chip('ارزیابی ناقص', 'warn') . ' ' . self::e(Text::fa($score['partial']) . ' دارایی در آخرین بررسی کامل سنجیده نشد؛ امتیاز آن‌ها قطعی نیست.') . ' <a href="index.php?m=mcsec&amp;p=assets">کدام؟</a></p>' : '';
-        $scoreCard = Ui::card(Ui::gauge($score['score'], $score['score'] < 0 ? 'اولین اسکن را بگیرید تا امتیاز ساخته شود.' : self::e($delta)) . $partialNote
-            . '<details class="mcs-how"><summary>امتیاز چطور حساب می‌شود؟</summary><p>از ۱۰۰ شروع می‌شود و هر یافته‌ی باز به اندازه‌ی اهمیتش کم می‌کند. یک یافته‌ی بحرانیِ باز، یا آسیب‌پذیری‌ای که مهاجمان همین حالا از آن استفاده می‌کنند (فهرست KEV)، امتیاز را حداکثر ۴۹ و یک یافته‌ی مهم حداکثر ۷۹ نگه می‌دارد، تا مشکل جدی پشت چند مورد سالم پنهان نماند.</p>'
-            . '<p>اگر فایروال یا خطای سایت جلوی بخشی از بررسی را بگیرد، اسکن «ارزیابی ناقص» است، نه «سالم»؛ یافته‌هایی که این بار سنجیده نشدند باز می‌مانند.</p></details>',
-            'امتیاز امنیت', 'shield-check', '', 'mcs-scorecard');
-        $openCard = Ui::card(Ui::sevCounts($counts, 'index.php?m=mcsec&p=findings') . '<p class="mcs-small mcs-muted">' . self::e(Text::fa(array_sum($counts))) . ' یافته‌ی باز در ' . self::e(Text::fa(count($verified))) . ' دارایی تأییدشده</p>',
-            'یافته‌های باز', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings">همه</a>');
-        $diffCard = Ui::card('<ul class="mcs-diff"><li><strong>' . self::e(Text::fa($new)) . '</strong><span>تازه</span></li><li class="is-ok"><strong>' . self::e(Text::fa($fixed)) . '</strong><span>رفع‌شده</span></li>'
-            . '<li class="is-warn"><strong>' . self::e(Text::fa($reopened)) . '</strong><span>دوباره دیده‌شده</span></li></ul>' . ($new > 0 ? '<a class="mcs-small" href="index.php?m=mcsec&amp;p=findings&amp;new=7">دیدن یافته‌های تازه</a>' : ''),
-            'هفت روز اخیر', 'activity');
-        $out .= '<div class="mcs-grid3">' . $scoreCard . $openCard . $diffCard . '</div>';
-
-        // row 2: what to do now
-        $rank = "CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
-        $top = Db::rows(Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('status', 'open')->whereIn('severity', ['critical', 'high', 'medium'])
-            ->orderByDesc('priority')->orderByRaw($rank . ' DESC')->orderByDesc('last_seen_at')->limit(20));
-        // one line per issue: the same port on the same IP reached through two assets is one job
-        $seen = [];
-        $top = array_slice(array_values(array_filter($top, function ($f) use (&$seen) {
-            $k = $f->source_key . '|' . $f->location;
-            if (isset($seen[$k])) {
-                return false;
-            }
-            return $seen[$k] = true;
-        })), 0, 5);
-        if ($top) {
-            $items = '';
-            foreach ($top as $f) {
-                $kb = Kb::get((string) $f->kb) ?? null;
-                $items .= '<li><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '">' . Ui::sev((string) $f->severity) . '<span class="mcs-todo-title">' . self::e($f->title) . '</span>' . ((int) ($f->kev ?? 0) === 1 ? ' ' . Ui::chip('در حال بهره‌برداری', 'err') : '') . '</a>'
-                    . '<span class="mcs-todo-meta">' . Ui::ltr($f->location) . ($kb && !empty($kb['effort']) ? ' · ' . self::e($kb['effort']) : '') . '</span></li>';
-            }
-            $out .= Ui::card('<ol class="mcs-todo">' . $items . '</ol>', 'مهم‌ترین کارهای الان', 'check', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings">همه‌ی یافته‌ها</a>');
-        } elseif ($score['score'] >= 0) {
-            $out .= Ui::card(Ui::emptyState('shield-check', 'مشکل مهمی باز نیست', 'آفرین. با زمان‌بندی هفتگی، اگر چیزی تغییر کرد خبرتان می‌کنیم.', !Schedules::forClient($cid) && $ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=schedules">زمان‌بندی بسازید</a>' : ''));
-        }
-
-        // row 3: trend + assets + certificates
-        $certs = self::expiringCerts($cid);
-        $assetSummary = '<ul class="mcs-statlist"><li><span>تأییدشده</span><strong>' . self::e(Text::fa(count($verified))) . '</strong></li>'
-            . '<li><span>در انتظار تأیید</span><strong>' . self::e(Text::fa(count(array_filter($assets, fn ($a) => $a->status === 'pending')))) . '</strong></li>'
-            . '<li><span>تأیید منقضی</span><strong>' . self::e(Text::fa(count(array_filter($assets, fn ($a) => $a->status === 'lapsed')))) . '</strong></li></ul>' . $certs;
-        $next = Db::table('mod_mcsec_schedules')->where('client_id', $cid)->where('status', 'active')->where('next_run_at', '>', 0)->orderBy('next_run_at')->first();
-        $trendCard = Ui::card(Ui::spark($trend) . '<p class="mcs-small mcs-muted">' . ($next ? 'اسکن خودکار بعدی: ' . self::e(Text::date((int) $next->next_run_at)) : 'زمان‌بندی فعالی ندارید.') . '</p>', 'روند امتیاز', 'activity');
-        $out .= '<div class="mcs-grid2">' . $trendCard . Ui::card($assetSummary, 'دارایی‌ها', 'globe', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=assets">مدیریت</a>') . '</div>';
-        return $out;
+        return $out . HomeViews::body($ctx, $assets, $verified, $score, $counts);
     }
 
-    /** The first-run checklist (hidden once everything is done). */
     private static function checklist(array $ctx, array $assets, array $verified): string
     {
         $cid = $ctx['who']['client_id'];

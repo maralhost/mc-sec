@@ -489,6 +489,7 @@ final class Oasm implements Engine
         $tid = (string) $scan->backend_ref;
         $surface = [];
         $hosts = [];
+        $shots = [];
         for ($page = 1; $page <= 10; $page++) {
             $r = $this->call('GET', '/api/assets?targetIds=' . rawurlencode($tid) . '&limit=100&page=' . $page, null, $ws, 30);
             if (!$r['ok']) {
@@ -503,6 +504,9 @@ final class Oasm implements Engine
                 }
                 // httpx tries every open port; a failed probe (SSH on 22, seen live) still carries a made-up http:// URL
                 $hr = is_array($a['httpResponses'] ?? null) && empty($a['httpResponses']['failed']) ? $a['httpResponses'] : [];
+                if (is_string($a['screenshotPath'] ?? null) && $a['screenshotPath'] !== '' && count($shots) < 20) {
+                    $shots[] = ['host' => $host, 'port' => (int) ($a['port'] ?? 0), 'path' => $a['screenshotPath']];
+                }
                 if (!empty($a['port'])) {
                     $surface[] = ['kind' => 'port', 'value' => $host . ':' . (int) $a['port'], 'meta' => array_filter([
                         'title' => mb_substr((string) ($hr['title'] ?? ''), 0, 120), 'server' => (string) ($hr['webserver'] ?? ''), 'status' => (int) ($hr['status_code'] ?? 0),
@@ -545,7 +549,7 @@ final class Oasm implements Engine
                 }
             }
         }
-        $out = ['findings' => $findings, 'surface' => $surface, 'kinds' => $piped ? [] : ['host', 'port'], 'complete' => true];
+        $out = ['findings' => $findings, 'surface' => $surface, 'kinds' => $piped ? [] : ['host', 'port'], 'complete' => true, 'shots' => $shots];
         if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
             // a run the target cut short saw nothing: say so, and never mark earlier findings fixed because of it
             $run = $this->pipelineRun($m, 20) ?? [];

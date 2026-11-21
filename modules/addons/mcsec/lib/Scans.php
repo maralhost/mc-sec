@@ -355,6 +355,13 @@ final class Scans
             'summary' => Db::json($summary), 'error' => '']);
         // engines that judge completeness (built-in) set the asset's "incomplete" mark; others leave it as it is
         Db::table('mod_mcsec_assets')->where('id', $asset->id)->update(['last_scan_at' => Clock::now()] + (array_key_exists('partial', $res) ? ['partial' => $partial] : []));
+        if (!empty($res['shots'])) {
+            try {
+                Shots::save($asset, (array) $res['shots']);
+            } catch (\Throwable $e) {
+                Trace::warn('engine', 'shot', $e->getMessage(), ['scan' => (int) $s->id]);
+            }
+        }
         $s = Db::table('mod_mcsec_scans')->where('id', $s->id)->first();
         try {
             self::announce($s, $asset, $profile, $diff, $surf);

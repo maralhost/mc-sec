@@ -54,6 +54,15 @@ if ($path === '/addonmodules.php') {
         echo json_encode($r['json'], JSON_UNESCAPED_UNICODE);
         return true;
     }
+    if (array_key_exists('raw', $r)) {
+        if ($r['raw'] === null) {
+            http_response_code(404);
+            exit;
+        }
+        header('Content-Type: ' . $r['raw']['mime']);
+        echo $r['raw']['bytes'];
+        exit;
+    }
     if (isset($r['redirect'])) {
         header('Location: ' . $keep('/' . ltrim((string) $r['redirect'], '/')));
         return true;

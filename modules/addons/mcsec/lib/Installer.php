@@ -354,6 +354,15 @@ final class Installer
             $t->mediumText('v')->nullable();
             $t->integer('expires_at')->default(0);
         });
+        // one screenshot per asset, copied from OASM by the worker (Shots)
+        $make('mod_mcsec_shots', function ($t) {
+            $t->integer('asset_id')->primary();
+            $t->integer('client_id')->index();
+            $t->string('host', 255)->default('');
+            $t->string('mime', 20);
+            $t->mediumText('data');                  // base64
+            $t->integer('taken_at')->default(0);
+        });
         // vulnerability intelligence per CVE: CISA KEV and FIRST EPSS (Intel, refreshed by the worker)
         $make('mod_mcsec_intel', function ($t) {
             $t->string('cve', 24)->primary();
