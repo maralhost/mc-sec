@@ -179,7 +179,7 @@ final class ScanViews
             }
             $aiOk = \McSec\Ai::configured() && Plans::limits($cid)['ai'];
             $form = $ctx['manage'] && $aiOk ? Ui::form($ctx, 'scan', 'report_create', '<input type="hidden" name="scan" value="' . (int) $s->id . '"><input type="hidden" name="ai" value="1"><button type="submit" class="btn btn-primary">'
-                . Ui::ico('sparkle') . 'گزارش هوش مصنوعی' . (Settings::int('ai_report_cost') > 0 ? ' · ' . self::e(Text::fa(Settings::int('ai_report_cost'))) . ' اعتبار' : '') . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $s->id) : '';
+                . Ui::ico('sparkle') . 'گزارش هوش مصنوعی' . (\McSec\Rules::cost($cid, Settings::int('ai_report_cost')) > 0 ? ' · ' . self::e(Text::fa(\McSec\Rules::cost($cid, Settings::int('ai_report_cost')))) . ' اعتبار' : '') . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $s->id) : '';
             $out .= Ui::card(($rep !== '' ? '<ul class="mcs-plain">' . $rep . '</ul>' : '<p class="mcs-muted">گزارش پایه پس از پایان اسکن خودکار ساخته می‌شود.</p>') . $form, 'گزارش', 'file');
         }
         if ($ctx['manage'] && in_array($s->status, ['completed', 'failed', 'cancelled'], true) && $asset && $asset->status === 'verified') {

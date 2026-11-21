@@ -7,11 +7,13 @@ namespace McSec\Client;
 use McSec\Accounts;
 use McSec\Audit;
 use McSec\Catalog;
+use McSec\Codes;
 use McSec\Credits;
 use McSec\Crypto;
 use McSec\Findings;
 use McSec\Notify;
 use McSec\Plans;
+use McSec\Rules;
 use McSec\Settings;
 use McSec\Text;
 use McSec\Whmcs;
@@ -105,45 +107,129 @@ final class AccountViews
         $cid = $ctx['who']['client_id'];
         $bal = Credits::balance($cid);
         $lim = Plans::limits($cid);
-        $out = Ui::guide('<p>هر اسکن به اندازه‌ی عمقش اعتبار مصرف می‌کند. اعتبار دو بخش دارد: <strong>اعتبار ماهانه</strong> (رایگانِ گروه شما و اعتبار پلن؛ اول هر ماه شمسی پر می‌شود و به ماه بعد نمی‌رود) و <strong>اعتبار خریداری‌شده</strong> که منقضی نمی‌شود. اول اعتبار ماهانه مصرف می‌شود.</p>'
-            . '<p>اسکنی که به‌خاطر خطای سامانه تمام نشود، اعتبارش خودکار برمی‌گردد.</p>', false);
-        $out .= '<div class="mcs-grid3">'
-            . Ui::kpi('coins', 'مانده‌ی کل', self::e(Text::fa($bal['total'])), 'اعتبار', 'primary')
-            . Ui::kpi('calendar', 'اعتبار ماهانه', self::e(Text::fa($bal['monthly'])), self::e('ماه ' . Text::fa($bal['period']) . ($lim['monthly'] > 0 ? ' — هر ماه ' . Text::fa($lim['monthly']) : '')))
-            . Ui::kpi('key', 'اعتبار خریداری‌شده', self::e(Text::fa($bal['paid'])), 'بی‌انقضا') . '</div>';
-        // plan & limits
-        $plan = $lim['plans'] ? self::e(implode('، ', $lim['plans'])) : 'بدون پلن (رایگان)';
-        $out .= Ui::card(Ui::facts(['پلن فعال' => $plan, 'سقف دارایی' => self::e(Text::fa($lim['max_assets'])), 'کوتاه‌ترین فاصله‌ی زمان‌بندی' => self::e($lim['min_interval_h'] <= 24 ? 'روزانه' : ($lim['min_interval_h'] <= 168 ? 'هفتگی' : 'ماهانه')),
-            'گزارش هوش مصنوعی' => self::e($lim['ai'] ? 'دارد' : 'ندارد')]) . '<p class="mcs-help">برای پلن بالاتر، از فروشگاه مارال کلاد گروه «امنیت سایبری» را ببینید یا با فروش تماس بگیرید.</p>', 'پلن و محدودیت‌ها', 'shield');
-        // costs
-        $rows = '';
-        foreach (Catalog::forClient($cid) as $p) {
-            $rows .= '<tr>' . Ui::td('اسکن', self::e($p['label'])) . Ui::td('هزینه', self::e((int) $p['credits'] > 0 ? Text::fa((int) $p['credits']) . ' اعتبار برای هر دارایی' : 'رایگان'))
-                . Ui::td('زمان معمول', self::e($p['eta'])) . Ui::td('در پلن شما', $p['allowed'] ? Ui::chip('هست', 'ok') : Ui::chip('نیست', 'muted')) . '</tr>';
+        $rule = Rules::of($cid);
+        $out = Ui::guide('<p>هر اسکن به اندازه‌ی عمقش اعتبار مصرف می‌کند. اعتباری که می‌خرید منقضی نمی‌شود. اعتبار رایگان ماهانه (از پلن یا گروه شما) اول هر ماه شمسی پر می‌شود، به ماه بعد نمی‌رود و همیشه اول مصرف می‌شود.</p>'
+            . '<p>اسکنی که به‌خاطر خطای سامانه تمام نشود، اعتبارش خودکار برمی‌گردد. اگر کد تخفیف، هدیه یا دعوت دارید، همین‌جا در «کد دارید؟» بنویسید.</p>', false);
+        // one number; the part that ends with the month is one line under it
+        $sub = [];
+        if ($bal['monthly'] > 0) {
+            $sub[] = Text::fa($bal['monthly']) . ' اعتبار آن تا پایان این ماه شمسی معتبر است؛ بقیه منقضی نمی‌شود.';
         }
-        if (Settings::int('ai_report_cost') > 0) {
-            $rows .= '<tr>' . Ui::td('اسکن', 'گزارش هوش مصنوعی') . Ui::td('هزینه', self::e(Text::fa(Settings::int('ai_report_cost')) . ' اعتبار')) . Ui::td('زمان معمول', 'چند دقیقه') . Ui::td('در پلن شما', $lim['ai'] ? Ui::chip('هست', 'ok') : Ui::chip('نیست', 'muted')) . '</tr>';
+        if ($lim['monthly'] > 0) {
+            $sub[] = 'هر ماه ' . Text::fa($lim['monthly']) . ' اعتبار رایگان می‌گیرید.';
         }
-        $out .= Ui::card(Ui::table(['اسکن', 'هزینه', 'زمان معمول', 'در پلن شما'], $rows), 'هزینه‌ی هر کار', 'list');
-        // packs
+        if ($rule['spend_pct'] < 100) {
+            $sub[] = 'هزینه‌ی اسکن‌ها برای حساب شما ' . Text::fa(100 - $rule['spend_pct']) . '٪ کمتر است.';
+        }
+        $out .= '<div class="mcs-balance">' . Ui::kpi('coins', 'اعتبار شما', self::e(Text::fa($bal['total'])), self::e(implode(' ', $sub)), 'primary') . '</div>';
+
+        // «کد دارید؟»: the one place to type any code
+        $canCode = $ctx['buy'] || $ctx['manage'];
+        $pending = Codes::pending($cid);
+        $prefill = Codes::normalize((string) ($_GET['code'] ?? ''));
+        $codeBox = $pending ? Ui::alert('info', 'کد ' . Ui::ltr($pending->code) . ' روی حساب شما فعال است: ' . self::e($pending->kind === 'discount' ? Text::fa((int) $pending->value) . '٪ تخفیف روی خرید بعدی بسته.' : Text::fa((int) $pending->value) . '٪ اعتبار بیشتر با خرید بعدی بسته.'), 'check') : '';
+        if ($canCode) {
+            $codeBox .= Ui::form($ctx, 'credits', 'code_redeem', '<div class="mcs-codebox">' . Ui::field('mcs-code', 'کد تخفیف، هدیه یا دعوت',
+                '<input class="form-control mcs-ltr" dir="ltr" id="mcs-code" name="code" maxlength="24" autocomplete="off" autocapitalize="characters" spellcheck="false" value="' . self::e($prefill) . '">',
+                'هر کدی دارید همین‌جا بنویسید؛ خودمان تشخیص می‌دهیم چه کدی است.') . '<button type="submit" class="btn btn-primary">ثبت کد</button></div>');
+        } else {
+            $codeBox .= '<p class="mcs-help">ثبت کد فقط با مالک حساب ممکن است.</p>';
+        }
+        $out .= Ui::card($codeBox, 'کد دارید؟', 'key', '', '" id="code');
+
+        // packs, at the price this account pays right now
         $packs = Credits::packs();
         if ($packs) {
             $client = Whmcs::client($cid);
             $cur = Whmcs::currency((int) ($client->currency ?? 1));
+            $gift = Settings::bool('gift_enabled');
             $cards = '<div class="mcs-packs">';
             foreach ($packs as $p) {
-                $per = $p['credits'] > 0 ? $p['price'] / $p['credits'] : 0;
-                $cards .= '<div class="mcs-pack"><strong>' . self::e(Text::fa($p['credits'])) . ' اعتبار</strong><span dir="auto">' . self::e($p['label']) . '</span><span class="mcs-pack-price">' . self::e(Text::money($p['price'], $cur)) . '</span>'
-                    . '<small class="mcs-muted">هر اعتبار ' . self::e(Text::money($per, $cur)) . '</small>'
-                    . ($ctx['buy'] ? Ui::form($ctx, 'credits', 'buy_pack', '<input type="hidden" name="pack" value="' . self::e($p['key']) . '"><button type="submit" class="btn btn-primary btn-block">خرید</button>') : '') . '</div>';
+                $o = Credits::offer($cid, $p);
+                $better = $o['why'] !== '';
+                $cards .= '<div class="mcs-pack' . ($better ? ' is-offer' : '') . '"><strong>' . self::e(Text::fa($o['credits'])) . ' اعتبار</strong><span dir="auto">' . self::e($p['label']) . '</span>'
+                    . ($better && $o['price'] < $p['price'] ? '<s class="mcs-muted">' . self::e(Text::money($p['price'], $cur)) . '</s>' : '')
+                    . '<span class="mcs-pack-price">' . self::e(Text::money($o['price'], $cur)) . '</span>'
+                    . ($better ? '<small class="mcs-pack-why">' . self::e($o['why']) . '</small>' : '<small class="mcs-muted">هر اعتبار ' . self::e(Text::money($o['price'] / max(1, $o['credits']), $cur)) . '</small>')
+                    . ($ctx['buy'] ? Ui::form($ctx, 'credits', 'buy_pack', '<input type="hidden" name="pack" value="' . self::e($p['key']) . '"><button type="submit" class="btn btn-primary btn-block">خرید</button>'
+                        . ($gift ? '<button type="submit" name="gift" value="1" class="btn btn-default btn-block">' . Ui::ico('send') . 'هدیه به دوست</button>' : '')) : '') . '</div>';
             }
-            $out .= Ui::card($cards . '</div><p class="mcs-help">با «خرید» فاکتور WHMCS ساخته می‌شود؛ با هر روش پرداخت (از جمله اعتبار حساب) بپردازید و اعتبار اسکن همان لحظه افزوده می‌شود.</p>'
+            $out .= Ui::card($cards . '</div><p class="mcs-help">با «خرید» فاکتور ساخته می‌شود؛ با هر روش پرداخت (از جمله اعتبار حساب) بپردازید و اعتبار اسکن همان لحظه افزوده می‌شود.'
+                . ($gift ? ' با «هدیه به دوست» پس از پرداخت یک کد هدیه می‌گیرید که دوستتان در حساب خودش وارد می‌کند.' : '') . '</p>'
                 . (!$ctx['buy'] ? '<p class="mcs-help">خرید فقط با مالک حساب یا کاربری که مجوز «فاکتورها» دارد ممکن است.</p>' : ''), 'خرید اعتبار', 'coins');
         }
+
+        // gift codes this account bought
+        $gifts = Codes::gifts($cid);
+        if ($gifts) {
+            $rows = '';
+            foreach ($gifts as $g) {
+                $state = (int) $g->used > 0 ? ((int) $g->enabled === 1 ? Ui::chip('استفاده شد', 'ok') : Ui::chip('به اعتبار خودتان برگشت', 'muted')) : Ui::chip('منتظر دوست شما', 'info');
+                $rows .= '<tr>' . Ui::td('کد', (int) $g->used > 0 ? Ui::ltr($g->code) : Ui::code((string) $g->code, '', false)) . Ui::td('اعتبار', self::e(Text::fa((int) $g->value)))
+                    . Ui::td('تاریخ خرید', self::e(Text::date((int) $g->created_at, false))) . Ui::td('وضعیت', $state) . '</tr>';
+            }
+            $out .= Ui::card(Ui::table(['کد', 'اعتبار', 'تاریخ خرید', 'وضعیت'], $rows) . '<p class="mcs-help">کد را به دوستتان بدهید تا در حساب خودش در «کد دارید؟» وارد کند. کدی که تا یک سال استفاده نشود، به اعتبار خودتان برمی‌گردد.</p>', 'هدیه‌های شما', 'send');
+        }
+
+        // invite friends
+        $invite = Codes::inviteCode($cid);
+        if ($invite !== '') {
+            $st = Codes::inviteStats($cid);
+            $gain = [];
+            if (Settings::int('invite_new_credits') > 0) {
+                $gain[] = 'دوست شما ' . Text::fa(Settings::int('invite_new_credits')) . ' اعتبار هدیه می‌گیرد.';
+            }
+            if (Settings::int('invite_reward_verify') > 0) {
+                $gain[] = 'وقتی اولین دامنه‌اش را تأیید کرد، شما ' . Text::fa(Settings::int('invite_reward_verify')) . ' اعتبار می‌گیرید.';
+            }
+            if (Settings::int('invite_reward_buy') > 0) {
+                $gain[] = 'با اولین خریدش، شما ' . Text::fa(Settings::int('invite_reward_buy')) . ' اعتبار دیگر می‌گیرید.';
+            }
+            $out .= Ui::card('<p>' . self::e(implode(' ', $gain)) . '</p>' . Ui::code(rtrim(Whmcs::systemUrl(), '/') . '/index.php?m=mcsec&p=credits&code=' . $invite, 'پیوند دعوت شما')
+                . '<p class="mcs-help">یا کد ' . Ui::code($invite, '', false) . ' را بدهید تا در «کد دارید؟» وارد کند.'
+                . ($st['invited'] > 0 ? ' تا امروز ' . self::e(Text::fa($st['invited'])) . ' نفر با دعوت شما آمده‌اند و ' . self::e(Text::fa($st['earned'])) . ' اعتبار جایزه گرفته‌اید.' : '') . '</p>', 'دعوت از دوستان', 'send');
+        }
+
+        // auto top-up
+        if (Settings::bool('auto_topup_enabled') && $packs && $ctx['buy']) {
+            $acc = Accounts::get($cid);
+            $on = $acc && (string) ($acc->auto_pack ?? '') !== '' && isset($packs[(string) $acc->auto_pack]);
+            $opts = [];
+            foreach ($packs as $p) {
+                $opts[$p['key']] = $p['label'];
+            }
+            if ($on) {
+                $body = '<p>' . Ui::chip('روشن', 'ok') . ' وقتی اعتبار به کمتر از ' . self::e(Text::fa((int) $acc->auto_below)) . ' برسد، فاکتور «' . self::e($packs[(string) $acc->auto_pack]['label']) . '» ساخته می‌شود و خبرتان می‌کنیم.</p>'
+                    . Ui::form($ctx, 'credits', 'auto_save', '<input type="hidden" name="pack" value=""><button type="submit" class="btn btn-default">خاموش کردن شارژ خودکار</button>', '', 'mcs-inline');
+            } else {
+                $body = Ui::form($ctx, 'credits', 'auto_save', '<div class="mcs-form-row">' . Ui::field('mcs-auto-b', 'وقتی اعتبار کمتر از این شد', '<input class="form-control mcs-ltr" dir="ltr" id="mcs-auto-b" name="below" inputmode="numeric" value="10" maxlength="6">')
+                    . Ui::field('mcs-auto-p', 'فاکتور این بسته ساخته شود', Ui::select('pack', $opts, (string) array_key_first($opts), 'mcs-auto-p')) . '</div>'
+                    . Ui::toggle('agree', false, 'موافقم که فاکتور خودکار ساخته شود', 'چیزی خودکار از حساب شما کسر نمی‌شود: فقط فاکتور ساخته و خبر داده می‌شود و هر وقت بخواهید خاموشش می‌کنید.')
+                    . '<button type="submit" class="btn btn-default">روشن کردن شارژ خودکار</button>');
+            }
+            $out .= Ui::drawer('شارژ خودکار: اسکن‌های زمان‌بندی‌شده بی‌اعتبار نمانند', $body, $on, 'calendar', 'auto');
+        }
+
+        // plan & limits
+        $plan = $lim['plans'] ? self::e(implode('، ', $lim['plans'])) : 'بدون پلن (رایگان)';
+        $out .= Ui::card(Ui::facts(['پلن فعال' => $plan, 'سقف دارایی' => self::e(Text::fa($lim['max_assets'])), 'کوتاه‌ترین فاصله‌ی زمان‌بندی' => self::e($lim['min_interval_h'] <= 24 ? 'روزانه' : ($lim['min_interval_h'] <= 168 ? 'هفتگی' : 'ماهانه')),
+            'گزارش هوش مصنوعی' => self::e($lim['ai'] ? 'دارد' : 'ندارد')]) . '<p class="mcs-help">برای پلن بالاتر، از فروشگاه مارال کلاد گروه «امنیت سایبری» را ببینید یا با فروش تماس بگیرید.</p>', 'پلن و محدودیت‌ها', 'shield');
+        // costs (what this account pays)
+        $rows = '';
+        foreach (Catalog::forClient($cid) as $p) {
+            $price = (int) $p['credits'] > 0 ? Text::fa((int) $p['credits']) . ' اعتبار برای هر دارایی' : 'رایگان';
+            $rows .= '<tr>' . Ui::td('اسکن', self::e($p['label'])) . Ui::td('هزینه', ((int) $p['full'] > (int) $p['credits'] ? '<s class="mcs-muted">' . self::e(Text::fa((int) $p['full'])) . '</s> ' : '') . self::e($price))
+                . Ui::td('زمان معمول', self::e($p['eta'])) . Ui::td('در پلن شما', $p['allowed'] ? Ui::chip('هست', 'ok') : Ui::chip('نیست', 'muted')) . '</tr>';
+        }
+        $aiCost = Rules::cost($cid, Settings::int('ai_report_cost'));
+        if (Settings::int('ai_report_cost') > 0) {
+            $rows .= '<tr>' . Ui::td('اسکن', 'گزارش هوش مصنوعی') . Ui::td('هزینه', self::e($aiCost > 0 ? Text::fa($aiCost) . ' اعتبار' : 'رایگان')) . Ui::td('زمان معمول', 'چند دقیقه') . Ui::td('در پلن شما', $lim['ai'] ? Ui::chip('هست', 'ok') : Ui::chip('نیست', 'muted')) . '</tr>';
+        }
+        $out .= Ui::card(Ui::table(['اسکن', 'هزینه', 'زمان معمول', 'در پلن شما'], $rows), 'هزینه‌ی هر کار', 'list');
         // ledger
         $rows = '';
         foreach (Credits::ledger($cid, 100) as $l) {
-            $rows .= '<tr>' . Ui::td('تاریخ', self::e(Text::date((int) $l->created_at))) . Ui::td('نوع', self::e(Credits::KINDS[$l->kind] ?? $l->kind) . ' <small class="mcs-muted">(' . self::e($l->bucket === 'monthly' ? 'ماهانه' : 'خریداری‌شده') . ')</small>')
+            $rows .= '<tr>' . Ui::td('تاریخ', self::e(Text::date((int) $l->created_at))) . Ui::td('نوع', self::e(Credits::KINDS[$l->kind] ?? $l->kind) . ($l->bucket === 'monthly' ? ' <small class="mcs-muted">(تا پایان ماه)</small>' : ''))
                 . Ui::td('شرح', '<span dir="auto">' . self::e($l->note) . '</span>')
                 . Ui::td('مقدار', '<bdi class="mcs-num ' . ((int) $l->delta < 0 ? 'is-neg' : 'is-pos') . '">' . self::e(((int) $l->delta > 0 ? '+' : '−') . Text::fa(abs((int) $l->delta))) . '</bdi>')
                 . Ui::td('مانده', self::e(Text::fa((int) $l->balance_after))) . '</tr>';

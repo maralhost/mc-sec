@@ -374,6 +374,55 @@ final class Installer
             $t->integer('updated_at')->default(0);
         });
 
+        // 0.7.0 billing: who gets which price (a client group or one account)
+        $make('mod_mcsec_rules', function ($t) {
+            $t->increments('id');
+            $t->string('scope', 8);                   // group | client
+            $t->integer('target');                    // WHMCS group id or client id
+            $t->integer('monthly')->default(0);       // free monthly credits
+            $t->integer('max_assets')->default(0);
+            $t->integer('discount')->default(0);      // % off credit packs
+            $t->integer('spend_pct')->default(100);   // % of the normal credit cost of scans and AI (50 = half price)
+            $t->string('profiles', 255)->default(''); // csv of scan types open without a plan
+            $t->integer('starts_at')->default(0);
+            $t->integer('ends_at')->default(0);       // 0 = no end
+            $t->string('note', 160)->default('');
+            $t->integer('enabled')->default(1);
+            $t->integer('admin_id')->default(0);
+            $t->integer('created_at')->default(0);
+            $t->index(['scope', 'target']);
+        });
+        // one mechanism for campaign codes, gift codes and invite codes
+        $make('mod_mcsec_codes', function ($t) {
+            $t->increments('id');
+            $t->string('code', 24)->unique();
+            $t->string('kind', 12);                   // credit | discount | bonus | gift | invite
+            $t->integer('value')->default(0);         // credits, or percent
+            $t->string('bucket', 8)->default('paid'); // credit codes: monthly (until the end of this month) | paid (never expire)
+            $t->integer('max_uses')->default(0);      // 0 = no limit
+            $t->integer('used')->default(0);
+            $t->integer('group_id')->default(0);      // only this client group (0 = everyone)
+            $t->integer('client_id')->default(0);     // only this account (0 = everyone)
+            $t->integer('owner_client')->default(0)->index(); // gift: the buyer; invite: the inviter
+            $t->integer('topup_id')->default(0);      // gift: the paid pack it came from
+            $t->integer('starts_at')->default(0);
+            $t->integer('expires_at')->default(0);    // 0 = no end
+            $t->integer('enabled')->default(1);
+            $t->string('note', 160)->default('');
+            $t->integer('admin_id')->default(0);
+            $t->integer('created_at')->default(0);
+        });
+        $make('mod_mcsec_redemptions', function ($t) {
+            $t->increments('id');
+            $t->integer('code_id');
+            $t->integer('client_id')->index();
+            $t->string('status', 10)->default('done'); // done | pending (waits for the next pack) | replaced | used
+            $t->integer('topup_id')->default(0);
+            $t->integer('user_id')->default(0);
+            $t->integer('created_at')->default(0);
+            $t->unique(['code_id', 'client_id']);     // a code works once per account
+        });
+
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)
         $col = function (string $table, string $column, callable $def) use ($s): void {
             if ($s->hasTable($table) && !$s->hasColumn($table, $column)) {
@@ -397,6 +446,27 @@ final class Installer
         $col('mod_mcsec_assets', 'mon_cert_end', fn ($t) => $t->string('mon_cert_end', 10)->default(''));
         $col('mod_mcsec_findings', 'kev', fn ($t) => $t->integer('kev')->default(0));
         $col('mod_mcsec_findings', 'priority', fn ($t) => $t->integer('priority')->default(0));
+
+        // 0.7.0: codes on packs, gift packs, auto top-up, invites
+        $col('mod_mcsec_topups', 'code_id', fn ($t) => $t->integer('code_id')->default(0));
+        $col('mod_mcsec_topups', 'gift', fn ($t) => $t->integer('gift')->default(0));
+        $col('mod_mcsec_topups', 'auto', fn ($t) => $t->integer('auto')->default(0));
+        $col('mod_mcsec_accounts', 'invited_by', fn ($t) => $t->integer('invited_by')->default(0));
+        $col('mod_mcsec_accounts', 'invited_at', fn ($t) => $t->integer('invited_at')->default(0));
+        $col('mod_mcsec_accounts', 'auto_pack', fn ($t) => $t->string('auto_pack', 32)->default(''));
+        $col('mod_mcsec_accounts', 'auto_below', fn ($t) => $t->integer('auto_below')->default(0));
+        // the group credits of before 0.7.0 (a setting) become rules, once
+        $old = json_decode((string) Db::table('mod_mcsec_settings')->where('k', 'group_rules')->value('v'), true);
+        if (is_array($old) && $old) {
+            foreach ($old as $r) {
+                $g = (int) ($r['group'] ?? 0);
+                if ($g > 0 && !Db::table('mod_mcsec_rules')->where('scope', 'group')->where('target', $g)->exists()) {
+                    Db::table('mod_mcsec_rules')->insert(['scope' => 'group', 'target' => $g, 'monthly' => max(0, (int) ($r['monthly'] ?? 0)),
+                        'max_assets' => max(0, (int) ($r['max_assets'] ?? 0)), 'note' => 'از تنظیم قدیمی گروه‌ها', 'created_at' => Clock::now()]);
+                }
+            }
+            Db::table('mod_mcsec_settings')->where('k', 'group_rules')->update(['v' => '[]']);
+        }
 
         // seed: nothing customer-facing (feature off until the admin turns it on)
         if (!Db::table('mod_mcsec_settings')->where('k', 'installed_at')->exists()) {

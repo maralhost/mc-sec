@@ -13,7 +13,7 @@ use McSec\Plans;
 $tz = new DateTimeZone('Asia/Tehran');
 Clock::$fixed = (new DateTimeImmutable('2026-11-11 10:00', $tz))->getTimestamp(); // 20 Aban 1405
 setting('welcome_credits', '10');
-setting('group_rules', json_encode([['group' => 2, 'monthly' => 30, 'max_assets' => 8]]));
+\McSec\Rules::save(['scope' => 'group', 'target' => 2, 'monthly' => 30, 'max_assets' => 8]);
 
 section('welcome credits exactly once');
 Accounts::ensure(1);

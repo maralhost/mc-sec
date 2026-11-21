@@ -204,6 +204,11 @@ final class Verify
         ]);
         if ($was !== 'verified') {
             Audit::log((int) $asset->client_id, 'asset_verified', (string) $asset->value, ['method' => $method]);
+            try {
+                Codes::onVerified((int) $asset->client_id);
+            } catch (\Throwable $e) {
+                Trace::warn('credit', 'invite', $e->getMessage(), [], ['client_id' => (int) $asset->client_id]);
+            }
             Notify::event((int) $asset->client_id, 'asset_verified', ['asset' => (string) $asset->value, 'asset_id' => (int) $asset->id, 'method' => $method], 'verified:' . $asset->id . ':' . Clock::now());
             // its pending subdomains inherit the proof now
             if ($asset->kind === 'domain' && in_array($method, self::ZONE_METHODS, true)) {

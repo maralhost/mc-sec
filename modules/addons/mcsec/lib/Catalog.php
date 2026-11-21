@@ -181,7 +181,9 @@ final class Catalog
             if ($kind !== '' && !in_array($kind, $p['kinds'], true)) {
                 continue;
             }
-            $p['allowed'] = $lim['profiles'] === null ? (bool) $p['free'] : in_array($k, $lim['profiles'], true) || $p['free'];
+            $p['allowed'] = $p['free'] || in_array($k, $lim['open'], true) || ($lim['profiles'] !== null && in_array($k, $lim['profiles'], true));
+            $p['full'] = (int) $p['credits'];
+            $p['credits'] = Rules::cost($clientId, (int) $p['credits']); // what this account pays
             $out[$k] = $p;
         }
         return $out;

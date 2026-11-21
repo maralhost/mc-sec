@@ -29,11 +29,11 @@ use McSec\Worker;
  */
 final class Controller
 {
-    public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'اعتبار رایگان و اعطا', 'assets' => 'دارایی‌ها و تأیید',
+    public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'قاعده‌ها و اعطا', 'codes' => 'کدها', 'assets' => 'دارایی‌ها و تأیید',
         'scans' => 'صف اسکن', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
 
     private const ACTIONS = [
-        'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_groups' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
+        'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_rule' => 'settings', 'disable_rule' => 'settings', 'save_code' => 'settings', 'disable_code' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
         'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
     ];
 
@@ -170,18 +170,22 @@ final class Controller
                     Settings::set('credit_packs', (string) json_encode($packs, JSON_UNESCAPED_UNICODE));
                     Audit::log(0, 'settings', 'packs', ['packs' => $packs]);
                     return 'ok:بسته‌های خرید ذخیره شد.';
-                case 'save_groups':
-                    $rules = [];
-                    foreach ((array) ($_POST['gr_group'] ?? []) as $i => $g) {
-                        $g = (int) $g;
-                        if ($g <= 0) {
-                            continue;
-                        }
-                        $rules[$g] = ['group' => $g, 'monthly' => max(0, (int) Text::toAscii((string) ($_POST['gr_monthly'][$i] ?? '0'))), 'max_assets' => max(0, (int) Text::toAscii((string) ($_POST['gr_assets'][$i] ?? '0')))];
+                case 'save_rule':
+                    $r = \McSec\Rules::save(['scope' => $int('rl_client') > 0 ? 'client' : 'group', 'target' => $int('rl_client') > 0 ? $int('rl_client') : $int('rl_group'), 'monthly' => $int('rl_monthly'), 'max_assets' => $int('rl_assets'),
+                        'discount' => $int('rl_discount'), 'spend_pct' => ($_POST['rl_spend'] ?? '') === '' ? 100 : $int('rl_spend'), 'profiles' => $in('rl_profiles'), 'days' => $int('rl_days'), 'note' => $in('rl_note')], Auth::adminId());
+                    return $r['ok'] ? 'ok:قاعده ذخیره شد و از همین حالا اعمال می‌شود. اعتبار ماهانه در هر ماه فقط یک بار داده می‌شود.' : 'err:' . $r['error'];
+                case 'disable_rule':
+                    return \McSec\Rules::disable($int('rule_id')) ? 'ok:قاعده برداشته شد. اعتباری که این ماه داده شده سر جایش می‌ماند.' : 'err:این قاعده پیدا نشد.';
+                case 'save_code':
+                    $r = \McSec\Codes::create(['kind' => $in('cd_kind'), 'code' => $in('cd_code'), 'value' => $int('cd_value'), 'bucket' => $in('cd_bucket'), 'max_uses' => $int('cd_max'), 'days' => $int('cd_days'),
+                        'group_id' => $int('cd_group'), 'client_id' => $int('cd_client'), 'note' => $in('cd_note')], Auth::adminId());
+                    return $r['ok'] ? 'ok:کد ' . $r['code'] . ' ساخته شد.' : 'err:' . $r['error'];
+                case 'disable_code':
+                    if (!\McSec\Codes::disable($int('code_id'))) {
+                        return 'err:این کد پیدا نشد یا از پیش خاموش است.';
                     }
-                    Settings::set('group_rules', (string) json_encode(array_values($rules)));
-                    Audit::log(0, 'settings', 'group_rules', ['rules' => array_values($rules)]);
-                    return 'ok:اعتبار رایگان گروه‌ها ذخیره شد. از همین ماه اعمال می‌شود (یک بار در هر ماه).';
+                    Audit::log(0, 'code', 'off ' . $int('code_id'));
+                    return 'ok:کد خاموش شد. آنچه پیش‌تر با آن داده شده سر جایش می‌ماند.';
                 case 'grant':
                     $cid = $int('grant_client');
                     $amount = $int('grant_amount');

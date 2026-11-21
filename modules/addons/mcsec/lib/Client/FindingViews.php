@@ -143,7 +143,7 @@ final class FindingViews
         if ($ai) {
             $out .= self::aiCard($ai);
         } elseif ($aiOk && $ctx['manage'] && $f->status === 'open') {
-            $cost = Settings::int('ai_fix_cost');
+            $cost = \McSec\Rules::cost($cid, Settings::int('ai_fix_cost'));
             $out .= Ui::card('<p>راهنمای بالا عمومی است. هوش مصنوعی با توجه به نوع همین یافته و فناوری‌های سایتتان، گام‌ها و تنظیم دقیق‌تری پیشنهاد می‌دهد. نام دامنه و IP شما برای مدل فرستاده نمی‌شود.</p>'
                 . Ui::form($ctx, 'finding', 'finding_aifix', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . 'راهکار با هوش مصنوعی'
                     . ($cost > 0 ? ' · ' . self::e(Text::fa($cost)) . ' اعتبار' : '') . '</button><span class="mcs-help">ممکن است تا یک دقیقه طول بکشد.</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'راهکار با هوش مصنوعی', 'sparkle');

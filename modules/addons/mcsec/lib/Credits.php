@@ -64,29 +64,16 @@ final class Credits
                 }
             }
         }
-        $rule = self::groupRule(Whmcs::groupOf($clientId));
-        if ($rule && (int) $rule['monthly'] > 0) {
-            self::credit($clientId, (int) $rule['monthly'], 'monthly', 'group', 'group:' . $clientId . ':' . $now, 'اعتبار ماهانه‌ی رایگان گروه');
+        // one rule per account (its own, else its group's): the ref is the same for both, so a month never pays twice
+        $rule = Rules::of($clientId);
+        if ($rule['monthly'] > 0) {
+            self::credit($clientId, $rule['monthly'], 'monthly', 'group', 'group:' . $clientId . ':' . $now, 'اعتبار ماهانه‌ی رایگان');
         }
         foreach (Plans::active($clientId) as $plan) {
             if ((int) $plan->monthly_credits > 0) {
                 self::credit($clientId, (int) $plan->monthly_credits, 'monthly', 'plan', 'plan:' . $plan->service_id . ':' . $now, 'اعتبار ماهانه‌ی پلن ' . $plan->name);
             }
         }
-    }
-
-    /** The free-credit rule of a client group, or null. @return array{group:int,monthly:int,max_assets:int}|null */
-    public static function groupRule(int $groupId): ?array
-    {
-        if ($groupId <= 0) {
-            return null;
-        }
-        foreach (Settings::json('group_rules') as $r) {
-            if ((int) ($r['group'] ?? 0) === $groupId) {
-                return ['group' => $groupId, 'monthly' => max(0, (int) ($r['monthly'] ?? 0)), 'max_assets' => max(0, (int) ($r['max_assets'] ?? 0))];
-            }
-        }
-        return null;
     }
 
     /** Adds credits once per ref. Returns false when that ref was already applied. */
@@ -218,7 +205,7 @@ final class Credits
     }
 
     public const KINDS = ['welcome' => 'خوش‌آمد', 'group' => 'رایگان گروه', 'plan' => 'پلن', 'topup' => 'خرید', 'grant' => 'هدیه‌ی مدیر', 'spend' => 'مصرف',
-        'refund' => 'بازگشت', 'expire' => 'پایان ماه', 'adjust' => 'اصلاح'];
+        'refund' => 'بازگشت', 'expire' => 'پایان ماه', 'adjust' => 'اصلاح', 'code' => 'کد', 'gift' => 'هدیه', 'invite' => 'دعوت دوستان'];
 
     // ── credit packs: invoice → InvoicePaid hook → credits ──
 
@@ -236,16 +223,52 @@ final class Credits
         return $out;
     }
 
-    /** Creates the WHMCS invoice of a pack (one open invoice per pack at a time). */
-    public static function buy(array $who, string $packKey): array
+    /**
+     * What this account pays for a pack right now. Discounts never stack: of the pack as it is, the account's rule
+     * discount and the code waiting on the account (a discount or extra credits), the one with the lowest price per
+     * credit wins.
+     * @return array{price:float,credits:int,code_id:int,why:string}
+     */
+    public static function offer(int $clientId, array $pack): array
+    {
+        $best = ['price' => (float) $pack['price'], 'credits' => (int) $pack['credits'], 'code_id' => 0, 'why' => ''];
+        $try = function (float $price, int $credits, int $codeId, string $why) use (&$best): void {
+            if ($credits > 0 && $price > 0 && $price / $credits < $best['price'] / $best['credits'] - 1e-9) {
+                $best = ['price' => $price, 'credits' => $credits, 'code_id' => $codeId, 'why' => $why];
+            }
+        };
+        $d = Rules::of($clientId)['discount'];
+        if ($d > 0) {
+            $try(round($pack['price'] * (100 - $d) / 100, 2), (int) $pack['credits'], 0, Text::fa($d) . '٪ تخفیف ویژه‌ی حساب شما');
+        }
+        $code = Codes::pending($clientId);
+        if ($code && $code->kind === 'discount') {
+            $try(round($pack['price'] * (100 - (int) $code->value) / 100, 2), (int) $pack['credits'], (int) $code->id, Text::fa((int) $code->value) . '٪ تخفیف با کد ' . $code->code);
+        } elseif ($code && $code->kind === 'bonus') {
+            $try((float) $pack['price'], (int) $pack['credits'] + intdiv((int) $pack['credits'] * (int) $code->value, 100), (int) $code->id, Text::fa((int) $code->value) . '٪ اعتبار بیشتر با کد ' . $code->code);
+        }
+        return $best;
+    }
+
+    /**
+     * Creates the WHMCS invoice of a pack (one open invoice per pack at a time). $opt: gift (the buyer gets a gift
+     * code instead of credits), auto (made by auto top-up).
+     */
+    public static function buy(array $who, string $packKey, array $opt = []): array
     {
         $pack = self::packs()[$packKey] ?? null;
         if (!$pack) {
             return ['ok' => false, 'error' => 'این بسته پیدا نشد.'];
         }
         $clientId = $who['client_id'];
-        $open = Db::table('mod_mcsec_topups')->where('client_id', $clientId)->where('pack', $packKey)->where('status', 'pending')->where('created_at', '>', Clock::now() - 7 * 86400)->first();
-        if ($open && $open->invoice_id) {
+        $gift = !empty($opt['gift']) ? 1 : 0;
+        if ($gift && !Settings::bool('gift_enabled')) {
+            return ['ok' => false, 'error' => 'خرید هدیه فعلاً در دسترس نیست.'];
+        }
+        $offer = self::offer($clientId, $pack);
+        $open = Db::table('mod_mcsec_topups')->where('client_id', $clientId)->where('pack', $packKey)->where('gift', $gift)->where('status', 'pending')
+            ->where('credits', $offer['credits'])->where('created_at', '>', Clock::now() - 7 * 86400)->orderByDesc('id')->first();
+        if ($open && $open->invoice_id && abs((float) $open->amount - $offer['price']) < 0.005) {
             $inv = Whmcs::invoice((int) $open->invoice_id);
             if ($inv && $inv->status === 'Unpaid') {
                 return ['ok' => true, 'invoice_id' => (int) $open->invoice_id, 'again' => true];
@@ -254,19 +277,20 @@ final class Credits
         if (!RateLimit::hit('buy:' . $clientId, 10, 3600)) {
             return ['ok' => false, 'error' => 'در یک ساعت گذشته فاکتورهای زیادی ساخته شد. کمی بعد دوباره امتحان کنید.'];
         }
-        $id = Db::table('mod_mcsec_topups')->insertGetId(['client_id' => $clientId, 'pack' => $packKey, 'credits' => $pack['credits'], 'amount' => $pack['price'],
-            'status' => 'pending', 'user_id' => $who['user_id'], 'created_at' => Clock::now()]);
-        $r = Whmcs::createInvoice($clientId, 'اعتبار اسکن امنیتی MC-Sec: ' . $pack['label'] . ' (' . $pack['credits'] . ' credits) #T' . $id, $pack['price'], Settings::int('invoice_due_days'));
+        $id = Db::table('mod_mcsec_topups')->insertGetId(['client_id' => $clientId, 'pack' => $packKey, 'credits' => $offer['credits'], 'amount' => $offer['price'],
+            'status' => 'pending', 'user_id' => (int) ($who['user_id'] ?? 0), 'code_id' => $offer['code_id'], 'gift' => $gift, 'auto' => !empty($opt['auto']) ? 1 : 0, 'created_at' => Clock::now()]);
+        $what = ($gift ? 'هدیه‌ی اعتبار اسکن امنیتی MC-Sec: ' : 'اعتبار اسکن امنیتی MC-Sec: ') . $pack['label'] . ' (' . $offer['credits'] . ' credits) #T' . $id;
+        $r = Whmcs::createInvoice($clientId, $what, $offer['price'], Settings::int('invoice_due_days'));
         if (!$r['ok'] || $r['invoice_id'] <= 0) {
             Db::table('mod_mcsec_topups')->where('id', $id)->update(['status' => 'cancelled']);
             return ['ok' => false, 'error' => 'فاکتور ساخته نشد. لطفاً دوباره امتحان کنید یا به پشتیبانی خبر دهید.'];
         }
         Db::table('mod_mcsec_topups')->where('id', $id)->update(['invoice_id' => $r['invoice_id']]);
-        Audit::log($clientId, 'topup', 'invoice ' . $r['invoice_id'], ['pack' => $packKey], $who['user_id']);
+        Audit::log($clientId, 'topup', 'invoice ' . $r['invoice_id'], array_filter(['pack' => $packKey, 'gift' => $gift, 'auto' => !empty($opt['auto']), 'code' => $offer['code_id']]), (int) ($who['user_id'] ?? 0));
         return ['ok' => true, 'invoice_id' => $r['invoice_id']];
     }
 
-    /** InvoicePaid hook (and the worker, as a safety net): credits for every paid pack invoice, once. */
+    /** InvoicePaid hook (and the worker, as a safety net): credits (or a gift code) for every paid pack invoice, once. */
     public static function invoicePaid(int $invoiceId): int
     {
         $done = 0;
@@ -275,13 +299,87 @@ final class Credits
             if (!$inv || $inv->status !== 'Paid' || (int) $inv->userid !== (int) $t->client_id) {
                 continue;
             }
-            if (self::credit((int) $t->client_id, (int) $t->credits, 'paid', 'topup', 'topup:' . $t->id, 'خرید بسته (فاکتور ' . $invoiceId . ')')) {
-                $done++;
-                Notify::event((int) $t->client_id, 'credits_added', ['credits' => (int) $t->credits, 'invoice' => $invoiceId], 'topup:' . $t->id);
+            if ((int) ($t->gift ?? 0) === 1) {
+                $done += Codes::makeGift($t) !== '' ? 1 : 0; // marks the top-up paid in the same transaction
+            } else {
+                if (self::credit((int) $t->client_id, (int) $t->credits, 'paid', 'topup', 'topup:' . $t->id, 'خرید بسته (فاکتور ' . $invoiceId . ')')) {
+                    $done++;
+                    Notify::event((int) $t->client_id, 'credits_added', ['credits' => (int) $t->credits, 'invoice' => $invoiceId], 'topup:' . $t->id);
+                }
+                Db::table('mod_mcsec_topups')->where('id', $t->id)->where('status', 'pending')->update(['status' => 'paid', 'paid_at' => Clock::now()]);
             }
-            Db::table('mod_mcsec_topups')->where('id', $t->id)->where('status', 'pending')->update(['status' => 'paid', 'paid_at' => Clock::now()]);
+            if ((int) ($t->code_id ?? 0) > 0) {
+                Codes::consumed((int) $t->code_id, (int) $t->client_id, (int) $t->id);
+            }
+            Codes::onPaid((int) $t->client_id);
         }
         return $done;
+    }
+
+    /**
+     * Auto top-up (worker): accounts that asked for it and fell below their threshold get the invoice of their chosen
+     * pack. Nothing is charged here; the customer pays the invoice as always. One open auto invoice at a time, and at
+     * most auto_topup_month_cap in 30 days. Reads are batched.
+     */
+    public static function autoTopups(): int
+    {
+        if (!Settings::bool('auto_topup_enabled')) {
+            return 0;
+        }
+        $n = 0;
+        $cap = max(1, Settings::int('auto_topup_month_cap'));
+        $accounts = Db::rows(Db::table('mod_mcsec_accounts')->where('auto_pack', '!=', '')->where('auto_below', '>', 0)->limit(2000));
+        foreach (array_chunk($accounts, 500) as $chunk) {
+            $ids = array_map(fn ($a) => (int) $a->client_id, $chunk);
+            $wallets = [];
+            foreach (Db::rows(Db::table('mod_mcsec_wallets')->whereIn('client_id', $ids)) as $w) {
+                $wallets[(int) $w->client_id] = (int) $w->monthly + (int) $w->paid;
+            }
+            $recent = [];
+            $openAuto = [];
+            foreach (Db::rows(Db::table('mod_mcsec_topups')->whereIn('client_id', $ids)->where('auto', 1)->where('created_at', '>', Clock::now() - 30 * 86400)->where('status', '!=', 'cancelled')) as $t) {
+                $recent[(int) $t->client_id] = ($recent[(int) $t->client_id] ?? 0) + 1;
+                if ($t->status === 'pending') {
+                    $openAuto[(int) $t->client_id] = true;
+                }
+            }
+            foreach ($chunk as $a) {
+                $cid = (int) $a->client_id;
+                if (($wallets[$cid] ?? 0) >= (int) $a->auto_below || isset($openAuto[$cid]) || ($recent[$cid] ?? 0) >= $cap) {
+                    continue;
+                }
+                $r = self::buy(['client_id' => $cid, 'user_id' => 0], (string) $a->auto_pack, ['auto' => true]);
+                if ($r['ok'] && empty($r['again'])) {
+                    $n++;
+                    Notify::event($cid, 'billing', ['title' => 'فاکتور شارژ خودکار اعتبار اسکن ساخته شد',
+                        'lines' => ['اعتبار شما به کمتر از ' . Text::fa((int) $a->auto_below) . ' رسید. پس از پرداخت فاکتور، اعتبار همان لحظه افزوده می‌شود.', 'شارژ خودکار را هر وقت بخواهید در صفحه‌ی «اعتبار» خاموش کنید.'],
+                        'link' => 'viewinvoice.php?id=' . (int) $r['invoice_id'], 'tone' => 'info'], 'auto:' . $r['invoice_id']);
+                }
+            }
+        }
+        return $n;
+    }
+
+    /** Turns auto top-up on or off for an account ('' = off). */
+    public static function setAuto(array $who, string $packKey, int $below): array
+    {
+        if ($packKey === '') {
+            Accounts::update($who['client_id'], ['auto_pack' => '', 'auto_below' => 0]);
+            Audit::log($who['client_id'], 'auto_topup', 'off', [], $who['user_id']);
+            return ['ok' => true, 'off' => true];
+        }
+        if (!Settings::bool('auto_topup_enabled')) {
+            return ['ok' => false, 'error' => 'شارژ خودکار فعلاً در دسترس نیست.'];
+        }
+        if (!isset(self::packs()[$packKey])) {
+            return ['ok' => false, 'error' => 'بسته را انتخاب کنید.'];
+        }
+        if ($below < 1 || $below > 100000) {
+            return ['ok' => false, 'error' => 'بنویسید اعتبار به کمتر از چند که رسید فاکتور ساخته شود (مثلاً ۱۰).'];
+        }
+        Accounts::update($who['client_id'], ['auto_pack' => $packKey, 'auto_below' => $below]);
+        Audit::log($who['client_id'], 'auto_topup', $packKey, ['below' => $below], $who['user_id']);
+        return ['ok' => true];
     }
 
     /** Worker safety net: pending top-ups whose invoice got paid while the hook did not run. */

@@ -25,6 +25,7 @@ final class Worker
             $report = ['at' => Clock::now()];
             $steps = [
                 'topups' => fn () => Credits::reconcileTopups(),
+                'auto_topup' => fn () => Settings::bool('auto_topup_enabled') && self::every('auto_topup', 600) ? Credits::autoTopups() : 'skip',
                 'poll' => fn () => Scans::pollRunning($deadline),
                 'dispatch' => fn () => Scans::dispatch($deadline),
                 'schedules' => fn () => Schedules::due($deadline),
@@ -69,6 +70,7 @@ final class Worker
         $steps = [
             'snapshot' => fn () => Score::snapshot(),
             'low_credit' => fn () => Credits::lowAlerts(),
+            'gifts' => fn () => Codes::returnGifts(),
             'log' => fn () => Trace::purge(),
             'audit' => fn () => Audit::purge(),
             'nonces' => fn () => Nonce::purge(),

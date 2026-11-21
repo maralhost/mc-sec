@@ -104,6 +104,7 @@ final class Scans
         if (empty($opt['admin']) && Db::table('mod_mcsec_scans')->where('client_id', $clientId)->where('queued_at', '>', $dayStart)->count() >= max(1, Settings::int('daily_scan_cap'))) {
             return ['ok' => false, 'error' => 'به سقف ' . Text::fa(Settings::int('daily_scan_cap')) . ' اسکن در ۲۴ ساعت رسیده‌اید. فردا دوباره امتحان کنید.'];
         }
+        $profile['credits'] = Rules::cost($clientId, (int) $profile['credits']); // the account's rule may lower the price
         $cost = empty($opt['free']) ? Catalog::cost($profile, $asset) : 0;
         $id = Db::table('mod_mcsec_scans')->insertGetId([
             'client_id' => $clientId, 'asset_id' => (int) $asset->id, 'profile' => $profileKey, 'engine' => $profile['engine'], 'status' => 'queued',

@@ -33,7 +33,7 @@ final class ReportViews
             foreach (Assets::forClient($cid, 'verified') as $a) {
                 $assets[(string) $a->id] = (string) $a->value;
             }
-            $cost = Settings::int('ai_report_cost');
+            $cost = \McSec\Rules::cost($cid, Settings::int('ai_report_cost'));
             $body = '<div class="mcs-form-row">' . Ui::field('mcs-rk', 'دامنه‌ی گزارش', Ui::select('kind', ['account' => 'همه‌ی دارایی‌ها', 'asset' => 'یک دارایی'], 'account', 'mcs-rk'))
                 . ($assets ? Ui::field('mcs-ra', 'دارایی (برای «یک دارایی»)', Ui::select('asset', $assets, (string) array_key_first($assets), 'mcs-ra')) : '') . '</div>'
                 . ($aiOk ? Ui::toggle('ai', true, 'با هوش مصنوعی' . ($cost > 0 ? ' (' . Text::fa($cost) . ' اعتبار)' : ''), 'خلاصه‌ی مدیریتی، ریسک‌ها، کارهای سریع و راهکار اختصاصی. اگر ساخته نشود، اعتبارش برمی‌گردد.') : '<p class="mcs-help">گزارش هوش مصنوعی در پلن فعلی شما نیست؛ گزارش پایه ساخته می‌شود.</p>')

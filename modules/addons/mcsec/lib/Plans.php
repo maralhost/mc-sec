@@ -46,18 +46,17 @@ final class Plans
     }
 
     /**
-     * @return array{max_assets:int,profiles:?array,min_interval_h:int,ai:bool,monthly:int,plans:string[]}
+     * @return array{max_assets:int,profiles:?array,min_interval_h:int,ai:bool,monthly:int,plans:string[],open:string[]}
+     * open = scan types the account's rule opens without a plan
      * profiles null = no plan (free profiles only)
      */
     public static function limits(int $clientId): array
     {
         $max = Settings::int('max_assets_free');
         $monthly = 0;
-        $rule = Credits::groupRule(Whmcs::groupOf($clientId));
-        if ($rule) {
-            $max = max($max, $rule['max_assets']);
-            $monthly += $rule['monthly'];
-        }
+        $rule = Rules::of($clientId);
+        $max = max($max, $rule['max_assets']);
+        $monthly += $rule['monthly'];
         $profiles = null;
         $interval = 168; // without a plan: at most weekly schedules
         $ai = Settings::bool('ai_enabled');
@@ -70,7 +69,7 @@ final class Plans
             $list = trim((string) $p->profiles) === '' ? array_keys(Catalog::all()) : explode(',', (string) $p->profiles);
             $profiles = array_values(array_unique(array_merge($profiles ?? [], $list)));
         }
-        return ['max_assets' => $max, 'profiles' => $profiles, 'min_interval_h' => $interval, 'ai' => $ai, 'monthly' => $monthly, 'plans' => $names];
+        return ['max_assets' => $max, 'profiles' => $profiles, 'min_interval_h' => $interval, 'ai' => $ai, 'monthly' => $monthly, 'plans' => $names, 'open' => $rule['profiles']];
     }
 
     /** Schedules paused for a missing plan or credits come back when a plan starts. */

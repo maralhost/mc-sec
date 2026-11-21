@@ -71,6 +71,7 @@ final class Views
             'setup' => self::setup(),
             'pricing' => self::pricing(),
             'credits' => self::credits(),
+            'codes' => self::codes(),
             'assets' => self::assets(),
             'scans' => self::scans(),
             'settings' => self::settings(),
@@ -189,7 +190,7 @@ final class Views
             $n = Db::table('mod_mcsec_plans')->where('product_id', $pr->id)->where('status', 'active')->count();
             $plans .= '<li><a href="configproducts.php?action=edit&id=' . (int) $pr->id . '">' . self::e($pr->name) . '</a> — ' . self::e(Text::fa($n)) . ' سرویس فعال</li>';
         }
-        return self::guide('<p><strong>مدل قیمت:</strong> پلن‌ها (محصول WHMCS با ماژول سرور «MC-Sec») سقف دارایی، اعتبار ماهانه، نوع‌های اسکن و کوتاه‌ترین فاصله‌ی زمان‌بندی را می‌دهند؛ هر اسکن به اندازه‌ی عمقش اعتبار مصرف می‌کند؛ بسته‌های اعتبار با فاکتور WHMCS فروخته می‌شوند؛ گروه‌های مشتری می‌توانند اعتبار ماهانه‌ی رایگان بگیرند.</p>'
+        return self::guide('<p><strong>مدل قیمت:</strong> پلن‌ها (محصول WHMCS با ماژول سرور «MC-Sec») سقف دارایی، اعتبار ماهانه، نوع‌های اسکن و کوتاه‌ترین فاصله‌ی زمان‌بندی را می‌دهند؛ هر اسکن به اندازه‌ی عمقش اعتبار مصرف می‌کند؛ بسته‌های اعتبار با فاکتور WHMCS فروخته می‌شوند؛ قیمت ویژه‌ی یک گروه یا یک حساب در «قاعده‌ها و اعطا» و کدهای تخفیف، هدیه و دعوت در «کدها» است.</p>'
             . '<p>هزینه‌ی هر نوع اسکن برای یک دامنه یا IP است؛ بازه‌ی IP به ازای هر ۱۶ آدرس. نوعی که «بی‌پلن» نیست فقط برای مشتری‌های دارای پلنی است که آن را دارد.</p>'
             . '<p><strong>ساختن پلن:</strong> Setup › Products › محصول تازه، تب Module Settings، ماژول «MC-Sec — پلن امنیت سایبری»، و اعتبار ماهانه، سقف دارایی، نوع‌ها و گزارش هوش مصنوعی را بگذارید. تمدید هر ماه اعتبار ماه را یک بار می‌دهد.</p>')
             . self::box('نوع‌های اسکن و هزینه', $prof) . self::box('نوع اسکن سفارشی از ابزارهای OASM', self::customProfiles()) . self::box('بسته‌های خرید اعتبار', $packsForm)
@@ -224,31 +225,105 @@ final class Views
     private static function credits(): string
     {
         $groups = Whmcs::groups();
-        $rules = Settings::json('group_rules');
+        $rules = \McSec\Rules::all();
+        $names = Whmcs::clientNames(array_map(fn ($r) => $r->scope === 'client' ? (int) $r->target : 0, $rules));
         $rows = '';
-        for ($i = 0; $i < count($rules) + 2; $i++) {
-            $r = $rules[$i] ?? ['group' => 0, 'monthly' => '', 'max_assets' => ''];
-            $opts = '<option value="0">—</option>';
-            foreach ($groups as $gid => $gn) {
-                $opts .= '<option value="' . $gid . '"' . ((int) $r['group'] === $gid ? ' selected' : '') . '>' . self::e($gn) . '</option>';
-            }
-            $rows .= '<tr><td><select class="form-control" name="gr_group[]">' . $opts . '</select></td><td><input class="form-control" name="gr_monthly[]" value="' . self::e($r['monthly']) . '" dir="ltr"></td>'
-                . '<td><input class="form-control" name="gr_assets[]" value="' . self::e($r['max_assets']) . '" dir="ltr"></td></tr>';
+        foreach ($rules as $r) {
+            $who = $r->scope === 'client' ? 'حساب #' . (int) $r->target . ' ' . ($names[(int) $r->target] ?? '') : 'گروه «' . ($groups[(int) $r->target] ?? '#' . (int) $r->target) . '»';
+            $ended = (int) $r->ends_at > 0 && (int) $r->ends_at <= Clock::now();
+            $rows .= '<tr' . ($ended ? ' class="mcsa-muted"' : '') . '><td>' . self::e($who) . ($r->note !== '' ? '<br><small>' . self::e($r->note) . '</small>' : '') . '</td><td>' . self::e(Text::fa((int) $r->monthly)) . '</td><td>' . self::e((int) $r->max_assets > 0 ? Text::fa((int) $r->max_assets) : '—') . '</td>'
+                . '<td>' . self::e((int) $r->discount > 0 ? Text::fa((int) $r->discount) . '٪' : '—') . '</td><td>' . self::e((int) $r->spend_pct < 100 ? Text::fa((int) $r->spend_pct) . '٪ قیمت عادی' : 'عادی') . '</td>'
+                . '<td>' . ($r->profiles !== '' ? '<code dir="ltr">' . self::e($r->profiles) . '</code>' : '—') . '</td><td>' . self::e((int) $r->ends_at > 0 ? ($ended ? 'تمام شد: ' : 'تا ') . Text::date((int) $r->ends_at, false) : 'بی‌پایان') . '</td>'
+                . '<td>' . (Auth::adminCan('settings') ? self::form('credits', 'disable_rule', '<input type="hidden" name="rule_id" value="' . (int) $r->id . '"><button class="btn btn-default btn-xs">برداشتن</button>', 'این قاعده برداشته شود؟') : '') . '</td></tr>';
         }
-        $groupsForm = self::form('credits', 'save_groups', '<table class="table"><thead><tr><th>گروه مشتری</th><th>اعتبار ماهانه‌ی رایگان</th><th>سقف دارایی</th></tr></thead><tbody>' . $rows . '</tbody></table><button class="btn btn-primary">ذخیره</button>');
+        $opts = '<option value="0">—</option>';
+        foreach ($groups as $gid => $gn) {
+            $opts .= '<option value="' . (int) $gid . '">' . self::e($gn) . '</option>';
+        }
+        $add = self::form('credits', 'save_rule', '<div class="mcsa-row">'
+            . '<div class="mcsa-field"><label for="mcsa-rl-g">گروه مشتری</label><select class="form-control" id="mcsa-rl-g" name="rl_group">' . $opts . '</select></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-c">یا شماره‌ی حساب</label><input class="form-control" id="mcsa-rl-c" name="rl_client" dir="ltr"><small>اگر پر شود، قاعده فقط برای همین حساب است.</small></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-m">اعتبار ماهانه‌ی رایگان <span class="mcsa-i" title="اول هر ماه شمسی پر می‌شود و به ماه بعد نمی‌رود. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-m" name="rl_monthly" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-a">سقف دارایی <span class="mcsa-i" title="۰ یعنی همان سقف پلن یا سقف بی‌پلن. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-a" name="rl_assets" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-d">تخفیف بسته‌ها (٪) <span class="mcsa-i" title="۰ تا ۹۰. با کد تخفیف جمع نمی‌شود: مشتری بهترینِ یکی را می‌گیرد. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-d" name="rl_discount" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-p">هزینه‌ی اسکن (٪ قیمت عادی) <span class="mcsa-i" title="۱۰۰ یعنی قیمت عادی، ۵۰ یعنی نصف، ۰ یعنی رایگان. فقط کم می‌کند. پیش‌فرض: ۱۰۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-p" name="rl_spend" dir="ltr" value="100"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-o">نوع‌های اسکن باز بی‌پلن <span class="mcsa-i" title="کلید نوع‌های اسکن با ویرگول، مثل vuln,web. کلیدها در «قیمت و پلن» هستند. پیش‌فرض: هیچ.">ⓘ</span></label><input class="form-control" id="mcsa-rl-o" name="rl_profiles" dir="ltr" placeholder="vuln,web"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-t">مدت (روز) <span class="mcsa-i" title="پس از این چند روز قاعده خودکار تمام می‌شود. ۰ یعنی بی‌پایان. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-t" name="rl_days" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-n">یادداشت (فقط مدیر می‌بیند)</label><input class="form-control" id="mcsa-rl-n" name="rl_note" maxlength="160"></div>'
+            . '</div><button class="btn btn-primary">ذخیره‌ی قاعده</button>');
         $grant = self::form('credits', 'grant', '<div class="mcsa-row"><div class="mcsa-field"><label>شماره‌ی حساب مشتری</label><input class="form-control" name="grant_client" dir="ltr" required></div>'
             . '<div class="mcsa-field"><label>تعداد اعتبار</label><input class="form-control" name="grant_amount" dir="ltr" required></div>'
             . '<div class="mcsa-field"><label>نوع</label><select class="form-control" name="grant_bucket"><option value="paid">بی‌انقضا</option><option value="monthly">ماهانه (تا آخر ماه)</option></select></div>'
             . '<div class="mcsa-field"><label>شرح (مشتری می‌بیند)</label><input class="form-control" name="grant_note" placeholder="مثلاً جبران قطعی"></div></div><button class="btn btn-primary">افزودن اعتبار</button>', 'این اعتبار افزوده شود؟');
         $ledger = '';
-        $last = Db::rows(Db::table('mod_mcsec_ledger')->whereIn('kind', ['grant', 'topup', 'refund', 'group', 'plan'])->orderByDesc('id')->limit(40));
+        $last = Db::rows(Db::table('mod_mcsec_ledger')->whereIn('kind', ['grant', 'topup', 'refund', 'group', 'plan', 'code', 'gift', 'invite'])->orderByDesc('id')->limit(40));
         $names = Whmcs::clientNames(array_map(fn ($r) => (int) $r->client_id, $last));
         foreach ($last as $l) {
             $ledger .= '<tr><td>' . self::e(Text::date((int) $l->created_at)) . '</td><td>#' . (int) $l->client_id . ' ' . self::e($names[(int) $l->client_id] ?? '') . '</td><td>' . self::e(Credits::KINDS[$l->kind] ?? $l->kind) . '</td><td dir="ltr">' . (int) $l->delta . '</td><td>' . self::e($l->note) . '</td></tr>';
         }
-        return self::guide('<p><strong>اعتبار رایگان گروه:</strong> برای هر گروه مشتری WHMCS (مثلاً «همکاران» یا «VIP») اعتبار ماهانه بگذارید؛ اول هر ماه شمسی پر می‌شود و به ماه بعد نمی‌رود. سقف دارایی گروه هم این‌جاست.</p><p><strong>اعطای تکی:</strong> برای جبران یا هدیه؛ مشتری خبر می‌گیرد و در تراکنش‌هایش می‌بیند.</p>')
-            . self::box('اعتبار رایگان گروه‌ها', $groupsForm) . self::box('افزودن اعتبار به یک حساب', $grant)
+        return self::guide('<p><strong>قاعده</strong> می‌گوید یک گروه مشتری WHMCS (مثلاً «همکاران» یا «VIP») یا یک حساب خاص چه قیمتی می‌گیرد: اعتبار ماهانه‌ی رایگان، سقف دارایی، تخفیف بسته‌ها، هزینه‌ی کمتر اسکن و نوع‌های اسکن باز بی‌پلن.</p>'
+            . '<p>برای هر مشتری <strong>فقط یک قاعده</strong> اثر دارد: قاعده‌ی خود حساب بر قاعده‌ی گروهش مقدم است. قاعده‌ی تازه برای همان گروه یا حساب جای قبلی را می‌گیرد. تخفیف قاعده با کد تخفیف جمع نمی‌شود؛ مشتری بهترینِ یکی را می‌گیرد.</p>'
+            . '<p><strong>اعطای تکی:</strong> برای جبران یا هدیه؛ مشتری خبر می‌گیرد و در تراکنش‌هایش می‌بیند.</p>')
+            . self::box('قاعده‌های فعال', $rows !== '' ? '<table class="table"><thead><tr><th>برای</th><th>اعتبار ماهانه</th><th>سقف دارایی</th><th>تخفیف بسته</th><th>هزینه‌ی اسکن</th><th>نوع‌های باز</th><th>مدت</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">هنوز قاعده‌ای نیست: همه قیمت عادی می‌گیرند.</p>')
+            . self::box('قاعده‌ی تازه', $add) . self::box('افزودن اعتبار به یک حساب', $grant)
             . self::box('آخرین افزوده‌ها و بازگشت‌ها', $ledger !== '' ? '<table class="table"><thead><tr><th>تاریخ</th><th>حساب</th><th>نوع</th><th>مقدار</th><th>شرح</th></tr></thead><tbody>' . $ledger . '</tbody></table>' : '<p class="mcsa-muted">چیزی نیست.</p>');
+    }
+
+    /** Campaign codes, and the switches of gifts, invites and auto top-up. */
+    private static function codes(): string
+    {
+        $groups = Whmcs::groups();
+        $list = Db::rows(Db::table('mod_mcsec_codes')->whereIn('kind', \McSec\Codes::ADMIN_KINDS)->orderByDesc('id')->limit(100));
+        $rows = '';
+        foreach ($list as $c) {
+            $what = match ((string) $c->kind) {
+                'credit' => Text::fa((int) $c->value) . ' اعتبار' . ($c->bucket === 'monthly' ? ' (تا پایان ماه)' : ' (بی‌انقضا)'),
+                'discount' => Text::fa((int) $c->value) . '٪ تخفیف بسته',
+                default => Text::fa((int) $c->value) . '٪ اعتبار بیشتر',
+            };
+            $only = (int) $c->client_id > 0 ? 'حساب #' . (int) $c->client_id : ((int) $c->group_id > 0 ? 'گروه «' . ($groups[(int) $c->group_id] ?? '#' . (int) $c->group_id) . '»' : 'همه');
+            $ended = (int) $c->enabled !== 1 || ((int) $c->expires_at > 0 && (int) $c->expires_at <= Clock::now());
+            $rows .= '<tr' . ($ended ? ' class="mcsa-muted"' : '') . '><td><code dir="ltr">' . self::e($c->code) . '</code>' . ($c->note !== '' ? '<br><small>' . self::e($c->note) . '</small>' : '') . '</td><td>' . self::e($what) . '</td><td>' . self::e($only) . '</td>'
+                . '<td>' . self::e(Text::fa((int) $c->used) . ((int) $c->max_uses > 0 ? ' از ' . Text::fa((int) $c->max_uses) : '')) . '</td>'
+                . '<td>' . self::e((int) $c->enabled !== 1 ? 'خاموش' : ((int) $c->expires_at > 0 ? ($ended ? 'تمام شد: ' : 'تا ') . Text::date((int) $c->expires_at, false) : 'بی‌پایان')) . '</td>'
+                . '<td>' . ((int) $c->enabled === 1 && Auth::adminCan('settings') ? self::form('codes', 'disable_code', '<input type="hidden" name="code_id" value="' . (int) $c->id . '"><button class="btn btn-default btn-xs">خاموش</button>', 'این کد خاموش شود؟') : '') . '</td></tr>';
+        }
+        $opts = '<option value="0">همه</option>';
+        foreach ($groups as $gid => $gn) {
+            $opts .= '<option value="' . (int) $gid . '">' . self::e($gn) . '</option>';
+        }
+        $add = self::form('codes', 'save_code', '<div class="mcsa-row">'
+            . '<div class="mcsa-field"><label for="mcsa-cd-k">نوع</label><select class="form-control" id="mcsa-cd-k" name="cd_kind"><option value="bonus">اعتبار بیشتر روی بسته (٪) — درآمد کم نمی‌شود</option><option value="discount">تخفیف بسته (٪)</option><option value="credit">اعتبار رایگان (تعداد)</option></select></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-v">مقدار <span class="mcsa-i" title="برای اعتبار رایگان: تعداد اعتبار. برای تخفیف: درصد (۱ تا ۹۰). برای اعتبار بیشتر: درصد (۱ تا ۳۰۰).">ⓘ</span></label><input class="form-control" id="mcsa-cd-v" name="cd_value" dir="ltr" required></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-c">کد <span class="mcsa-i" title="حروف لاتین بزرگ، رقم و خط تیره، مثل YALDA1405. خالی: خودکار ساخته می‌شود.">ⓘ</span></label><input class="form-control" id="mcsa-cd-c" name="cd_code" dir="ltr" maxlength="24" placeholder="YALDA1405"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-b">اعتبار رایگان تا کی؟ <span class="mcsa-i" title="فقط برای نوع «اعتبار رایگان». پیش‌فرض: بی‌انقضا.">ⓘ</span></label><select class="form-control" id="mcsa-cd-b" name="cd_bucket"><option value="paid">بی‌انقضا</option><option value="monthly">تا پایان همان ماه شمسی</option></select></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-m">سقف تعداد استفاده <span class="mcsa-i" title="چند حساب می‌توانند از این کد استفاده کنند. ۰ یعنی بی‌سقف. هر حساب فقط یک بار. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-cd-m" name="cd_max" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-d">مهلت (روز) <span class="mcsa-i" title="پس از این چند روز کد دیگر پذیرفته نمی‌شود. ۰ یعنی بی‌پایان. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-cd-d" name="cd_days" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-g">فقط برای گروه</label><select class="form-control" id="mcsa-cd-g" name="cd_group">' . $opts . '</select></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-u">فقط برای حساب شماره‌ی</label><input class="form-control" id="mcsa-cd-u" name="cd_client" dir="ltr" placeholder="خالی = همه"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-n">یادداشت (فقط مدیر می‌بیند)</label><input class="form-control" id="mcsa-cd-n" name="cd_note" maxlength="160" placeholder="مثلاً کمپین یلدا"></div>'
+            . '</div><button class="btn btn-primary">ساختن کد</button>');
+        $now = Clock::now();
+        $stat = [
+            'هدیه‌های فروخته‌شده' => Db::table('mod_mcsec_codes')->where('kind', 'gift')->count(),
+            'هدیه‌ی منتظر استفاده' => Db::table('mod_mcsec_codes')->where('kind', 'gift')->where('used', 0)->count(),
+            'دعوت‌شده‌ها (۳۰ روز)' => Db::table('mod_mcsec_accounts')->where('invited_at', '>', $now - 30 * 86400)->count(),
+            'جایزه‌ی دعوت (۳۰ روز)' => (int) Db::table('mod_mcsec_ledger')->where('kind', 'invite')->where('created_at', '>', $now - 30 * 86400)->sum('delta'),
+            'اعتبار داده‌شده با کد (۳۰ روز)' => (int) Db::table('mod_mcsec_ledger')->where('kind', 'code')->where('created_at', '>', $now - 30 * 86400)->sum('delta'),
+            'حساب با شارژ خودکار' => Db::table('mod_mcsec_accounts')->where('auto_pack', '!=', '')->count(),
+        ];
+        $kpis = '<div class="mcsa-kpis">';
+        foreach ($stat as $l => $v) {
+            $kpis .= '<div><span>' . self::e($l) . '</span><strong>' . self::e(Text::fa((int) $v)) . '</strong></div>';
+        }
+        $kpis .= '</div>';
+        return self::guide('<p>مشتری فقط <strong>یک جا</strong> کد وارد می‌کند: کادر «کد دارید؟» در صفحه‌ی اعتبار. کد کمپین، کد هدیه و کد دعوت همه همان‌جا پذیرفته می‌شوند.</p>'
+            . '<ul><li><strong>اعتبار بیشتر روی بسته:</strong> همان قیمت، اعتبار بیشتر. پیشنهاد ما برای کمپین‌ها، چون درآمد کم نمی‌شود.</li><li><strong>تخفیف بسته:</strong> درصدی از قیمت بسته‌ی بعدی کم می‌شود.</li><li><strong>اعتبار رایگان:</strong> همان لحظه به کیف می‌آید.</li></ul>'
+            . '<p>هر کد برای هر حساب یک بار کار می‌کند. تخفیف‌ها جمع نمی‌شوند: بین قاعده‌ی حساب و کد، بهترینِ یکی. کد تخفیف <strong>پلن‌ها</strong> را در Promotions خود WHMCS بسازید و پورسانت نقدی را با Affiliates.</p>'
+            . '<p>کدهای هدیه و دعوت را سامانه خودش می‌سازد؛ این‌جا فقط روشن و خاموش می‌شوند.</p>')
+            . $kpis . self::box('کد تازه', $add)
+            . self::box('کدهای کمپین', $rows !== '' ? '<table class="table"><thead><tr><th>کد</th><th>اثر</th><th>برای</th><th>استفاده</th><th>مهلت</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">هنوز کدی نساخته‌اید.</p>')
+            . self::box('هدیه، دعوت و شارژ خودکار', self::form('codes', 'save_settings', self::fields('billing') . '<button class="btn btn-primary">ذخیره</button>'));
     }
 
     private static function assets(): string
@@ -300,7 +375,7 @@ final class Views
     {
         $out = self::guide('<p>هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است. روال پیشنهادی: «چه کسانی» = list با چند حساب آزمایشی ← آزمودن ← groups یا all.</p>');
         foreach (['general' => 'عمومی و دسترسی', 'scope' => 'محدوده‌ی اسکن: فهرست ممنوع و CDN', 'scans' => 'ظرفیت و اسکن', 'checks' => 'فهرست سیاه، پایش و اولویت آسیب‌پذیری‌ها',
-            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'credits' => 'اعتبار', 'system' => 'سامانه'] as $g => $l) {
+            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
             $out .= self::box($l, self::form('settings', 'save_settings', self::fields($g) . '<button class="btn btn-primary">ذخیره</button>')
                 . ($g === 'checks' ? self::intelStatus() : '')
                 . ($g === 'scope' ? '<hr>' . self::form('settings', 'scope_test', '<div class="mcsa-field"><label for="mcsa-scope-t">این دامنه یا IP اسکن می‌شود؟</label>'

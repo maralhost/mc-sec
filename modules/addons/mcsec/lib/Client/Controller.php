@@ -41,9 +41,11 @@ final class Controller
     public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
+    /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
+    private const BUYER_ACTIONS = ['buy_pack', 'code_redeem', 'auto_save'];
 
     public static function handle(): array
     {
@@ -205,7 +207,7 @@ final class Controller
         if (!Auth::mayAct($who)) {
             return ['flash' => 'err:شما با «ورود به‌جای مشتری» آمده‌اید و در این حالت فقط دیدن ممکن است.'];
         }
-        if (!in_array($a, self::VIEWER_ACTIONS, true) && $a !== 'buy_pack' && !$ctx['manage']) {
+        if (!in_array($a, self::VIEWER_ACTIONS, true) && !in_array($a, self::BUYER_ACTIONS, true) && !$ctx['manage']) {
             return ['flash' => 'err:کاربر شما فقط اجازه‌ی دیدن دارد. برای این کار، مالک حساب باید مجوز «مدیریت سرویس‌ها» را به شما بدهد.'];
         }
         $in = fn (string $k): string => html_entity_decode(trim((string) ($_POST[$k] ?? '')), ENT_QUOTES, 'UTF-8');
@@ -398,8 +400,23 @@ final class Controller
                 if (!$ctx['buy']) {
                     return ['flash' => 'err:خرید اعتبار فقط با مالک حساب یا کاربری که مجوز «فاکتورها» دارد ممکن است.'];
                 }
-                $r = Credits::buy($who, $in('pack'));
+                $r = Credits::buy($who, $in('pack'), ['gift' => ($_POST['gift'] ?? '') === '1']);
                 return $r['ok'] ? ['redirect' => 'viewinvoice.php?id=' . (int) $r['invoice_id']] : ['flash' => 'err:' . $r['error']];
+            case 'code_redeem':
+                if (!$ctx['buy'] && !$ctx['manage']) {
+                    return ['flash' => 'err:ثبت کد فقط با مالک حساب یا کاربری که مجوز «فاکتورها» یا «مدیریت سرویس‌ها» دارد ممکن است.'];
+                }
+                $r = \McSec\Codes::redeem($who, $in('code'));
+                return ['flash' => $r['ok'] ? 'ok:' . $r['message'] : 'err:' . $r['error']];
+            case 'auto_save':
+                if (!$ctx['buy']) {
+                    return ['flash' => 'err:شارژ خودکار را فقط مالک حساب یا کاربری که مجوز «فاکتورها» دارد می‌تواند تنظیم کند.'];
+                }
+                if ($in('pack') !== '' && ($_POST['agree'] ?? '') !== '1') {
+                    return ['flash' => 'err:برای روشن کردن شارژ خودکار، تیک موافقت را بزنید.'];
+                }
+                $r = Credits::setAuto($who, $in('pack'), $int('below'));
+                return ['flash' => $r['ok'] ? (!empty($r['off']) ? 'ok:شارژ خودکار خاموش شد.' : 'ok:شارژ خودکار روشن شد. وقتی اعتبار کم شود فاکتور می‌سازیم و خبرتان می‌کنیم.') : 'err:' . $r['error']];
         }
         return ['flash' => 'err:این کار شناخته نشد.'];
     }

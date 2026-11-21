@@ -61,7 +61,7 @@ final class Reports
         $id = Db::table('mod_mcsec_reports')->insertGetId(['client_id' => $clientId, 'kind' => $kind, 'scan_id' => $scanId, 'asset_id' => $assetId, 'title' => $title,
             'status' => 'queued', 'ai' => $ai ? 1 : 0, 'requested_by' => $userId, 'created_at' => Clock::now(),
             'period_from' => (int) ($scope['from'] ?? 0), 'period_to' => (int) ($scope['to'] ?? 0)]);
-        $cost = $ai ? max(0, Settings::int('ai_report_cost')) : 0;
+        $cost = $ai ? Rules::cost($clientId, max(0, Settings::int('ai_report_cost'))) : 0;
         if ($cost > 0) {
             $paid = Credits::spend($clientId, $cost, 'report:' . $id, 'گزارش هوش مصنوعی: ' . $title);
             if (!$paid['ok']) {
@@ -326,7 +326,7 @@ final class Reports
         if (!RateLimit::hit('aifix:' . $who['client_id'], 30, 86400)) {
             return ['ok' => false, 'error' => 'امروز درخواست زیادی برای راهکار هوش مصنوعی فرستاده‌اید.'];
         }
-        $cost = max(0, Settings::int('ai_fix_cost'));
+        $cost = Rules::cost($who['client_id'], max(0, Settings::int('ai_fix_cost')));
         $ref = 'aifix:' . $f->id . ':' . Clock::today();
         if ($cost > 0) {
             $paid = Credits::spend($who['client_id'], $cost, $ref, 'راهکار هوش مصنوعی: ' . $f->title);

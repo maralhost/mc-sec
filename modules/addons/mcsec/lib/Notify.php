@@ -30,6 +30,7 @@ final class Notify
         'site_down' => ['از دسترس خارج شدن سایت', ['email', 'telegram', 'bale', 'webhook']],
         'site_up' => ['برگشتن سایت', ['email', 'telegram', 'bale', 'webhook']],
         'ssl_expiring' => ['نزدیک شدن انقضای گواهی SSL', ['email', 'telegram', 'bale', 'webhook']],
+        'billing' => ['هدیه، دعوت و شارژ خودکار', ['email']],
     ];
     /** Events that existed before 0.2.0: preferences saved earlier know only these; newer ones get their defaults. */
     private const LEGACY_EVENTS = ['new_findings', 'new_exposure', 'scan_completed', 'scan_failed', 'findings_fixed', 'asset_verified', 'asset_lapsed', 'schedule_paused', 'credits_low', 'credits_added', 'report_ready', 'digest'];
@@ -221,6 +222,9 @@ final class Notify
                 return ['title' => $days < 0 ? 'گواهی SSL ' . $asset . ' منقضی شده است' : 'گواهی SSL ' . $asset . ' ' . ($days === 0 ? 'امروز' : Text::fa($days) . ' روز دیگر') . ' منقضی می‌شود',
                     'lines' => ['تاریخ انقضا: ' . Text::ymd((string) ($d['end'] ?? '')), $days < 0 ? 'مرورگرها اکنون برای بازدیدکنندگان هشدار امنیتی نشان می‌دهند.' : 'اگر تمدید خودکار دارید، بررسی کنید که کار می‌کند؛ وگرنه همین حالا تمدید کنید.'],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => $days < 0 ? 'err' : 'warn'];
+            case 'billing':
+                // text and link are written by this module (Credits, Codes), never by a customer
+                return ['title' => (string) ($d['title'] ?? ''), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => (string) ($d['link'] ?? 'index.php?m=mcsec&p=credits'), 'tone' => (string) ($d['tone'] ?? 'info')];
             case 'digest':
                 return ['title' => (string) ($d['title'] ?? 'گزارش دوره‌ای امنیت'), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
         }
