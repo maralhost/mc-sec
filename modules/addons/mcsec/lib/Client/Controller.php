@@ -65,6 +65,9 @@ final class Controller
         if (($_GET['p'] ?? '') === 'shot' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
             return self::shot($who['client_id'], (int) Text::toAscii((string) ($_GET['id'] ?? '0')));
         }
+        if (($_GET['p'] ?? '') === 'report' && ($_GET['pdf'] ?? '') === '1' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+            return self::reportPdf($who['client_id'], (int) Text::toAscii((string) ($_GET['id'] ?? '0')));
+        }
         Accounts::ensure($who['client_id']);
         $ctx = ['who' => $who, 'manage' => Auth::canManage($who) && Auth::mayAct($who), 'buy' => Auth::canBuy($who) && Auth::mayAct($who)];
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && ($_GET['progress'] ?? '') === '1') {
@@ -73,6 +76,9 @@ final class Controller
         $flash = '';
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             $r = self::post($ctx, (string) ($_POST['a'] ?? ''));
+            if (array_key_exists('file', $r)) {
+                return self::file($r['file']);
+            }
             if ($pjax && ($_POST['quiet'] ?? '') === '1' && !isset($r['redirect'])) {
                 [$kind, $msg] = array_pad(explode(':', (string) ($r['flash'] ?? ''), 2), 2, '');
                 return self::json(['ok' => $kind === 'ok', 'flash' => $msg, 'unread' => Notify::unread($who['client_id'])]);
@@ -111,30 +117,47 @@ final class Controller
             'vars' => ['mcsec_html' => $html]];
     }
 
-    /**
-     * The stored screenshot of one of this account's assets, as an image (the only route that is not a page).
-     * Bytes are a picture of a customer's site: type from our own check of the bytes, nosniff, private cache.
-     */
+    /** The stored screenshot of one of this account's assets, as an image. */
     private static function shot(int $clientId, int $assetId): array
     {
-        $img = \McSec\Shots::get($clientId, $assetId);
+        return self::file(\McSec\Shots::get($clientId, $assetId), 86400);
+    }
+
+    /**
+     * Sends bytes instead of a page (a picture or a PDF): the only way out that is not HTML. The type is one this
+     * module decided from the bytes or made itself, never one a scanned site supplied; nosniff; private cache.
+     * @param array{mime:string,bytes:string,name?:string}|null $file null = not found
+     */
+    private static function file(?array $file, int $cache = 0): array
+    {
         if (self::$testMode) {
-            return ['raw' => $img];
+            return ['raw' => $file];
         }
-        if ($img === null) {
+        if ($file === null) {
             http_response_code(404);
             exit;
         }
         while (ob_get_level() > 0) {
             ob_end_clean();
         }
-        header('Content-Type: ' . $img['mime']);
-        header('Content-Length: ' . strlen($img['bytes']));
+        header('Content-Type: ' . $file['mime']);
+        header('Content-Length: ' . strlen($file['bytes']));
         header('X-Content-Type-Options: nosniff');
         header('Content-Security-Policy: default-src \'none\'');
-        header('Cache-Control: private, max-age=86400');
-        echo $img['bytes'];
+        header('Cache-Control: private, ' . ($cache > 0 ? 'max-age=' . $cache : 'no-store'));
+        if (!empty($file['name'])) {
+            header('Content-Disposition: attachment; filename="' . preg_replace('~[^A-Za-z0-9._-]~', '', (string) $file['name']) . '"');
+        }
+        echo $file['bytes'];
         exit;
+    }
+
+    /** A ready report of this account as a PDF made here (Pdf); null when it is not this account's or no PDF can be made. */
+    private static function reportPdf(int $clientId, int $id): array
+    {
+        $r = \McSec\Reports::get($clientId, $id);
+        $bytes = $r && $r->status === 'ready' ? \McSec\Pdf::render(\McSec\Reports::data($r)) : '';
+        return self::file($bytes !== '' ? ['mime' => 'application/pdf', 'bytes' => $bytes, 'name' => 'mcsec-report-' . $id . '.pdf'] : null);
     }
 
     private static function json(array $out): array
@@ -230,6 +253,22 @@ final class Controller
             case 'asset_save':
                 $r = Assets::setLabel($who, $int('asset'), $in('label'), $in('tags'));
                 return ['flash' => $r['ok'] ? 'ok:ذخیره شد.' : 'err:' . $r['error']];
+            case 'oasm_report':
+                // OASM's own technical PDF (English) for one asset: made and fetched now, in this explicit POST
+                $asset = Assets::get($cid, $int('asset'));
+                if (!$asset || $asset->status !== 'verified' || (string) $asset->oasm_target === '') {
+                    return ['flash' => 'err:برای این دارایی هنوز اسکنی روی OASM انجام نشده است؛ اول «کشف سطح حمله» یا «اسکن آسیب‌پذیری» بگیرید.'];
+                }
+                if (!\McSec\RateLimit::hit('oasmpdf:' . $cid, 6, 3600)) {
+                    return ['flash' => 'err:در یک ساعت اخیر چند بار گزارش فنی گرفته‌اید. کمی بعد دوباره امتحان کنید.'];
+                }
+                $pdf = (new \McSec\Engines\Oasm())->report($asset);
+                if (!$pdf['ok']) {
+                    $ref = Trace::error('engine', 'oasm.report', (string) $pdf['error'], ['asset' => (int) $asset->id], ['client_id' => $cid]);
+                    return ['flash' => 'err:گزارش فنی از موتور اسکن گرفته نشد. کمی بعد دوباره امتحان کنید؛ اگر تکرار شد این کد را به پشتیبانی بدهید: ' . $ref];
+                }
+                Audit::log($cid, 'oasm_report', (string) $asset->value, ['bytes' => strlen($pdf['bytes'])], $who['user_id']);
+                return ['file' => ['mime' => 'application/pdf', 'bytes' => $pdf['bytes'], 'name' => 'oasm-report-' . (int) $asset->id . '.pdf']];
             case 'view_mode':
                 \McSec\Kv::set('view:' . $cid . ':' . (int) $who['user_id'], $in('view') === 'advanced' ? 'advanced' : 'simple');
                 return ['redirect' => 'index.php?m=mcsec'];

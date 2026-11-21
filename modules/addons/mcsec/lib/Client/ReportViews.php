@@ -73,7 +73,8 @@ final class ReportViews
             return Ui::alert('danger', self::e($r->error), 'alert');
         }
         $d = Reports::data($r);
-        Views::$pageActions = '<button type="button" class="btn btn-default" data-mcs-print hidden>' . Ui::ico('printer') . 'چاپ یا PDF</button>';
+        Views::$pageActions = (\McSec\Pdf::available() ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=report&amp;id=' . (int) $r->id . '&amp;pdf=1" download>' . Ui::ico('file') . 'دانلود PDF</a> ' : '')
+            . '<button type="button" class="btn btn-default" data-mcs-print hidden>' . Ui::ico('printer') . (\McSec\Pdf::available() ? 'چاپ' : 'چاپ یا PDF') . '</button>';
         $out = $r->error !== '' ? Ui::alert('warning', self::e($r->error), 'alert') : '';
         $out .= '<article class="mcs-report">';
         $out .= '<header class="mcs-report-head"><div><p class="mcs-muted mcs-small">' . self::e(Reports::KINDS[$d['kind']] ?? '') . ' — ' . self::e($d['client'] ?? '') . '</p><h3 dir="auto">' . self::e($d['title'] ?? '') . '</h3>'

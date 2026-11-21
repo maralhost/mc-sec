@@ -13,7 +13,7 @@ if (!defined('WHMCS')) {
 }
 
 if (!defined('MCSEC_VERSION')) {
-    define('MCSEC_VERSION', '0.5.0');
+    define('MCSEC_VERSION', '0.6.0');
     define('MCSEC_DIR', __DIR__);
     define('MCSEC_MODULE', 'mcsec');
 

@@ -45,6 +45,7 @@ function quiet(f,u,d,bs){var x=new URL(u.href);x.searchParams.set('pjax','1');d.
 root.addEventListener('submit',function(e){var f=e.target;if(e.defaultPrevented||!f||f.tagName!=='FORM'||(f.getAttribute('method')||'').toLowerCase()!=='post')return;
  var s=e.submitter;var ask=(s&&s.getAttribute('data-mcs-confirm'))||f.getAttribute('data-mcs-confirm');
  if(ask&&!window.confirm(ask)){e.preventDefault();return;}
+ if(f.classList.contains('mcs-native'))return; // the answer is a file to download, not a view
  var u=inSection(f.getAttribute('action')||location.href);if(!u)return;e.preventDefault();
  var d=new FormData(f);if(s&&s.name)d.append(s.name,s.value);var bs=qa('button',f);bs.forEach(function(b){b.disabled=true;});
  if(f.hasAttribute('data-mcs-quiet')){quiet(f,u,d,bs);return;}

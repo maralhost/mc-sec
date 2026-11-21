@@ -582,6 +582,41 @@ final class Oasm implements Engine
         ];
     }
 
+    /**
+     * OASM's own vulnerability report (PDF, English) for one asset's target: generated, listed, downloaded and then
+     * removed from OASM's storage (checked live: POST /api/reports/generate/vulnerability answers when the file exists).
+     * Called only from an explicit customer POST. @return array{ok:bool,bytes:string,error:string}
+     */
+    public function report(object $asset): array
+    {
+        $this->cid = (int) $asset->client_id;
+        $fail = fn (string $why) => ['ok' => false, 'bytes' => '', 'error' => $why];
+        $ws = (string) (Accounts::get((int) $asset->client_id)->oasm_workspace ?? '');
+        $tid = (string) $asset->oasm_target;
+        if ($ws === '' || $tid === '' || Http::circuitOpen('oasm')) {
+            return $fail('no workspace or target, or OASM unavailable');
+        }
+        $g = $this->call('POST', '/api/reports/generate/vulnerability', ['targetIds' => [$tid], 'minSeverity' => 'INFO'], $ws, 60);
+        if (!$g['ok']) {
+            return $fail('generate: HTTP ' . $g['status']);
+        }
+        $l = $this->call('GET', '/api/reports?type=VULNERABILITY&limit=1', null, $ws, 20);
+        $row = $l['json']['data'][0] ?? null;
+        $path = is_array($row) ? (string) ($row['downloadUrl'] ?? '') : '';
+        // only OASM's own storage route, relative: the link is signed and is neither kept nor logged
+        if (!preg_match('~^/api/storage/reports/[A-Za-z0-9._-]+\.pdf\?[\x21-\x7E]+$~', $path)) {
+            return $fail('list: HTTP ' . $l['status'] . ', no report link');
+        }
+        $d = Http::request('GET', $this->base() . $path, ['Accept' => 'application/pdf'], null, ['timeout' => 60, 'connect' => 6, 'max_bytes' => 20 * 1024 * 1024, 'verify' => Settings::bool('oasm_verify_tls')]);
+        if ((string) ($row['id'] ?? '') !== '') {
+            $this->call('DELETE', '/api/reports/' . rawurlencode((string) $row['id']), null, $ws, 15);
+        }
+        if ($d['status'] !== 200 || !str_starts_with((string) $d['body'], '%PDF-')) {
+            return $fail('download: HTTP ' . $d['status']);
+        }
+        return ['ok' => true, 'bytes' => (string) $d['body'], 'error' => ''];
+    }
+
     public function cancel(object $scan, object $asset): bool
     {
         $this->cid = (int) $asset->client_id;

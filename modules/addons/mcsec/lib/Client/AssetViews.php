@@ -145,6 +145,11 @@ final class AssetViews
                 'برچسب‌ها' => trim((string) $a->tags) !== '' ? implode(' ', array_map(fn ($t) => Ui::chip($t), explode(',', (string) $a->tags))) : '',
             ]), 'یافته‌های باز', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings&amp;asset=' . (int) $a->id . '">همه</a>') . '</div>';
 
+        if ($ctx['manage'] && $a->status === 'verified' && (string) $a->oasm_target !== '') {
+            $out .= Ui::card('<p>گزارش فارسی هر اسکن با راه رفع در بخش «گزارش‌ها» است. این‌جا گزارش خام موتور اسکن را می‌گیرید: انگلیسی، با همه‌ی یافته‌ها و جزئیات فنی این دارایی؛ برای تیم فنی یا ممیز.</p>'
+                . Ui::form($ctx, 'asset', 'oasm_report', '<input type="hidden" name="asset" value="' . (int) $a->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('file') . 'دانلود گزارش فنی (PDF انگلیسی)</button>'
+                    . '<span class="mcs-help">ساختنش چند ثانیه طول می‌کشد.</span>', '', 'mcs-inline mcs-native', false, '&amp;id=' . (int) $a->id), 'گزارش فنی موتور اسکن', 'file');
+        }
         // top open findings
         $rank = "CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
         $top = Db::rows(Db::table('mod_mcsec_findings')->where('asset_id', $a->id)->where('status', 'open')->orderByDesc('priority')->orderByRaw($rank . ' DESC')->orderByDesc('last_seen_at')->limit(8));
