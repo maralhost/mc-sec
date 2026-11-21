@@ -31,6 +31,8 @@ final class Notify
         'site_up' => ['برگشتن سایت', ['email', 'telegram', 'bale', 'webhook']],
         'ssl_expiring' => ['نزدیک شدن انقضای گواهی SSL', ['email', 'telegram', 'bale', 'webhook']],
         'billing' => ['هدیه، دعوت و شارژ خودکار', ['email']],
+        'domain_expiring' => ['نزدیک شدن انقضای دامنه', ['email', 'telegram', 'bale']],
+        'threat_alert' => ['تهدید تازه برای فناوری‌های شما', ['email', 'telegram', 'bale', 'webhook']],
     ];
     /** Events that existed before 0.2.0: preferences saved earlier know only these; newer ones get their defaults. */
     private const LEGACY_EVENTS = ['new_findings', 'new_exposure', 'scan_completed', 'scan_failed', 'findings_fixed', 'asset_verified', 'asset_lapsed', 'schedule_paused', 'credits_low', 'credits_added', 'report_ready', 'digest'];
@@ -222,6 +224,21 @@ final class Notify
                 return ['title' => $days < 0 ? 'گواهی SSL ' . $asset . ' منقضی شده است' : 'گواهی SSL ' . $asset . ' ' . ($days === 0 ? 'امروز' : Text::fa($days) . ' روز دیگر') . ' منقضی می‌شود',
                     'lines' => ['تاریخ انقضا: ' . Text::ymd((string) ($d['end'] ?? '')), $days < 0 ? 'مرورگرها اکنون برای بازدیدکنندگان هشدار امنیتی نشان می‌دهند.' : 'اگر تمدید خودکار دارید، بررسی کنید که کار می‌کند؛ وگرنه همین حالا تمدید کنید.'],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => $days < 0 ? 'err' : 'warn'];
+            case 'domain_expiring':
+                $days = (int) ($d['days'] ?? 0);
+                $dom = (string) ($d['domain'] ?? '');
+                return ['title' => 'دامنه‌ی ' . $dom . ' ' . ($days <= 0 ? 'امروز' : Text::fa($days) . ' روز دیگر') . ' منقضی می‌شود',
+                    'lines' => ['تاریخ انقضا: ' . Text::ymd((string) ($d['end'] ?? '')), !empty($d['auto']) ? 'تمدید خودکار روشن است؛ مطمئن شوید فاکتور تمدید پرداخت می‌شود.' : 'تمدید خودکار این دامنه خاموش است.',
+                        'دامنه‌ی منقضی‌شده سایت و ایمیل را از کار می‌اندازد و ممکن است دیگری آن را ثبت کند.'],
+                    'link' => 'clientarea.php?action=domains', 'tone' => $days <= 7 ? 'err' : 'warn'];
+            case 'threat_alert':
+                // product and CVE come from CISA's catalogue; hosts are this account's own assets
+                $hosts = array_slice(array_map('strval', (array) ($d['assets'] ?? [])), 0, 5);
+                return ['title' => 'آسیب‌پذیری تازه‌ی ' . (string) ($d['product'] ?? '') . ' در حمله‌های واقعی استفاده می‌شود',
+                    'lines' => array_values(array_filter([(string) ($d['cve'] ?? '') . ((string) ($d['name'] ?? '') !== '' ? ' — ' . (string) $d['name'] : ''),
+                        'این فناوری روی ' . implode('، ', $hosts) . ' دیده شده است.',
+                        'دیده شدن فناوری یعنی نسخه‌ی شما حتماً آسیب‌پذیر نیست. پیشنهاد ما: نرم‌افزار را به‌روز کنید و با «اسکن آسیب‌پذیری» مطمئن شوید.'], 'strlen')),
+                    'link' => 'index.php?m=mcsec&p=scans#new', 'tone' => 'warn'];
             case 'billing':
                 // text and link are written by this module (Credits, Codes), never by a customer
                 return ['title' => (string) ($d['title'] ?? ''), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => (string) ($d['link'] ?? 'index.php?m=mcsec&p=credits'), 'tone' => (string) ($d['tone'] ?? 'info')];
@@ -338,6 +355,7 @@ final class Notify
     public static function linkBots(): int
     {
         $n = 0;
+        $asked = 0;
         foreach (['telegram', 'bale'] as $which) {
             if (Settings::secret($which === 'telegram' ? 'telegram_token' : 'bale_token') === '') {
                 continue;
@@ -351,6 +369,14 @@ final class Notify
                     continue;
                 }
                 if (!preg_match('~^(?:/start\s+)?([2-9A-HJ-NP-Z]{8})\s*$~', strtoupper(trim(Text::toAscii((string) $m['text']))), $mm)) {
+                    // a question in a chat that is already linked to an account: the assistant answers (never acts) when that is switched on
+                    $linked = Settings::bool('assistant_bots') ? Db::table('mod_mcsec_accounts')->where($which === 'telegram' ? 'tg_chat' : 'bale_chat', (string) $m['chat']['id'])->first() : null;
+                    if ($linked) {
+                        $asked++;
+                        $answer = $asked <= 3 ? Assistant::bot((int) $linked->client_id, (string) $m['text'], $which . ':' . (int) ($u['update_id'] ?? 0)) : 'الان چند پرسش با هم رسیده است. چند دقیقه‌ی دیگر دوباره بپرسید.';
+                        self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => $answer]);
+                        continue;
+                    }
                     self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'برای اتصال، کد ۸ نویسه‌ای را از صفحه‌ی «اعلان‌ها» در بخش امنیت سایبری حساب کاربری‌تان بفرستید.']);
                     continue;
                 }

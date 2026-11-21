@@ -12,7 +12,7 @@ function demo_data(): void
     $tz = new DateTimeZone('Asia/Tehran');
     Clock::$fixed = (new DateTimeImmutable('2026-11-11 10:00', $tz))->getTimestamp();
     foreach (['enabled' => '1', 'access_mode' => 'all', 'max_assets_free' => '20', 'ai_enabled' => '1', 'ai_model' => 'gpt-4.1-mini', 'allow_private_ips' => '1',
-        'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'assistant_enabled' => '1', 'assistant_all' => '1', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
+        'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'assistant_enabled' => '1', 'assistant_all' => '1', 'export_csv' => '1', 'host_mute' => '1', 'ai_opinion' => '1', 'service_box' => '1', 'domain_watch' => '1', 'threat_alerts' => '1', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
         setting($k, $v);
     }
     \McSec\Rules::save(['scope' => 'group', 'target' => 2, 'monthly' => 30, 'max_assets' => 10]);
@@ -21,6 +21,10 @@ function demo_data(): void
     \McSec\Ai::$mock = function (array $body) {
         if (($a = demo_assistant($body)) !== null) {
             return $a;
+        }
+        if (str_contains((string) ($body['messages'][1]['content'] ?? ''), 'second opinion')) {
+            return ['ok' => true, 'text' => json_encode(['verdict' => 'likely_real', 'why' => 'پاسخ سرور همان الگویی را دارد که این آسیب‌پذیری می‌سازد و نسخه‌ی دیده‌شده در بازه‌ی آسیب‌پذیر است.',
+                'check' => ['نسخه‌ی افزونه را در پیشخوان وردپرس ببینید.', 'پس از به‌روزرسانی، «رفع کردم، دوباره بسنج» را بزنید.']], JSON_UNESCAPED_UNICODE)];
         }
         $user = (string) ($body['messages'][1]['content'] ?? '');
         preg_match_all('~"id":(\d+)~', $user, $m);

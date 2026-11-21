@@ -364,6 +364,70 @@ final class Reports
         return ['ok' => true, 'data' => $clean, 'cached' => false];
     }
 
+    public const VERDICTS = ['likely_real' => ['به احتمال زیاد واقعی است', 'err'], 'likely_false' => ['احتمالاً مثبت کاذب است', 'ok'], 'unclear' => ['باید دستی بررسی شود', 'warn']];
+
+    /**
+     * «نظر دوم» (switch ai_opinion): the model reads one finding's evidence and says whether it looks real, and how to
+     * make sure. An opinion only: severity, score, priority and status never change because of it. The asset's name is
+     * replaced before the text leaves; the answer is kept 30 days for this finding. @return array{ok:bool,error?:string}
+     */
+    public static function opinion(array $who, int $findingId): array
+    {
+        $cid = (int) $who['client_id'];
+        $f = Findings::get($cid, $findingId);
+        if (!$f) {
+            return ['ok' => false, 'error' => 'این یافته پیدا نشد.'];
+        }
+        if (!Settings::bool('ai_opinion') || !Ai::ready()) {
+            return ['ok' => false, 'error' => 'نظر دوم هوش مصنوعی فعلاً در دسترس نیست.'];
+        }
+        if (self::cachedOpinion($f)) {
+            return ['ok' => true];
+        }
+        if (!RateLimit::hit('opinion:' . $cid, 30, 86400)) {
+            return ['ok' => false, 'error' => 'امروز نظر دوم زیادی خواسته‌اید. فردا دوباره امتحان کنید.'];
+        }
+        $cost = Rules::cost($cid, max(0, Settings::int('ai_opinion_cost')));
+        $ref = 'opinion:' . $f->id . ':' . Clock::today();
+        if ($cost > 0) {
+            $paid = Credits::spend($cid, $cost, $ref, 'نظر دوم هوش مصنوعی: ' . $f->title);
+            if (!$paid['ok']) {
+                return ['ok' => false, 'error' => $paid['error']];
+            }
+        }
+        $asset = Db::table('mod_mcsec_assets')->where('id', (int) $f->asset_id)->where('client_id', $cid)->first();
+        $anon = fn (string $s, int $max) => Ai::mask(mb_substr($asset && (string) $asset->value !== '' ? str_ireplace((string) $asset->value, 'target.example', $s) : $s, 0, $max));
+        $data = ['title' => $anon((string) $f->title, 255), 'severity' => (string) $f->severity, 'source' => (string) $f->source_key, 'cve' => (string) $f->cve, 'where' => $anon((string) $f->location, 200),
+            'description' => $anon((string) $f->description, 700), 'evidence' => $anon((string) $f->evidence, 1500), 'technologies' => self::techOf((int) $f->asset_id)];
+        $user = "Give a second opinion on this scanner finding: is it likely a real issue or a false positive? Judge only from the evidence; if the evidence is thin, say unclear.\n<scan_data>\n" . Db::json($data) . "\n</scan_data>\n"
+            . 'Return JSON: {"verdict":"likely_real|likely_false|unclear","why":"2-3 sentences","check":["a step the customer can do to make sure"]}';
+        @set_time_limit(120);
+        Ai::$timeout = 60;
+        try {
+            $r = Ai::chat(Ai::SYSTEM, $user, true, 900);
+        } finally {
+            Ai::$timeout = 0;
+        }
+        $j = $r['ok'] && is_array($r['json']) ? $r['json'] : null;
+        if (!$j || !isset(self::VERDICTS[(string) ($j['verdict'] ?? '')])) {
+            if ($cost > 0) {
+                Credits::refund($cid, $ref, 'بازگشت اعتبار نظر دوم');
+            }
+            return ['ok' => false, 'error' => 'پاسخ هوش مصنوعی دریافت نشد' . ($cost > 0 ? ' و اعتبارش برگشت' : '') . '؛ کمی بعد دوباره امتحان کنید.'];
+        }
+        $s = fn ($v, $m) => mb_substr(is_scalar($v) ? trim(strip_tags((string) $v)) : '', 0, $m);
+        Kv::setJson('opinion:' . (int) $f->id, ['verdict' => (string) $j['verdict'], 'why' => $s($j['why'] ?? '', 700),
+            'check' => array_values(array_filter(array_map(fn ($x) => $s($x, 300), array_slice((array) ($j['check'] ?? []), 0, 5)), 'strlen')), 'at' => Clock::now()], 30 * 86400);
+        Audit::log($cid, 'ai_opinion', (string) $f->title, ['id' => (int) $f->id, 'verdict' => (string) $j['verdict'], 'credits' => $cost], (int) $who['user_id']);
+        return ['ok' => true];
+    }
+
+    public static function cachedOpinion(object $f): ?array
+    {
+        $d = Kv::json('opinion:' . (int) $f->id);
+        return isset(self::VERDICTS[(string) ($d['verdict'] ?? '')]) ? $d : null;
+    }
+
     public static function cachedFix(object $f): ?array
     {
         $key = 'fix:' . sha1(strtolower((string) $f->source_key) . '|' . mb_strtolower((string) $f->title) . '|fa');

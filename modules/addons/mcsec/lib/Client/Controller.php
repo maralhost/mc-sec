@@ -41,7 +41,7 @@ final class Controller
     public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'assistant', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
@@ -69,6 +69,12 @@ final class Controller
         }
         if (($_GET['p'] ?? '') === 'report' && ($_GET['pdf'] ?? '') === '1' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
             return self::reportPdf($who['client_id'], (int) Text::toAscii((string) ($_GET['id'] ?? '0')));
+        }
+        if (($_GET['p'] ?? '') === 'findings' && ($_GET['csv'] ?? '') === '1' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && Settings::bool('export_csv')) {
+            // the same list the page shows, as a file; reading only
+            $f = ['status' => (string) ($_GET['status'] ?? 'open'), 'severity' => (string) ($_GET['severity'] ?? ''), 'asset' => (int) Text::toAscii((string) ($_GET['asset'] ?? '0')),
+                'scan' => (int) Text::toAscii((string) ($_GET['scan'] ?? '0')), 'new' => (int) Text::toAscii((string) ($_GET['new'] ?? '0')), 'q' => mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80)];
+            return self::file(['mime' => 'text/csv; charset=utf-8', 'bytes' => Findings::csv($who['client_id'], $f), 'name' => 'mcsec-findings-' . date('Ymd', Clock::now()) . '.csv']);
         }
         Accounts::ensure($who['client_id']);
         $ctx = ['who' => $who, 'manage' => Auth::canManage($who) && Auth::mayAct($who), 'buy' => Auth::canBuy($who) && Auth::mayAct($who)];
@@ -334,6 +340,17 @@ final class Controller
             case 'finding_aifix':
                 $r = Reports::aiFix($who, $int('finding'));
                 return ['flash' => $r['ok'] ? 'ok:راهکار هوش مصنوعی آماده شد.' : 'err:' . $r['error']];
+            case 'finding_opinion':
+                $r = Reports::opinion($who, $int('finding'));
+                return ['flash' => $r['ok'] ? 'ok:نظر دوم هوش مصنوعی آماده شد.' : 'err:' . $r['error']];
+            case 'host_mute':
+                $on = ($_POST['on'] ?? '') === '1';
+                $r = \McSec\Surface::mute($who, $int('id'), $on);
+                if (!$r['ok']) {
+                    return ['flash' => 'err:' . $r['error']];
+                }
+                return ['flash' => 'ok:' . ($on ? 'این میزبان کنار گذاشته شد؛ دیگر یافته‌ای برایش ثبت نمی‌شود' . (!empty($r['engine']) ? ' و در موتور اسکن هم خاموش شد.' : '. خاموش کردنش در موتور اسکن الان انجام نشد؛ با اسکن بعدی دوباره تلاش می‌کنیم.')
+                    : 'این میزبان دوباره بررسی می‌شود.')];
             case 'report_create':
                 $kind = $in('kind') === 'asset' ? 'asset' : 'account';
                 $assetId = $int('asset');

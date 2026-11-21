@@ -130,6 +130,22 @@ final class Whmcs
         return array_values(array_unique(array_filter($out)));
     }
 
+    /**
+     * Active domains registered here that expire within $days, for every account, in one read.
+     * @return object[] {userid, domain, expirydate, donotrenew}
+     */
+    public static function expiringDomains(int $days): array
+    {
+        if (!Db::hasColumn('tbldomains', 'expirydate')) {
+            return [];
+        }
+        $cols = ['userid', 'domain', 'expirydate'];
+        if (Db::hasColumn('tbldomains', 'donotrenew')) {
+            $cols[] = 'donotrenew';
+        }
+        return Db::rows(Db::table('tbldomains')->where('status', 'Active')->where('expirydate', '>=', Clock::today())->where('expirydate', '<=', Clock::today($days))->orderBy('expirydate')->limit(3000)->select($cols));
+    }
+
     /** Dedicated and assigned IPs of this account's active services. @return string[] */
     public static function ownedIps(int $clientId): array
     {

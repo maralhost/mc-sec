@@ -53,6 +53,59 @@ final class Surface
         return $out;
     }
 
+    public const MUTE_NOTE = 'میزبان کنار گذاشته شد (مال این حساب نیست)';
+
+    /** Hosts of an asset the customer set aside, lowercased. @return string[] */
+    public static function muted(int $assetId): array
+    {
+        $v = Db::table('mod_mcsec_surface')->where('asset_id', $assetId)->where('kind', 'host')->where('muted', '>', 0)->pluck('value');
+        return array_map(fn ($x) => strtolower((string) $x), is_array($v) ? $v : $v->all());
+    }
+
+    /**
+     * Sets a discovered host aside, or brings it back (switch host_mute). The host is switched off in OASM so it is
+     * no longer scanned (this is the explicit POST that may call the engine); here its findings stop being recorded
+     * and its open ones are marked «ریسک پذیرفته» with a fixed note. The asset's own name cannot be set aside.
+     * @return array{ok:bool,error?:string,engine?:bool}
+     */
+    public static function mute(array $who, int $id, bool $on): array
+    {
+        $cid = (int) $who['client_id'];
+        $row = $id > 0 ? Db::table('mod_mcsec_surface')->where('id', $id)->where('client_id', $cid)->where('kind', 'host')->first() : null;
+        $asset = $row ? Assets::get($cid, (int) $row->asset_id) : null;
+        if (!Settings::bool('host_mute') || !$row || !$asset) {
+            return ['ok' => false, 'error' => 'این میزبان پیدا نشد.'];
+        }
+        $host = strtolower((string) $row->value);
+        if ($host === strtolower((string) $asset->value)) {
+            return ['ok' => false, 'error' => 'این خود دارایی است. اگر نمی‌خواهید بررسی شود، دارایی را حذف کنید.'];
+        }
+        $engine = true;
+        if ((string) $asset->oasm_target !== '') {
+            try {
+                $engine = (new Engines\Oasm())->toggleHost($asset, $host, !$on);
+            } catch (\Throwable $e) {
+                Trace::warn('engine', 'oasm.toggle', $e->getMessage(), ['asset' => (int) $asset->id], ['client_id' => $cid]);
+                $engine = false;
+            }
+        }
+        Db::table('mod_mcsec_surface')->where('id', (int) $row->id)->update(['muted' => $on ? ($engine ? 1 : 2) : 0]);
+        $q = Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('asset_id', (int) $asset->id)->where('status', $on ? 'open' : 'accepted');
+        if (!$on) {
+            $q->where('status_note', self::MUTE_NOTE);
+        }
+        foreach (Db::rows($q->select(['id', 'location'])->limit(2000)) as $f) {
+            if (Findings::hostOf((string) $f->location) === $host) {
+                Db::table('mod_mcsec_findings')->where('id', (int) $f->id)->where('client_id', $cid)->update($on
+                    ? ['status' => 'accepted', 'status_note' => self::MUTE_NOTE, 'status_by' => (int) $who['user_id'], 'status_at' => Clock::now()]
+                    : ['status' => 'open', 'status_note' => '', 'status_by' => (int) $who['user_id'], 'status_at' => Clock::now()]);
+            }
+        }
+        Assets::refreshStats((int) $asset->id);
+        Audit::log($cid, 'host_mute', $host, ['on' => $on, 'asset' => (int) $asset->id, 'engine' => $engine], (int) $who['user_id']);
+        return ['ok' => true, 'engine' => $engine];
+    }
+
     /** @return array<string,object[]> current (not gone) items of an asset by kind */
     public static function forAsset(int $assetId, int $limit = 500): array
     {

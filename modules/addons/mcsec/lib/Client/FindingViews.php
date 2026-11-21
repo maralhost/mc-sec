@@ -80,8 +80,9 @@ final class FindingViews
                 . Ui::td('وضعیت', self::statusChip($r))
                 . Ui::td('دیده‌شده', self::e(Views::when((int) $r->last_seen_at))) . '</tr>';
         }
+        $csv = Settings::bool('export_csv') ? ' · <a href="' . self::e($keep(['page' => '', 'csv' => '1'])) . '" download>' . Ui::ico('file') . 'خروجی CSV</a>' : '';
         return $out . Ui::card(Ui::table(['شدت', 'یافته', 'محل', 'وضعیت', 'آخرین بار'], $rows) . Ui::pager($keep(['page' => '']), $res['page'], $res['pages']),
-            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . self::e(Text::fa($res['total'])) . ' یافته</p>';
+            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . self::e(Text::fa($res['total'])) . ' یافته' . $csv . '</p>';
     }
 
     public static function detail(array $ctx): string
@@ -147,6 +148,22 @@ final class FindingViews
             $out .= Ui::card('<p>راهنمای بالا عمومی است. هوش مصنوعی با توجه به نوع همین یافته و فناوری‌های سایتتان، گام‌ها و تنظیم دقیق‌تری پیشنهاد می‌دهد. نام دامنه و IP شما برای مدل فرستاده نمی‌شود.</p>'
                 . Ui::form($ctx, 'finding', 'finding_aifix', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . 'راهکار با هوش مصنوعی'
                     . ($cost > 0 ? ' · ' . self::e(Text::fa($cost)) . ' اعتبار' : '') . '</button><span class="mcs-help">ممکن است تا یک دقیقه طول بکشد.</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'راهکار با هوش مصنوعی', 'sparkle');
+        }
+        // a second opinion on whether it is real (an opinion only), and a way to ask the assistant about it
+        $op = Settings::bool('ai_opinion') ? Reports::cachedOpinion($f) : null;
+        if ($op) {
+            [$vl, $vt] = Reports::VERDICTS[(string) $op['verdict']];
+            $out .= Ui::card('<p>' . Ui::chip($vl, $vt) . '</p><p dir="auto">' . self::e((string) ($op['why'] ?? '')) . '</p>'
+                . (!empty($op['check']) ? '<p class="mcs-small"><strong>چطور مطمئن شوم؟</strong></p><ol class="mcs-fix-steps">' . implode('', array_map(fn ($s) => '<li dir="auto">' . self::e($s) . '</li>', (array) $op['check'])) . '</ol>' : '')
+                . '<p class="mcs-ai-note">' . Ui::ico('sparkle') . 'این فقط نظر هوش مصنوعی از روی شواهد اسکن است؛ شدت، امتیاز و وضعیت یافته را عوض نمی‌کند.</p>', 'نظر دوم هوش مصنوعی', 'sparkle', '', 'mcs-aicard');
+        } elseif (Settings::bool('ai_opinion') && Ai::ready() && $ctx['manage'] && $f->status === 'open') {
+            $oc = \McSec\Rules::cost($cid, Settings::int('ai_opinion_cost'));
+            $out .= Ui::card('<p>مطمئن نیستید این مورد واقعی است؟ هوش مصنوعی شواهد همین یافته را می‌خواند و می‌گوید به احتمال زیاد واقعی است، مثبت کاذب است، یا باید دستی بررسی شود. نام دامنه‌ی شما برای مدل فرستاده نمی‌شود.</p>'
+                . Ui::form($ctx, 'finding', 'finding_opinion', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . 'نظر دوم بگیر'
+                    . ($oc > 0 ? ' · ' . self::e(Text::fa($oc)) . ' اعتبار' : '') . '</button><span class="mcs-help">ممکن است تا یک دقیقه طول بکشد.</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'واقعی است یا مثبت کاذب؟', 'sparkle');
+        }
+        if (Settings::bool('assistant_suggest') && \McSec\Assistant::allowed($cid) && $f->status === 'open') {
+            $out .= '<p class="mcs-small"><a href="index.php?m=mcsec&amp;p=assistant&amp;ask=' . rawurlencode('مشکل «' . mb_substr((string) $f->title, 0, 120) . '» (یافته‌ی ' . (int) $f->id . ') را ساده توضیح بده و بگو چطور رفعش کنم') . '">' . Ui::ico('sparkle') . 'از دستیار امنیت درباره‌ی این یافته بپرسید</a></p>';
         }
         if (trim((string) $f->solution) !== '') {
             $out .= Ui::drawer('راه‌حل پیشنهادی اسکنر (انگلیسی)', '<div dir="ltr" class="mcs-ltr-block">' . Ui::para((string) $f->solution) . '</div>', false, 'file');

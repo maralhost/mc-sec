@@ -95,7 +95,7 @@ final class AssetViews
             }
         }
         $body = '<div class="mcs-add">'
-            . Ui::field('mcs-targets', 'دامنه، زیردامنه یا IP', '<textarea class="form-control mcs-ltr" id="mcs-targets" name="targets" rows="2" dir="ltr" placeholder="example.com&#10;shop.example.com&#10;203.0.113.10" required></textarea>',
+            . Ui::field('mcs-targets', 'دامنه، زیردامنه یا IP', '<textarea class="form-control mcs-ltr" id="mcs-targets" name="targets" rows="2" dir="ltr" placeholder="example.com&#10;shop.example.com&#10;203.0.113.10" required>' . self::e(self::prefill()) . '</textarea>',
                 'یکی یا چندتا (هر خط یکی، تا ۱۰۰ مورد). نشانی کامل مثل https://example.com/page هم پذیرفته می‌شود.')
             . '<div class="mcs-form-row">' . Ui::field('mcs-label', 'نام دلخواه (اختیاری)', '<input class="form-control" id="mcs-label" name="label" maxlength="120" dir="auto" placeholder="مثلاً فروشگاه اصلی">')
             . Ui::field('mcs-autoscan', 'پس از تأیید، خودکار اسکن کن', Ui::select('autoscan', ['' => 'نه، خودم اسکن می‌گیرم'] + $profiles, 'hygiene', 'mcs-autoscan'),
@@ -161,7 +161,7 @@ final class AssetViews
             $out .= Ui::card('<ol class="mcs-todo">' . $list . '</ol>', 'مهم‌ترین یافته‌ها', 'alert');
         }
 
-        $out .= self::surfaceCard($a);
+        $out .= self::surfaceCard($a, $ctx);
         $scans = Scans::recent($cid, 10, (int) $a->id);
         if ($scans) {
             $out .= Ui::card(ScanViews::table($scans, false), 'اسکن‌های این دارایی', 'radar', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=scans">همه‌ی اسکن‌ها</a>');
@@ -239,8 +239,16 @@ final class AssetViews
         return Ui::card($intro . $tabs . $note . '<div class="mcs-actions">' . $check . '</div>', $a->status === 'lapsed' ? 'تأیید دوباره‌ی مالکیت' : 'تأیید مالکیت', 'key', '', 'is-attention');
     }
 
-    private static function surfaceCard(object $a): string
+    /** A target handed over in the address (the box on a hosting service's page): only a clean domain or IP is put in the form. */
+    private static function prefill(): string
     {
+        $t = \McSec\Net::parse(mb_substr((string) ($_GET['add'] ?? ''), 0, 255));
+        return isset($t['error']) ? '' : (string) $t['value'];
+    }
+
+    private static function surfaceCard(object $a, array $ctx = []): string
+    {
+        $canMute = Settings::bool('host_mute') && !empty($ctx['manage']);
         $s = Surface::forAsset((int) $a->id);
         if (!$s) {
             return (int) $a->last_scan_at > 0 ? '' : Ui::card('<p class="mcs-muted">پس از اسکن «کشف سطح حمله» یا «بررسی سلامت پایه»، زیردامنه‌ها، درگاه‌های باز، فناوری‌ها و گواهی‌های این دارایی این‌جا دیده می‌شوند.</p>', 'سطح حمله', 'radar');
@@ -268,7 +276,13 @@ final class AssetViews
                     default => '',
                 };
                 $isNew = (int) $r->first_seen_at > \McSec\Clock::now() - 7 * 86400 && $baseline > 0 && (int) $r->first_scan_id > $baseline;
-                $items .= '<li>' . Ui::ltr($r->value) . ($isNew ? ' ' . Ui::chip('تازه', 'warn') : '') . ($extra !== '' ? '<small dir="auto">' . self::e($extra) . '</small>' : '') . '</li>';
+                $mute = '';
+                if ($k === 'host' && strtolower((string) $r->value) !== strtolower((string) $a->value)) {
+                    $isMuted = (int) ($r->muted ?? 0) > 0;
+                    $mute = ($isMuted ? ' ' . Ui::chip('کنار گذاشته', 'muted') : '') . ($canMute ? ' ' . Ui::form($ctx, 'asset', 'host_mute', '<input type="hidden" name="id" value="' . (int) $r->id . '"><input type="hidden" name="on" value="' . ($isMuted ? '0' : '1') . '">'
+                        . '<button type="submit" class="btn btn-link btn-sm">' . ($isMuted ? 'برگردان' : 'مال من نیست') . '</button>', $isMuted ? '' : 'میزبان ' . $r->value . ' کنار گذاشته شود؟ دیگر اسکن نمی‌شود و یافته‌ای برایش ثبت نمی‌شود.', 'mcs-inline', false, '&amp;id=' . (int) $a->id) : '');
+                }
+                $items .= '<li>' . Ui::ltr($r->value) . ($isNew ? ' ' . Ui::chip('تازه', 'warn') : '') . $mute . ($extra !== '' ? '<small dir="auto">' . self::e($extra) . '</small>' : '') . '</li>';
             }
             $body .= Ui::drawer($label . ' (' . Text::fa(count($s[$k])) . ')', '<ul class="mcs-surface">' . $items . '</ul>', false);
         }

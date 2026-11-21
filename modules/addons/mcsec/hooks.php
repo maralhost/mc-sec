@@ -111,3 +111,21 @@ add_hook('ClientAreaHomepagePanels', 1, function ($homePagePanels) {
         \McSec\Db::log('home panel hook failed: ' . $e->getMessage());
     }
 });
+
+/** A small "security of this site" box on a hosting service's page (switch service_box). Database only. */
+add_hook('ClientAreaProductDetailsOutput', 1, function ($vars) {
+    try {
+        if (!\McSec\Settings::bool('service_box')) {
+            return '';
+        }
+        $who = mcsec_hook_client();
+        $svc = $vars['service'] ?? null;
+        if ($who === null || !is_object($svc)) {
+            return '';
+        }
+        return \McSec\Watch::serviceBox((int) $who['client_id'], (string) ($svc->domain ?? ''));
+    } catch (\Throwable $e) {
+        \McSec\Db::log('service box hook failed: ' . $e->getMessage());
+        return '';
+    }
+});

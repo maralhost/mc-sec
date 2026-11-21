@@ -75,6 +75,7 @@ final class Findings
             $owners[strtolower((string) $o->value)] = (int) $o->id;
         }
         $touched = [];
+        $aside = Surface::muted((int) $asset->id); // hosts the customer said are not theirs: nothing is recorded for them
         foreach ($items as $it) {
             $title = Text::name((string) ($it['title'] ?? ''), 255);
             $key = mb_substr((string) ($it['key'] ?? $title), 0, 160);
@@ -82,6 +83,9 @@ final class Findings
                 continue;
             }
             $loc = mb_substr((string) ($it['location'] ?? $asset->value), 0, 500);
+            if ($aside && in_array(self::hostOf($loc), $aside, true)) {
+                continue;
+            }
             $owner = $owners[self::hostOf($loc)] ?? (int) $asset->id;
             $touched[$owner] = true;
             $fp = self::fingerprint($owner, $key, $loc);
@@ -225,6 +229,26 @@ final class Findings
         $rows = Db::rows($q->select(['f.*', 'a.value as asset_value', 'a.label as asset_label'])->orderByDesc('f.priority')->orderByRaw($rank . ' DESC')->orderByDesc('f.last_seen_at')
             ->offset(($page - 1) * $per)->limit($per));
         return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages];
+    }
+
+    /**
+     * The findings list as CSV (same filters as the page, at most 5000 rows), with a BOM so Excel reads the Persian text.
+     * A cell that a spreadsheet would run as a formula (= + - @ at the start) gets a leading apostrophe.
+     */
+    public static function csv(int $clientId, array $f): string
+    {
+        $cell = function ($v): string {
+            $s = str_replace(["\r", "\n", "\t"], ' ', (string) $v);
+            $s = preg_match('~^[=+\-@]~', ltrim($s)) ? "'" . $s : $s;
+            return '"' . str_replace('"', '""', $s) . '"';
+        };
+        $out = "\xEF\xBB\xBF" . implode(',', array_map($cell, ['شدت', 'عنوان', 'دارایی', 'محل', 'وضعیت', 'CVE', 'اولویت', 'در حال بهره‌برداری', 'اولین بار', 'آخرین بار'])) . "\r\n";
+        $f['page'] = 1;
+        foreach (self::search($clientId, $f, 5000)['rows'] as $r) {
+            $out .= implode(',', array_map($cell, [self::SEVERITIES[(string) $r->severity]['label'] ?? $r->severity, $r->title, $r->asset_value, $r->location, self::STATUS[(string) $r->status] ?? $r->status,
+                $r->cve, (int) $r->priority, (int) $r->kev === 1 ? 'بله' : '', date('Y-m-d', (int) $r->first_seen_at), date('Y-m-d', (int) $r->last_seen_at)])) . "\r\n";
+        }
+        return $out;
     }
 
     /** Customer changes: accepted / false_positive need a reason; open reopens. 'fixed' is the system's word only. */

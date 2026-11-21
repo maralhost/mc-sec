@@ -144,8 +144,85 @@ TXT;
         return ['ok' => true];
     }
 
+    /**
+     * Starter questions made from the account's own state (no model call): the next useful thing first.
+     * @return string[] at most four
+     */
+    public static function suggestions(int $clientId): array
+    {
+        $out = [];
+        $assets = Assets::forClient($clientId);
+        $verified = array_values(array_filter($assets, fn ($a) => $a->status === 'verified'));
+        foreach ($assets as $a) {
+            if ($a->status === 'pending') {
+                $out[] = 'مالکیت ' . $a->value . ' را بررسی کن';
+                break;
+            }
+        }
+        $top = Findings::search($clientId, ['status' => 'open'], 1)['rows'][0] ?? null;
+        if ($top && Findings::rank((string) $top->severity) >= Findings::rank('medium')) {
+            $out[] = 'مشکل «' . mb_substr((string) $top->title, 0, 70) . '» را توضیح بده و بگو چطور رفعش کنم';
+        }
+        foreach ($verified as $a) {
+            if ((int) $a->last_scan_at === 0) {
+                $out[] = 'از ' . $a->value . ' اسکن بگیر';
+                break;
+            }
+        }
+        if ($verified && !Db::table('mod_mcsec_schedules')->where('client_id', $clientId)->exists()) {
+            $out[] = $verified[0]->value . ' را هر هفته خودکار بررسی کن';
+        }
+        if (!$assets) {
+            $out[] = 'یک دامنه‌ی تازه اضافه کن';
+        }
+        $out[] = 'وضعیت امنیت من چطور است؟';
+        $out[] = 'مهم‌ترین کاری که الان باید بکنم چیست؟';
+        return array_slice(array_values(array_unique($out)), 0, 4);
+    }
+
+    /**
+     * A question that came through the account's linked Bale or Telegram chat (worker). Answers only: no action tool is
+     * offered, because a card needs the panel's confirmation. Same switches, daily cap and message cost as the page;
+     * the conversation is the account's own (user 0). Always returns a text to send back.
+     */
+    public static function bot(int $clientId, string $text, string $ref): string
+    {
+        if (!self::allowed($clientId) || !Access::clientAllowed($clientId) || !Ai::ready()) {
+            return 'دستیار امنیت برای این حساب روشن نیست. اعلان‌ها مثل قبل همین‌جا می‌رسند.';
+        }
+        $text = trim(mb_substr(preg_replace('~[^\S\n]+~u', ' ', str_replace("\r", '', $text)) ?? '', 0, self::MAX_TEXT));
+        if ($text === '' || str_starts_with($text, '/')) {
+            return 'پرسش خود را درباره‌ی امنیت دارایی‌هایتان بنویسید. برای انجام کار (اسکن، افزودن دارایی) به صفحه‌ی «دستیار امنیت» در ناحیه‌ی کاربری بروید.';
+        }
+        $cap = max(1, Settings::int('assistant_daily'));
+        if (!RateLimit::hit('chat:' . $clientId, $cap, 86400)) {
+            return 'به سقف ' . Text::fa($cap) . ' پیام امروز رسیده‌اید. فردا ادامه دهید.';
+        }
+        $who = ['client_id' => $clientId, 'user_id' => 0];
+        $msgId = (int) Db::table('mod_mcsec_chat')->insertGetId(['client_id' => $clientId, 'user_id' => 0, 'role' => 'user', 'body' => $text, 'created_at' => Clock::now()]);
+        $cost = self::cost($clientId);
+        if ($cost > 0 && !Credits::spend($clientId, $cost, 'chat:' . $msgId, 'دستیار امنیت (' . $ref . ')')['ok']) {
+            Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $clientId)->delete();
+            return 'اعتبار کافی نیست: هر پیام به دستیار ' . Text::fa($cost) . ' اعتبار است.';
+        }
+        try {
+            $r = self::think($who, $msgId, false);
+        } catch (\Throwable $e) {
+            $r = ['ok' => false, 'error' => $e->getMessage()];
+        }
+        if (!$r['ok']) {
+            if ($cost > 0) {
+                Credits::refund($clientId, 'chat:' . $msgId, 'دستیار جواب نداد');
+            }
+            Trace::error('ai', 'assistant.bot', mb_substr((string) $r['error'], 0, 240), ['message' => $msgId], ['client_id' => $clientId]);
+            Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $clientId)->update(['status' => 'failed']);
+            return 'دستیار الان نتوانست جواب بدهد. کمی بعد دوباره بپرسید.';
+        }
+        return mb_substr((string) Db::table('mod_mcsec_chat')->where('client_id', $clientId)->where('user_id', 0)->where('role', 'assistant')->where('id', '>', $msgId)->orderByDesc('id')->value('body'), 0, 3500);
+    }
+
     /** The model loop of one turn: read tools are answered here; an action becomes a pending card. */
-    private static function think(array $who, int $msgId): array
+    private static function think(array $who, int $msgId, ?bool $mayAct = null): array
     {
         $cid = (int) $who['client_id'];
         $uid = (int) $who['user_id'];
@@ -160,7 +237,7 @@ TXT;
         $notes = [];
         $links = [];
         $started = microtime(true);
-        $acting = Settings::bool('assistant_actions') && Auth::canManage($who);
+        $acting = $mayAct ?? (Settings::bool('assistant_actions') && Auth::canManage($who));
         for ($i = 0; $i < self::STEPS; $i++) {
             $last = $i === self::STEPS - 1 || microtime(true) - $started > 40;
             $data = self::scrub(['today' => Text::date(Clock::now(), false), 'account' => self::context($cid), 'tool_results' => $notes]);

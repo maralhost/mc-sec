@@ -481,6 +481,11 @@ final class Installer
         $col('mod_mcsec_accounts', 'invited_at', fn ($t) => $t->integer('invited_at')->default(0));
         $col('mod_mcsec_accounts', 'auto_pack', fn ($t) => $t->string('auto_pack', 32)->default(''));
         $col('mod_mcsec_accounts', 'auto_below', fn ($t) => $t->integer('auto_below')->default(0));
+        // 0.10.0: a discovered host the customer set aside; what a KEV entry is about (for the emerging-threat alert)
+        $col('mod_mcsec_surface', 'muted', fn ($t) => $t->integer('muted')->default(0)); // 1 = set aside (off in the engine too), 2 = set aside here, engine still to do
+        $col('mod_mcsec_intel', 'vendor', fn ($t) => $t->string('vendor', 80)->default(''));
+        $col('mod_mcsec_intel', 'product', fn ($t) => $t->string('product', 120)->default(''));
+        $col('mod_mcsec_intel', 'name', fn ($t) => $t->string('name', 200)->default(''));
         // the group credits of before 0.7.0 (a setting) become rules, once
         $old = json_decode((string) Db::table('mod_mcsec_settings')->where('k', 'group_rules')->value('v'), true);
         if (is_array($old) && $old) {

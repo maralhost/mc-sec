@@ -93,7 +93,9 @@ final class Intel
         foreach ($list as $v) {
             $id = strtoupper((string) ($v['cveID'] ?? ''));
             if (preg_match('~^CVE-\d{4}-\d{4,7}$~', $id)) {
-                $map[$id] = ['added' => substr((string) ($v['dateAdded'] ?? ''), 0, 10), 'ransom' => strcasecmp((string) ($v['knownRansomwareCampaignUse'] ?? ''), 'Known') === 0 ? 1 : 0];
+                $map[$id] = ['added' => substr((string) ($v['dateAdded'] ?? ''), 0, 10), 'ransom' => strcasecmp((string) ($v['knownRansomwareCampaignUse'] ?? ''), 'Known') === 0 ? 1 : 0,
+                    'vendor' => mb_substr(trim(strip_tags((string) ($v['vendorProject'] ?? ''))), 0, 80), 'product' => mb_substr(trim(strip_tags((string) ($v['product'] ?? ''))), 0, 120),
+                    'name' => mb_substr(trim(strip_tags((string) ($v['vulnerabilityName'] ?? ''))), 0, 200)];
             }
         }
         if (count($map) < 100) {
@@ -104,16 +106,16 @@ final class Intel
         $now = Clock::now();
         foreach (array_chunk(array_keys($map), 500) as $chunk) {
             $have = [];
-            foreach (Db::rows(Db::table('mod_mcsec_intel')->whereIn('cve', $chunk)->select(['cve', 'kev', 'kev_added', 'kev_ransom'])) as $row) {
+            foreach (Db::rows(Db::table('mod_mcsec_intel')->whereIn('cve', $chunk)->select(['cve', 'kev', 'kev_added', 'kev_ransom', 'product'])) as $row) {
                 $have[(string) $row->cve] = $row;
             }
             $insert = [];
             foreach ($chunk as $id) {
                 $m = $map[$id];
                 if (!isset($have[$id])) {
-                    $insert[] = ['cve' => $id, 'kev' => 1, 'kev_added' => $m['added'], 'kev_ransom' => $m['ransom'], 'epss' => null, 'epss_at' => 0, 'updated_at' => $now];
-                } elseif ((int) $have[$id]->kev !== 1 || (string) $have[$id]->kev_added !== $m['added'] || (int) $have[$id]->kev_ransom !== $m['ransom']) {
-                    Db::table('mod_mcsec_intel')->where('cve', $id)->update(['kev' => 1, 'kev_added' => $m['added'], 'kev_ransom' => $m['ransom'], 'updated_at' => $now]);
+                    $insert[] = ['cve' => $id, 'kev' => 1, 'kev_added' => $m['added'], 'kev_ransom' => $m['ransom'], 'vendor' => $m['vendor'], 'product' => $m['product'], 'name' => $m['name'], 'epss' => null, 'epss_at' => 0, 'updated_at' => $now];
+                } elseif ((int) $have[$id]->kev !== 1 || (string) $have[$id]->kev_added !== $m['added'] || (int) $have[$id]->kev_ransom !== $m['ransom'] || (string) ($have[$id]->product ?? '') !== $m['product']) {
+                    Db::table('mod_mcsec_intel')->where('cve', $id)->update(['kev' => 1, 'kev_added' => $m['added'], 'kev_ransom' => $m['ransom'], 'vendor' => $m['vendor'], 'product' => $m['product'], 'name' => $m['name'], 'updated_at' => $now]);
                 }
             }
             if ($insert) {
@@ -127,6 +129,45 @@ final class Intel
             Db::table('mod_mcsec_intel')->whereIn('cve', $chunk)->update(['kev' => 0, 'updated_at' => $now]);
         }
         return count($map);
+    }
+
+    /**
+     * Emerging threats (switch threat_alerts): a vulnerability CISA added to KEV in the last $days days, matched by product
+     * name against the technologies seen on verified assets. Only those accounts hear about it, once per CVE. No scan
+     * is started and no credit is taken: seeing a technology is not proof that its version is vulnerable, and the
+     * message says so. Precision over reach: the name must be the technology's whole name ("nginx", "nginx:1.18").
+     */
+    public static function threatAlerts(int $days = 7): int
+    {
+        if (!Settings::bool('threat_alerts')) {
+            return 0;
+        }
+        $sent = 0;
+        $since = date('Y-m-d', Clock::now() - $days * 86400);
+        foreach (Db::rows(Db::table('mod_mcsec_intel')->where('kev', 1)->where('kev_added', '>=', $since)->where('product', '!=', '')->orderByDesc('kev_added')->limit(60)) as $k) {
+            $product = strtolower(trim((string) $k->product));
+            $vendor = strtolower(trim((string) $k->vendor));
+            if (mb_strlen($product) < 3 || str_contains($product, 'multiple')) {
+                continue;
+            }
+            $names = array_values(array_unique(array_filter([$product, $vendor !== '' && !str_starts_with($product, $vendor) ? $vendor . ' ' . $product : ''])));
+            $like = fn (string $s) => str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $s);
+            $q = Db::table('mod_mcsec_surface as s')->join('mod_mcsec_assets as a', 'a.id', '=', 's.asset_id')->where('s.kind', 'tech')->where('s.gone_at', 0)->where('a.status', 'verified')
+                ->where(function ($w) use ($names, $like) {
+                    foreach ($names as $nm) {
+                        $w->orWhereRaw('LOWER(s.value) = ?', [$nm])->orWhereRaw('LOWER(s.value) LIKE ?', [$like($nm) . ':%']);
+                    }
+                });
+            $by = [];
+            foreach (Db::rows($q->select(['s.client_id', 'a.value'])->limit(5000)) as $r) {
+                $by[(int) $r->client_id][(string) $r->value] = true;
+            }
+            foreach (Access::allowedIds(array_keys($by)) as $cid) {
+                Notify::event($cid, 'threat_alert', ['cve' => (string) $k->cve, 'product' => (string) $k->product, 'name' => (string) $k->name, 'assets' => array_keys($by[$cid])], $k->cve . ':' . $cid);
+                $sent++;
+            }
+        }
+        return $sent;
     }
 
     /** EPSS for CVEs of open findings not looked up in the last 7 days (100 per request, at most 10 requests). */

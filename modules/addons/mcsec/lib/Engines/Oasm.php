@@ -549,6 +549,12 @@ final class Oasm implements Engine
                 }
             }
         }
+        // hosts set aside while the engine could not be reached: try again now
+        foreach (Db::rows(Db::table('mod_mcsec_surface')->where('asset_id', (int) $asset->id)->where('kind', 'host')->where('muted', 2)->limit(20)) as $later) {
+            if ($this->toggleHost($asset, (string) $later->value, false)) {
+                Db::table('mod_mcsec_surface')->where('id', (int) $later->id)->update(['muted' => 1]);
+            }
+        }
         $out = ['findings' => $findings, 'surface' => $surface, 'kinds' => $piped ? [] : ['host', 'port'], 'complete' => true, 'shots' => $shots];
         if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
             // a run the target cut short saw nothing: say so, and never mark earlier findings fixed because of it
@@ -587,6 +593,36 @@ final class Oasm implements Engine
      * removed from OASM's storage (checked live: POST /api/reports/generate/vulnerability answers when the file exists).
      * Called only from an explicit customer POST. @return array{ok:bool,bytes:string,error:string}
      */
+    /**
+     * Switches one discovered host of an asset's target off (kept, no longer scanned) or on again.
+     * POST /api/assets/toggle takes the host's assets.id, found in GET /api/assets/host. False when it could not be done.
+     */
+    public function toggleHost(object $asset, string $host, bool $enabled): bool
+    {
+        $this->cid = (int) $asset->client_id;
+        $tid = (string) $asset->oasm_target;
+        if ($tid === '' || !$this->configured()) {
+            return false;
+        }
+        $ws = $this->workspace((int) $asset->client_id);
+        for ($page = 1; $page <= 10; $page++) {
+            $r = $this->call('GET', '/api/assets/host?targetIds=' . rawurlencode($tid) . '&limit=100&page=' . $page, null, $ws, 20);
+            $rows = (array) ($r['json']['data'] ?? []);
+            if (!$r['ok'] || !$rows) {
+                return false;
+            }
+            foreach ($rows as $h) {
+                if (strtolower((string) ($h['host'] ?? '')) === strtolower($host) && (string) ($h['id'] ?? '') !== '') {
+                    return $this->call('POST', '/api/assets/toggle', ['assetId' => (string) $h['id'], 'isEnabled' => $enabled], $ws, 20)['ok'];
+                }
+            }
+            if (count($rows) < 100) {
+                break;
+            }
+        }
+        return false;
+    }
+
     public function report(object $asset): array
     {
         $this->cid = (int) $asset->client_id;

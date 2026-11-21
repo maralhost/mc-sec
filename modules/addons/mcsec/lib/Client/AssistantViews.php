@@ -58,12 +58,13 @@ final class AssistantViews
         $cost = Assistant::cost($cid);
         $starters = '';
         if (!$rows) {
-            foreach (self::STARTERS as $s) {
+            foreach (Settings::bool('assistant_suggest') ? Assistant::suggestions($cid) : self::STARTERS as $s) {
                 $starters .= '<button type="submit" name="preset" value="' . self::e($s) . '" class="mcs-starter">' . self::e($s) . '</button>';
             }
             $starters = '<div class="mcs-starters" role="group" aria-label="نمونه‌ی پرسش">' . $starters . '</div>';
         }
-        $kept = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['a'] ?? '') === 'chat_send' ? mb_substr(html_entity_decode((string) ($_POST['text'] ?? ''), ENT_QUOTES, 'UTF-8'), 0, Assistant::MAX_TEXT) : '';
+        $kept = ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && ($_POST['a'] ?? '') === 'chat_send' ? mb_substr(html_entity_decode((string) ($_POST['text'] ?? ''), ENT_QUOTES, 'UTF-8'), 0, Assistant::MAX_TEXT)
+            : (Settings::bool('assistant_suggest') ? mb_substr(trim((string) ($_GET['ask'] ?? '')), 0, 300) : ''); // a question handed over by a link: put in the box, sent only when the customer presses the button
         $form = Ui::form($ctx, 'assistant', 'chat_send', $starters
             . '<label class="mcs-sr" for="mcs-chat-text">پیام شما به دستیار</label>'
             . '<div class="mcs-composer"><textarea class="form-control" id="mcs-chat-text" name="text" rows="2" maxlength="' . Assistant::MAX_TEXT . '" dir="rtl" placeholder="بپرسید یا بگویید چه کاری می‌خواهید…">' . self::e($kept) . '</textarea>'
