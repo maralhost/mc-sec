@@ -1,0 +1,59 @@
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>MC-Sec · طرح A</title><style>.mcs{
+  --t-bg:var(--ui-block-bg,#fff);--t-sunk:var(--body-bg,#f4f6f9);--t-text:var(--text-body-color,#334155);--t-head:var(--text-heading-color,#0f172a);
+  --t-muted:var(--text-lighter-color,#5b6778);--t-line:var(--ui-block-divider-color,#e2e8f0);--t-primary:var(--brand-primary,#1d4ed8);
+  --t-primary-soft:var(--brand-primary-lighter-4,rgba(29,78,216,.08));--t-primary-soft2:var(--brand-primary-lighter-3,rgba(29,78,216,.16));
+  --t-ok-bg:#e3f6ea;--t-ok:#15803d;--t-warn-bg:#fdf1d8;--t-warn:#b45309;--t-err-bg:#fde6e6;--t-err:#b91c1c;--t-info-bg:#e2f0fb;--t-info:#1d4ed8;
+  --t-run:#0369a1;--t-run-bg:#e0f2fe;--t-acc:#6d28d9;--t-acc-bg:#ede9fe;
+  --sev-c-fg:#fff;--sev-c-bg:#b4123a;--sev-c-ic:#b4123a;--sev-h-fg:#9a3412;--sev-h-bg:#ffedd5;--sev-h-ic:#c2410c;--sev-m-fg:#854d0e;--sev-m-bg:#fef3c7;--sev-m-ic:#b45309;
+  --sev-l-fg:#1e40af;--sev-l-bg:#dbeafe;--sev-l-ic:#2563eb;--sev-i-fg:#334155;--sev-i-bg:#f1f5f9;--sev-i-ic:#64748b;
+  --t-radius:var(--ui-block-border-radius,12px);--t-radius-sm:var(--border-radius-base,8px);--t-shadow:var(--ui-block-shadow,0 1px 2px rgba(16,24,40,.04),0 2px 8px rgba(16,24,40,.05));
+  --t-pad:var(--ui-block-padding-base,22px);--t-gap:16px;--t-input:var(--input-bg,#fff);--t-input-line:var(--input-border-color,#cbd5e1);--t-h:var(--ui-height-base,42px);
+  --t-soft:rgba(127,140,160,.12);--t-mono:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;
+  position:relative;line-height:1.85;color:var(--t-text);font-family:Ray,var(--font-family-base,Tahoma,sans-serif)
+}
+html.lagom-dark-mode .mcs,.mcs.mcs-dark{
+  --t-ok-bg:rgba(74,222,128,.12);--t-ok:#4ade80;--t-warn-bg:rgba(251,191,36,.12);--t-warn:#fbbf24;--t-err-bg:rgba(252,165,165,.12);--t-err:#fca5a5;--t-info-bg:rgba(147,197,253,.12);--t-info:#93c5fd;
+  --t-run:#7dd3fc;--t-run-bg:rgba(125,211,252,.12);--t-acc:#c4b5fd;--t-acc-bg:rgba(196,181,253,.12);
+  --sev-c-fg:#1a0008;--sev-c-bg:#fb7185;--sev-c-ic:#fb7185;--sev-h-fg:#fdba74;--sev-h-bg:#3b1406;--sev-h-ic:#fb923c;--sev-m-fg:#fcd34d;--sev-m-bg:#3a2a05;--sev-m-ic:#fbbf24;
+  --sev-l-fg:#93c5fd;--sev-l-bg:#13254a;--sev-l-ic:#60a5fa;--sev-i-fg:#cbd5e1;--sev-i-bg:#1f2937;--sev-i-ic:#94a3b8
+}*{box-sizing:border-box}body{margin:0;background:#f4f6f9;font-family:Tahoma,sans-serif}body.dark{background:#0b1220}
+.mcs.mcs-dark{--t-bg:#111a2b;--t-sunk:#0b1220;--t-text:#cbd5e1;--t-head:#f1f5f9;--t-muted:#94a3b8;--t-line:#22304a;--t-primary:#60a5fa;--t-primary-soft:rgba(96,165,250,.12);--t-soft:rgba(148,163,184,.12)}
+.dz{max-width:1180px;margin:0 auto;padding:20px 16px 40px;font-size:14.5px}
+.dz h1{font-size:1.25rem;margin:0;color:var(--t-head)}.dz h2{font-size:1rem;margin:0 0 .7rem;color:var(--t-head)}.dz p{margin:0}
+.dz a{color:var(--t-primary);text-decoration:none}.dz bdi{font-family:var(--t-mono);font-size:.86em;direction:ltr;unicode-bidi:isolate}
+.dz-top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 14px;flex-wrap:wrap}
+.dz-switch{display:inline-flex;background:var(--t-soft);border-radius:999px;padding:3px}
+.dz-switch span{padding:.25rem .9rem;border-radius:999px;color:var(--t-muted);font-size:.85rem}.dz-switch .on{background:var(--t-bg);color:var(--t-head);font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.12)}
+.dz-card{background:var(--t-bg);border:1px solid var(--t-line);border-radius:12px;padding:18px 20px}
+.dz-grid{display:grid;gap:14px}.dz-muted{color:var(--t-muted)}.dz-small{font-size:.82rem}
+.dz-sev{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.05rem .6rem;font-size:.78rem;font-weight:700;white-space:nowrap}
+.dz-sev.c{background:var(--sev-c-bg);color:var(--sev-c-fg)}.dz-sev.h{background:var(--sev-h-bg);color:var(--sev-h-fg)}.dz-sev.m{background:var(--sev-m-bg);color:var(--sev-m-fg)}.dz-sev.l{background:var(--sev-l-bg);color:var(--sev-l-fg)}
+.dz-chip{display:inline-block;border-radius:999px;padding:0 .55rem;font-size:.76rem;font-weight:700;white-space:nowrap}
+.dz-chip.ok{background:var(--t-ok-bg);color:var(--t-ok)}.dz-chip.err{background:var(--t-err-bg);color:var(--t-err)}.dz-chip.warn{background:var(--t-warn-bg);color:var(--t-warn)}.dz-chip.mut{background:var(--t-soft);color:var(--t-muted)}
+.dz-btn{display:inline-block;border:1px solid var(--t-line);border-radius:8px;padding:.3rem .8rem;font-size:.85rem;color:var(--t-head);background:var(--t-bg);white-space:nowrap}
+.dz-btn.pri{background:var(--t-primary);border-color:var(--t-primary);color:#fff}
+.dz-list{list-style:none;margin:0;padding:0}.dz-list li{display:flex;align-items:center;gap:.7rem;padding:.6rem 0;border-top:1px solid var(--t-line)}.dz-list li:first-child{border-top:0}
+.dz-list .t{flex:1;min-width:0}.dz-list .t strong{display:block;color:var(--t-head);font-weight:700}.dz-list .t span{color:var(--t-muted);font-size:.82rem}
+.dz-ring{position:relative;width:104px;height:104px;flex:none}.dz-ring svg{width:100%;height:100%}.dz-ring b{position:absolute;inset:0;display:grid;place-items:center;font-size:1.7rem;color:var(--t-head)}
+.dz-feed{list-style:none;margin:0;padding:0}.dz-feed li{position:relative;padding:0 1.1rem .8rem 0;border-right:2px solid var(--t-line);margin-right:.35rem}
+.dz-feed li:last-child{padding-bottom:0}.dz-feed li::before{content:"";position:absolute;right:-6px;top:.45rem;width:10px;height:10px;border-radius:50%;background:var(--d,var(--t-muted))}
+.dz-feed time{display:block;color:var(--t-muted);font-size:.78rem}
+table.dz-t{width:100%;border-collapse:collapse}table.dz-t th{font-weight:400;color:var(--t-muted);font-size:.8rem;text-align:right;padding:.3rem .5rem;border-bottom:1px solid var(--t-line);white-space:nowrap}
+table.dz-t td{padding:.55rem .5rem;border-bottom:1px solid var(--t-line);vertical-align:middle}table.dz-t tr:last-child td{border-bottom:0}
+/* A: status first */
+.a-hero{display:flex;gap:20px;align-items:center}.a-hero .say{flex:1}.a-hero .say strong{display:block;font-size:1.35rem;color:var(--t-head);line-height:1.5}
+.a-sites{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+.a-site{border:1px solid var(--t-line);border-radius:10px;overflow:hidden;background:var(--t-bg)}
+.a-shot{height:96px;background:linear-gradient(180deg,var(--t-soft) 0 16px,transparent 16px),var(--t-sunk);position:relative;border-bottom:1px solid var(--t-line)}
+.a-shot::before{content:"";position:absolute;top:5px;right:8px;width:26px;height:6px;border-radius:3px;background:var(--t-line)}
+.a-shot i{position:absolute;right:12px;left:12px;height:7px;border-radius:4px;background:var(--t-line)}.a-shot i:nth-child(1){top:30px;left:45%}.a-shot i:nth-child(2){top:46px}.a-shot i:nth-child(3){top:60px;left:30%}.a-shot i:nth-child(4){top:74px;left:60%;background:var(--t-primary-soft2)}
+.a-shot.down{background:repeating-linear-gradient(135deg,var(--t-err-bg) 0 10px,transparent 10px 20px),var(--t-sunk)}.a-shot.down i{display:none}
+.a-site .b{padding:.6rem .75rem}.a-site .b bdi{display:block;color:var(--t-head);font-size:.85rem;margin-bottom:.3rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.a-site .b div{display:flex;gap:.35rem;flex-wrap:wrap}
+/* B: asset map */
+.b-stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--t-line);border-radius:12px;background:var(--t-bg);overflow:hidden}
+.b-stats div{padding:.8rem 1rem;border-inline-start:1px solid var(--t-line)}.b-stats div:first-child{border:0}.b-stats span{display:block;color:var(--t-muted);font-size:.8rem}.b-stats strong{font-size:1.35rem;color:var(--t-head)}.b-stats small{color:var(--t-muted)}
+.b-dots{display:inline-flex;gap:3px;align-items:center}.b-dots i{width:9px;height:9px;border-radius:2px;background:var(--t-line)}
+.b-dots i.c{background:var(--sev-c-ic)}.b-dots i.h{background:var(--sev-h-ic)}.b-dots i.m{background:var(--sev-m-ic)}.b-dots i.l{background:var(--sev-l-ic)}
+.b-bar{height:6px;border-radius:3px;background:var(--t-line);overflow:hidden;min-width:70px}.b-bar i{display:block;height:100%;background:var(--g,var(--t-ok))}
+@media (max-width:820px){.a-sites{grid-template-columns:repeat(2,1fr)}.b-stats{grid-template-columns:repeat(2,1fr)}.dz-2{grid-template-columns:1fr!important}.a-hero{flex-direction:column;align-items:flex-start}table.dz-t .opt{display:none}}</style></head><body class=""><div class="mcs"><div class="dz"><div class="dz-top"><h1>امنیت سایبری</h1><span class="dz-switch" role="group" aria-label="نما"><span class="on">ساده</span><span class="">پیشرفته</span></span></div><div class="dz-grid"><div class="dz-card a-hero"><div class="dz-ring" role="img" aria-label="امتیاز 49 از ۱۰۰"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--t-line)" stroke-width="10"/><circle cx="60" cy="60" r="52" fill="none" stroke="var(--t-err)" stroke-width="10" stroke-linecap="round" stroke-dasharray="160.1 326.7" transform="rotate(-90 60 60)"/></svg><b>۴۹</b></div><div class="say"><strong>سه کار فوری دارید؛ یکی از سایت‌ها هم از دسترس خارج است.</strong><p class="dz-muted">امتیاز از هفته‌ی پیش ۲۲ واحد پایین آمده، چون یک آسیب‌پذیری بحرانی تازه پیدا شد.</p></div><div><svg viewBox="0 0 220 44" width="220" height="44" aria-hidden="true"><polyline fill="none" stroke="var(--t-primary)" stroke-width="2" points="0,14 22,12 44,13 66,10 88,12 110,11 132,16 154,15 176,22 198,30 220,34"/></svg><p class="dz-small dz-muted">روند ۶۰ روز</p></div></div><div class="dz-card"><h2>اول این‌ها را انجام دهید</h2><ul class="dz-list"><li><span class="dz-sev c">بحرانی</span><span class="t"><strong>افزونه‌ی وردپرس «Automatic» را به‌روز کنید</strong><span>shop-maral.ir · مهاجمان همین حالا از این آسیب‌پذیری استفاده می‌کنند · حدود ۱۵ دقیقه</span></span><a class="dz-btn" href="#">چطور رفع کنم؟</a></li><li><span class="dz-sev h">بالا</span><span class="t"><strong>دسترسی به پوشه‌ی .git را ببندید</strong><span>shop-maral.ir · کد سایت از اینترنت خوانده می‌شود · حدود ۱۰ دقیقه</span></span><a class="dz-btn" href="#">چطور رفع کنم؟</a></li><li><span class="dz-sev h">بالا</span><span class="t"><strong>درگاه MySQL را به روی اینترنت ببندید</strong><span>198.51.100.7:3306 · حدود ۲۰ دقیقه</span></span><a class="dz-btn" href="#">چطور رفع کنم؟</a></li></ul></div><div><h2 style="margin:.4rem .2rem .6rem">سایت‌ها و سرورهای شما</h2><div class="a-sites"><div class="a-site"><div class="a-shot"><i></i><i></i><i></i><i></i></div><div class="b"><bdi>shop-maral.ir</bdi><div><span class="dz-chip ok">در دسترس</span><span class="dz-chip warn">SSL: ۱۱ روز</span><span class="dz-chip err">۲ فوری</span></div></div></div><div class="a-site"><div class="a-shot down"><i></i><i></i><i></i><i></i></div><div class="b"><bdi>blog-maral.ir</bdi><div><span class="dz-chip err">از دسترس خارج</span><span class="dz-chip ok">SSL: ۶۴ روز</span></div></div></div><div class="a-site"><div class="a-shot"><i></i><i></i><i></i><i></i></div><div class="b"><bdi>api.shop-maral.ir</bdi><div><span class="dz-chip ok">در دسترس</span><span class="dz-chip ok">SSL: ۸۸ روز</span></div></div></div><div class="a-site"><div class="a-shot"><i></i><i></i><i></i><i></i></div><div class="b"><bdi>198.51.100.7</bdi><div><span class="dz-chip mut">سرور</span><span class="dz-chip mut">۳ درگاه باز</span><span class="dz-chip err">۱ فوری</span></div></div></div></div></div><div class="dz-card"><h2>این هفته چه عوض شد؟</h2><ul class="dz-feed"><li style="--d:var(--t-err)"><time>امروز، ۰۹:۴۰</time><bdi>blog-maral.ir</bdi> از دسترس خارج شد (HTTP 502)</li><li style="--d:var(--sev-h-ic)"><time>دیروز</time>درگاه تازه‌ی <bdi>3306</bdi> روی <bdi>198.51.100.7</bdi> باز شد</li><li style="--d:var(--t-ok)"><time>۳ روز پیش</time>۲ یافته روی <bdi>shop-maral.ir</bdi> رفع شد</li><li><time>۵ روز پیش</time>زیردامنه‌ی تازه: <bdi>mail.shop-maral.ir</bdi></li></ul></div></div></div></div></body></html>
