@@ -66,6 +66,11 @@ final class Settings
         'live_sync' => ['1', 'bool', 'scans', 'به‌روزرسانی زنده‌ی پیشرفت', 'وقتی مشتری صفحه‌ی اسکن را باز دارد، وضعیت با درخواست کوتاه (حداکثر ۴ ثانیه) از موتور خوانده شود. خاموش: فقط کار پس‌زمینه هر ۵ دقیقه.'],
         'builtin_ports' => ['21,22,23,25,110,143,445,1433,2375,3306,3389,5432,5900,6379,9200,11211,27017', 'csv', 'scans', 'درگاه‌های بررسی پایه', 'درگاه‌های پرخطری که بررسی سلامت پایه باز بودنشان را می‌سنجد.'],
 
+        'nuclei_rate' => ['10', 'int', 'scans', 'nuclei: درخواست در ثانیه', 'سقف درخواست‌های اسکن آسیب‌پذیری به هر هدف. پیش‌فرض خود OASM ۱۵۰ است که فایروال و محافظ وب هدف را وادار به مسدود کردن اسکنر می‌کند. ۱ تا ۱۵۰. تغییر این چهار تنظیم از اسکن بعدی هر دارایی اثر دارد.'],
+        'nuclei_concurrency' => ['5', 'int', 'scans', 'nuclei: الگوی همزمان', 'چند الگو همزمان اجرا شود. ۱ تا ۵۰.'],
+        'nuclei_exclude_tags' => ['dos,fuzz,intrusive', 'csv', 'scans', 'nuclei: برچسب‌های کنارگذاشته', 'الگوهایی با این برچسب‌ها اجرا نمی‌شوند (پرفشار یا مخرب).'],
+        'nuclei_interactsh' => ['0', 'bool', 'scans', 'nuclei: کشف خارج از باند (interactsh)', 'روشن: برای یافتن SSRF و RCE کور، هدف وادار می‌شود به سرور عمومی interactsh وصل شود. پیش‌فرض خاموش.'],
+
         // extra checks, light monitoring and vulnerability intelligence
         'reputation_lists' => [
             "# هر خط: domain یا ip، نام zone، و نام فهرست\nip bl.spamcop.net SpamCop\n# Spamhaus برای استفاده‌ی تجاری کلید رایگان یا پولی DQS می‌خواهد (spamhaus.com/dqs):\n# domain KEY.dbl.dq.spamhaus.net Spamhaus DBL\n# ip KEY.zen.dq.spamhaus.net Spamhaus ZEN\n# domain multi.surbl.org SURBL",

@@ -30,7 +30,7 @@ use McSec\Worker;
 final class Controller
 {
     public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'اعتبار رایگان و اعطا', 'assets' => 'دارایی‌ها و تأیید',
-        'scans' => 'صف اسکن', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی'];
+        'scans' => 'صف اسکن', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
 
     private const ACTIONS = [
         'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_groups' => 'settings',

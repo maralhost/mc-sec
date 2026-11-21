@@ -405,4 +405,25 @@ ok(preg_match('~<textarea[^>]+name="set_reputation_lists"[^>]+dir="ltr"~', $adm)
 setting('intel_enabled', '0');
 setting('monitor_enabled', '0');
 
+section('admin: version changelog');
+$log = \McSec\Admin\Views::changes();
+ok(isset($log[MCSEC_VERSION]) && count($log[MCSEC_VERSION]['items']) >= 3 && array_key_first($log) === MCSEC_VERSION, 'the installed version has an entry and is the newest');
+$bad = [];
+foreach ($log as $ver => $v) {
+    if (!preg_match('~^\d+\.\d+\.\d+$~', (string) $ver) || !preg_match('~^\d{4}-\d{2}-\d{2}$~', (string) ($v['date'] ?? '')) || trim((string) ($v['title'] ?? '')) === '') {
+        $bad[] = $ver;
+    }
+    foreach ($v['items'] as $it) {
+        if (!in_array($it[0] ?? '', ['new', 'change', 'fix', 'ops'], true) || mb_strlen((string) ($it[1] ?? '')) < 10) {
+            $bad[] = $ver . ':item';
+        }
+    }
+}
+ok($bad === [], 'every entry has a version, date, title and typed lines (' . implode(',', $bad) . ')');
+admin('view');
+$_GET = ['module' => 'mcsec', 'mcsa' => 'changelog'];
+$adm = \McSec\Admin\Controller::handle('addonmodules.php?module=mcsec');
+ok(str_contains($adm, 'تغییرات نسخه‌ها') && str_contains($adm, '>' . MCSEC_VERSION . '</bdi>') && str_contains($adm, 'نصب‌شده') && str_contains($adm, '0.1.0'), 'page lists every version and marks the installed one (a view-only admin can read it)');
+ok(substr_count($adm, 'mcsa-tag-ok">نصب‌شده') === 1, 'only one version is marked installed');
+
 done();

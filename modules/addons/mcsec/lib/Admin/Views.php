@@ -75,6 +75,7 @@ final class Views
             'scans' => self::scans(),
             'settings' => self::settings(),
             'log' => self::log(),
+            'changelog' => self::changelog(),
             default => self::overview(),
         };
         $warn = !Settings::bool('enabled') ? '<div class="alert alert-info">MC-Sec برای مشتری‌ها خاموش است. پس از راه‌اندازی موتورها و آزمودن روی چند حساب آزمایشی، در «تنظیمات» روشنش کنید.</div>' : '';
@@ -308,9 +309,41 @@ final class Views
             . self::box('گزارش فنی', $rows !== '' ? '<table class="table mcsa-log"><thead><tr><th>کد</th><th>زمان</th><th>بخش</th><th>کار</th><th>حساب</th><th>پیام</th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">چیزی ثبت نشده است.</p>');
     }
 
+    /** Versions and what each changed (changelog.php), newest first; the installed version is marked. */
+    public static function changes(): array
+    {
+        $file = dirname(__DIR__, 2) . '/changelog.php';
+        $log = is_file($file) ? include $file : [];
+        return is_array($log) ? $log : [];
+    }
+
+    private static function changelog(): string
+    {
+        $kinds = ['new' => ['تازه', 'ok'], 'change' => ['تغییر', 'chg'], 'fix' => ['رفع', 'fix'], 'ops' => ['برای مدیر', 'ops']];
+        $out = self::guide('<p>هر نسخه چه چیزی آورد. «تازه» قابلیت نو است، «تغییر» رفتاری که عوض شده، «رفع» اشکالی که درست شده، و «برای مدیر» کاری که پس از نصب باید انجام دهید یا بدانید. نسخه‌ی نصب‌شده علامت دارد.</p>');
+        $log = self::changes();
+        if (!$log) {
+            return $out . self::box('تغییرات نسخه‌ها', '<p class="mcsa-muted">فایل تغییرات پیدا نشد.</p>');
+        }
+        foreach ($log as $ver => $v) {
+            $items = '';
+            foreach ((array) ($v['items'] ?? []) as $it) {
+                [$label, $cls] = $kinds[(string) ($it[0] ?? '')] ?? ['تغییر', 'chg'];
+                $items .= '<li><span class="mcsa-tag mcsa-tag-' . $cls . '">' . self::e($label) . '</span> ' . self::e((string) ($it[1] ?? '')) . '</li>';
+            }
+            $here = (string) $ver === MCSEC_VERSION ? ' <span class="mcsa-tag mcsa-tag-ok">نصب‌شده</span>' : '';
+            $out .= '<div class="mcsa-box"><h3><bdi dir="ltr">' . self::e($ver) . '</bdi> — ' . self::e((string) ($v['title'] ?? '')) . $here
+                . ' <small class="mcsa-muted">' . self::e(Text::ymd((string) ($v['date'] ?? ''))) . '</small></h3><ul class="mcsa-changes">' . $items . '</ul></div>';
+        }
+        return $out;
+    }
+
     private static function css(): string
     {
-        return '.mcsa{font-family:Tahoma,var(--font-family-base,sans-serif);line-height:1.8;max-width:1300px}.mcsa *{box-sizing:border-box}.mcsa-head h2{margin:0 0 .5rem;font-size:1.35rem}.mcsa-head small{font-size:.8rem;color:#64748b;font-weight:400}'
+        return '.mcsa-changes{list-style:none;padding:0;margin:0}.mcsa-changes li{padding:.3rem 0;border-bottom:1px dashed #e2e8f0}.mcsa-changes li:last-child{border:0}'
+            . '.mcsa-tag{display:inline-block;min-width:4.6rem;text-align:center;font-size:.75rem;font-weight:700;border-radius:999px;padding:.05rem .5rem;margin-inline-end:.4rem;background:#e2e8f0;color:#334155}'
+            . '.mcsa-tag-ok{background:#dcfce7;color:#166534}.mcsa-tag-fix{background:#fee2e2;color:#991b1b}.mcsa-tag-chg{background:#e0f2fe;color:#075985}.mcsa-tag-ops{background:#fef3c7;color:#92400e}'
+            . '.mcsa{font-family:Tahoma,var(--font-family-base,sans-serif);line-height:1.8;max-width:1300px}.mcsa *{box-sizing:border-box}.mcsa-head h2{margin:0 0 .5rem;font-size:1.35rem}.mcsa-head small{font-size:.8rem;color:#64748b;font-weight:400}'
             . '.mcsa-nav{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 1rem;padding:.3rem;background:#f1f5f9;border-radius:10px}.mcsa-nav a{padding:.35rem .8rem;border-radius:8px;color:#334155;text-decoration:none}.mcsa-nav a.active{background:#fff;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.1)}'
             . '.mcsa-box{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:1rem 1.2rem;margin:0 0 1rem}.mcsa-box h3{margin:0 0 .75rem;font-size:1.05rem}.mcsa-help,.mcsa-muted{color:#64748b}'
             . '.mcsa-guide{background:#e0f2fe;border-radius:10px;padding:.5rem 1rem;margin:0 0 1rem}.mcsa-guide summary{cursor:pointer;font-weight:700;color:#075985}'

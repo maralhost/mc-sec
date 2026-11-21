@@ -95,6 +95,7 @@ ok(!Scans::queue(1, $cf, 'vuln', 0, 1)['ok'], 'vulnerability scan refused too');
 setting('cdn_origin_scan', '1');
 $q = Scans::queue(1, $cf, 'surface', 0, 1);
 ok(!$q['ok'] && str_contains($q['error'], 'IP اصلی'), 'origin scanning on, no origin yet: asks for it');
+setting('profiles', json_encode(['recon' => ['enabled' => true]])); // Osmedeus profiles are off by default since 0.3.0
 $q = Scans::queue(1, $cf, 'recon', 0, 1, ['admin' => 1]);
 ok(!$q['ok'] && str_contains($q['error'], 'فقط برای دامنه'), 'a domain-only profile cannot move to the origin');
 

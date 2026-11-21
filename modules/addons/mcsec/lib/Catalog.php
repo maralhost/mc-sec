@@ -8,6 +8,8 @@ namespace McSec;
  * The scan products customers choose from. Each profile names its engine, the asset kinds it accepts, its credit
  * cost per asset and (for Osmedeus) the workflow. Admins override enabled/credits/workflow/label in the setting
  * `profiles`; anything not overridden comes from DEFAULTS. `free` = available without a plan.
+ * OASM is the product engine. The two Osmedeus profiles (recon, deep) are off by default since 0.3.0: its tools overlap
+ * OASM's, and two engines reporting the same issue made duplicate findings. An admin can still turn them on.
  */
 final class Catalog
 {
@@ -28,12 +30,12 @@ final class Catalog
             'desc' => 'با هزاران الگوی Nuclei آسیب‌پذیری‌های شناخته‌شده (CVE)، پیکربندی نادرست، پنل‌ها و فایل‌های حساسِ در دسترس را می‌سنجد.',
         ],
         'recon' => [
-            'label' => 'شناسایی سریع', 'engine' => 'osmedeus', 'workflow' => 'fast', 'credits' => 8, 'kinds' => ['domain'], 'free' => false, 'enabled' => true,
+            'label' => 'شناسایی سریع', 'engine' => 'osmedeus', 'workflow' => 'fast', 'credits' => 8, 'kinds' => ['domain'], 'free' => false, 'enabled' => false,
             'eta' => '۲۰ تا ۶۰ دقیقه', 'depth' => 2, 'icon' => 'search',
             'desc' => 'شناسایی گسترده‌ی زیردامنه‌ها، سرویس‌های وب، اسکرین‌شات و فناوری‌ها با Osmedeus.',
         ],
         'deep' => [
-            'label' => 'ارزیابی عمیق', 'engine' => 'osmedeus', 'workflow' => 'general', 'credits' => 30, 'kinds' => ['domain', 'ip', 'cidr'], 'free' => false, 'enabled' => true,
+            'label' => 'ارزیابی عمیق', 'engine' => 'osmedeus', 'workflow' => 'general', 'credits' => 30, 'kinds' => ['domain', 'ip', 'cidr'], 'free' => false, 'enabled' => false,
             'eta' => '۲ تا ۸ ساعت', 'depth' => 4, 'icon' => 'layers',
             'desc' => 'همه‌ی مراحل: شناسایی، اسکن درگاه، کشف محتوا، آسیب‌پذیری وب و گزارش کامل. برای پیش از راه‌اندازی یا ممیزی.',
         ],

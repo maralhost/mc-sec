@@ -346,6 +346,10 @@ final class Scans
         $partial = mb_substr((string) ($res['partial'] ?? ''), 0, 255);
         if ($partial !== '') {
             $summary['partial'] = $partial;
+            // a paid scan the target cut off before it saw anything gave the customer nothing: the credits go back
+            if ((int) $s->credits > 0 && !$res['findings'] && Settings::bool('refund_on_fail')) {
+                $summary['refunded'] = Credits::refund((int) $s->client_id, 'scan:' . $s->id, 'بازگشت اعتبار اسکن ناقص (هدف پاسخ نداد)', (int) $s->id);
+            }
         }
         Db::table('mod_mcsec_scans')->where('id', $s->id)->update(['status' => 'completed', 'finished_at' => Clock::now(), 'progress' => 100, 'stage' => $partial !== '' ? 'تمام شد (ارزیابی ناقص)' : 'تمام شد',
             'summary' => Db::json($summary), 'error' => '']);

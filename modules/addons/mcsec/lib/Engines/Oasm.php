@@ -19,8 +19,10 @@ use McSec\Trace;
  *    encrypted in Kv and renewed on 401. The workspace API key does not open the REST endpoints.
  *  - isolation: one OASM workspace per WHMCS client (POST /api/workspaces), every call scoped with X-Workspace-Id.
  *  - targets: POST /api/targets/bulk (DOMAIN, IP, CIDR /24–/32); creating a target starts discovery by itself;
- *    POST /api/targets/{id}/re-scan runs it again; POST /api/vulnerabilities/scan runs nuclei (vulnerability_scan_basic).
- *  - progress: GET /api/targets/{id}/runs (status, jobsDone/jobsTotal, currentTool).
+ *    POST /api/targets/{id}/re-scan runs it again.
+ *  - vulnerability scan: nuclei through a project pipeline (POST /api/projects with tools[] and MC-Sec's settings,
+ *    POST /api/projects/{id}/workflows/{binding}/run), checked live 2026-11-21. Not POST /api/vulnerabilities/scan.
+ *  - progress: GET /api/targets/{id}/runs (discovery) or GET /api/projects/{id}/runs (pipeline: stepsDone/stepsTotal).
  *  - results: GET /api/assets (services host:port with HTTP response, tech, TLS), GET /api/vulnerabilities?targetId=.
  * OASM's own scheduler stays disabled (scanSchedule = disabled): MC-Sec schedules, charges and notifies.
  */
@@ -190,13 +192,18 @@ final class Oasm implements Engine
         $since = gmdate('Y-m-d\TH:i:s\Z', Clock::now() - 30);
         $kind = $profile['key'] === 'vuln' ? 'vuln' : 'discovery';
         if ($kind === 'vuln') {
-            // without nuclei installed in the workspace and a worker able to run it, OASM accepts the scan and leaves it
-            // pending forever (seen live on staging): stop now so the customer gets the credits back at once
-            $n = $this->nuclei($ws, true);
-            if ($n['known'] && (!$n['installed'] || $n['workers'] < 1)) {
-                return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run nuclei: ' . (!$n['installed'] ? 'not installed in workspace' : 'no worker for it (needs a node-mode worker with Docker)')];
+            // nuclei runs through a project pipeline with MC-Sec's own polite settings: POST /vulnerabilities/scan uses
+            // OASM's defaults (150 requests a second, interactsh on), which gets the scanner banned by the target
+            $n = $this->tool($ws, 'nuclei', true);
+            if (!$n['known'] || !$n['installed']) {
+                return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run nuclei: ' . (!$n['known'] ? 'tool list not readable or nuclei missing' : 'not installed in workspace')];
             }
-            $r = $this->call('POST', '/api/vulnerabilities/scan', ['targetIds' => [$t['id']]], $ws);
+            try {
+                $run = $this->runPipeline($asset, $ws, $t['id'], 'vuln', 'nuclei', $n['id']);
+            } catch (\Throwable $e) {
+                return ['ok' => false, 'error' => mb_substr($e->getMessage(), 0, 200), 'retry' => true];
+            }
+            return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'project' => $run['project'], 'run' => $run['run']], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
         } elseif (!$t['created']) {
             $r = $this->call('POST', '/api/targets/' . rawurlencode($t['id']) . '/re-scan', null, $ws);
         } else {
@@ -209,34 +216,153 @@ final class Oasm implements Engine
     }
 
     /**
-     * nuclei (a connector tool) in a workspace: installed on demand; 'workers' = workers able to run it. On staging the
-     * only worker is the built-in cloud one, which runs subfinder/naabu/httpx but no connector, so 'workers' is 0.
-     * @return array{known:bool,installed:bool,workers:int}
+     * A connector tool (nuclei, zap, …) in a workspace. With $prepare it is installed and given a default config
+     * profile when missing: OASM calls a connector "ready" only once a profile exists (seen live, 0.12.1).
+     * availableWorkersCount is NOT used: OASM reports 0 for every connector even while a node worker runs them.
+     * @return array{known:bool,installed:bool,ready:bool,id:string}
      */
-    public function nuclei(string $ws, bool $install, int $clientId = -1): array
+    public function tool(string $ws, string $name, bool $prepare, int $clientId = -1): array
     {
-        $r = $this->call('GET', '/api/tools?category=vulnerabilities&limit=50', null, $ws, 20, $clientId);
+        $none = ['known' => false, 'installed' => false, 'ready' => false, 'id' => ''];
+        $r = $this->call('GET', '/api/tools?limit=100', null, $ws, 20, $clientId);
         if (!$r['ok']) {
-            return ['known' => false, 'installed' => false, 'workers' => 0];
+            return $none;
         }
         foreach ((array) ($r['json']['data'] ?? []) as $t) {
-            if (strtolower((string) ($t['name'] ?? '')) !== 'nuclei') {
+            if (strtolower((string) ($t['name'] ?? '')) !== $name || (string) ($t['id'] ?? '') === '') {
                 continue;
             }
+            $id = (string) $t['id'];
             $installed = !empty($t['isInstalled']);
-            if (!$installed && $install && (string) ($t['id'] ?? '') !== '') {
-                $installed = $this->call('POST', '/api/tools/install', ['toolId' => (string) $t['id']], $ws, 20, $clientId)['ok'];
+            $ready = !empty($t['isReady']);
+            if ($prepare && !$installed) {
+                $installed = $this->call('POST', '/api/tools/install', ['toolId' => $id], $ws, 20, $clientId)['ok'];
             }
-            return ['known' => true, 'installed' => $installed, 'workers' => (int) ($t['availableWorkersCount'] ?? 0)];
+            if ($prepare && $installed && empty($t['hasConfigProfile'])) {
+                $ready = $this->call('POST', '/api/tools/' . rawurlencode($id) . '/config-profiles', ['name' => 'MC-Sec', 'isDefault' => true, 'config' => self::toolConfig($name)], $ws, 20, $clientId)['ok'];
+            }
+            return ['known' => true, 'installed' => $installed, 'ready' => $ready, 'id' => $id];
         }
-        return ['known' => true, 'installed' => false, 'workers' => 0];
+        return $none;
     }
+
+    /**
+     * MC-Sec's settings for a tool. nuclei: gentle by default (10 requests a second, 5 templates at once, no
+     * out-of-band probes to public interactsh servers, no dos/fuzz/intrusive templates).
+     */
+    public static function toolConfig(string $name): array
+    {
+        if ($name !== 'nuclei') {
+            return [];
+        }
+        return [
+            'concurrency' => max(1, min(50, Settings::int('nuclei_concurrency'))), 'rateLimit' => max(1, min(150, Settings::int('nuclei_rate'))),
+            'interactsh' => Settings::bool('nuclei_interactsh'), 'excludeTags' => array_values(array_filter(Settings::csv('nuclei_exclude_tags'), fn ($t) => preg_match('~^[a-z0-9_-]{1,40}$~i', $t) === 1)),
+            'followRedirects' => false, 'severity' => ['info', 'low', 'medium', 'high', 'critical'],
+        ];
+    }
+
+    /**
+     * Runs one tool on one target through an OASM project (the only place where a pipeline with its own tool settings
+     * can be run on demand). The project of an asset and scan kind is kept (Kv) and reused; when the settings changed
+     * it is archived and a new one made.
+     * @return array{project:string,run:string}
+     */
+    private function runPipeline(object $asset, string $ws, string $targetId, string $kind, string $tool, string $toolId): array
+    {
+        $config = self::toolConfig($tool);
+        $hash = substr(sha1($targetId . '|' . $toolId . '|' . json_encode($config)), 0, 16);
+        $key = 'oasm:pl:' . (int) $asset->id . ':' . $kind;
+        $pl = Kv::json($key);
+        if (($pl['hash'] ?? '') === $hash && ($pl['project'] ?? '') !== '' && ($pl['binding'] ?? '') !== '') {
+            $r = $this->call('POST', '/api/projects/' . rawurlencode($pl['project']) . '/workflows/' . rawurlencode($pl['binding']) . '/run', null, $ws);
+            if ($r['ok'] && (string) ($r['json']['jobHistoryId'] ?? '') !== '') {
+                return ['project' => (string) $pl['project'], 'run' => (string) $r['json']['jobHistoryId']];
+            }
+            if ($r['status'] === 0 || $r['status'] >= 500) {
+                throw new \RuntimeException('OASM pipeline run: HTTP ' . $r['status']);
+            }
+            // the project was removed in OASM: make it again below
+        } elseif (($pl['project'] ?? '') !== '') {
+            $this->call('POST', '/api/projects/' . rawurlencode((string) $pl['project']) . '/archive', null, $ws);
+        }
+        $c = $this->call('POST', '/api/projects', [
+            'name' => mb_substr('mcsec a' . (int) $asset->id . ' ' . $kind . ' ' . $asset->value, 0, 80), 'description' => 'MC-Sec ' . $kind . ' pipeline',
+            'scopeRules' => [['mode' => 'include', 'type' => 'target', 'value' => $targetId]], 'autoAddAssets' => true,
+            'tools' => [['toolId' => $toolId, 'category' => 'vulnerabilities', 'input' => ['web', 'host'], 'stage' => 1, 'config' => $config]],
+            'workflowName' => 'MC-Sec ' . $tool,
+        ], $ws, 30);
+        $pid = (string) ($c['json']['id'] ?? '');
+        if (!$c['ok'] || $pid === '') {
+            throw new \RuntimeException('OASM project not created: HTTP ' . $c['status'] . ' ' . mb_substr((string) $c['body'], 0, 160));
+        }
+        $g = $this->call('GET', '/api/projects/' . rawurlencode($pid), null, $ws);
+        $bid = (string) ($g['json']['projectWorkflows'][0]['id'] ?? '');
+        if ($bid === '') {
+            throw new \RuntimeException('OASM project has no pipeline: HTTP ' . $g['status']);
+        }
+        Kv::setJson($key, ['project' => $pid, 'binding' => $bid, 'hash' => $hash]);
+        $r = $this->call('POST', '/api/projects/' . rawurlencode($pid) . '/workflows/' . rawurlencode($bid) . '/run', null, $ws);
+        $run = (string) ($r['json']['jobHistoryId'] ?? '');
+        if (!$r['ok'] || $run === '') {
+            throw new \RuntimeException('OASM pipeline run: HTTP ' . $r['status'] . ' ' . mb_substr((string) $r['body'], 0, 160));
+        }
+        return ['project' => $pid, 'run' => $run];
+    }
+
+    /** The project run a scan started, or null while OASM does not list it. */
+    private function pipelineRun(array $m, int $timeout = 8): ?array
+    {
+        $r = $this->call('GET', '/api/projects/' . rawurlencode((string) $m['project']) . '/runs?limit=20', null, (string) ($m['ws'] ?? ''), $timeout);
+        foreach ($r['ok'] ? (array) ($r['json']['data'] ?? []) : [] as $run) {
+            if ((string) ($run['id'] ?? '') === (string) $m['run']) {
+                return $run;
+            }
+        }
+        return $r['ok'] ? [] : null;
+    }
+
+    /**
+     * True when the jobs of a run ended because the target stopped answering the scanner (its firewall or web
+     * protection banned the scanner's IP: seen live, within seconds, even at 10 requests a second).
+     */
+    private function blockedByTarget(array $m): bool
+    {
+        $r = $this->call('GET', '/api/jobs-registry?jobHistoryId=' . rawurlencode((string) $m['run']) . '&limit=20', null, (string) ($m['ws'] ?? ''), 15);
+        foreach ((array) ($r['json']['data'] ?? []) as $job) {
+            foreach ((array) ($job['errorLogs'] ?? []) as $log) {
+                $msg = strtolower(substr((string) ($log['logMessage'] ?? ''), 0, 400));
+                if (str_contains($msg, 'marked unresponsive') || str_contains($msg, 'target reachability')) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public const BLOCKED = 'هدف هنگام اسکن دیگر پاسخ نداد؛ به احتمال زیاد فایروال یا محافظ وب سرور، IP اسکنر را مسدود کرده است. IP اسکنر را در آن مجاز کنید و دوباره اسکن بگیرید.';
 
     public function poll(object $scan, object $asset, array $profile): array
     {
         $this->cid = (int) $asset->client_id;
         $m = json_decode((string) $scan->backend_meta, true) ?: [];
         $ws = (string) ($m['ws'] ?? '');
+        if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
+            $run = $this->pipelineRun($m);
+            if ($run === null) {
+                return ['status' => 'running', 'stage' => 'در انتظار پاسخ OASM'];
+            }
+            if (!$run) {
+                return Clock::now() - (int) $scan->started_at > 3 * 3600 ? ['status' => 'failed', 'error' => 'OASM کار را شروع نکرد'] : ['status' => 'running', 'progress' => 2, 'stage' => 'در صف موتور OASM'];
+            }
+            if (!empty($run['isCompleted'])) {
+                // "failed" because the target banned the scanner is an incomplete assessment (collect says why), not a broken scan
+                $bad = in_array((string) ($run['status'] ?? ''), ['failed', 'cancelled'], true) && (int) ($run['stepsDone'] ?? 0) === 0;
+                return $bad && !$this->blockedByTarget($m) ? ['status' => 'failed', 'error' => 'OASM: ' . $run['status']] : ['status' => 'completed', 'progress' => 100, 'stage' => 'تمام شد'];
+            }
+            $total = (int) ($run['stepsTotal'] ?? 0);
+            return ['status' => 'running', 'progress' => max(3, $total > 0 ? (int) min(95, floor(100 * (int) ($run['stepsDone'] ?? 0) / $total)) : 5), 'stage' => 'در حال اجرا: nuclei'];
+        }
         $r = $this->call('GET', '/api/targets/' . rawurlencode((string) $scan->backend_ref) . '/runs?limit=10&sortOrder=DESC', null, $ws, 8);
         if (!$r['ok']) {
             return ['status' => 'running', 'stage' => 'در انتظار پاسخ OASM'];
@@ -337,7 +463,15 @@ final class Oasm implements Engine
                 }
             }
         }
-        return ['findings' => $findings, 'surface' => $surface, 'kinds' => ($m['kind'] ?? '') === 'vuln' ? [] : ['host', 'port'], 'complete' => true];
+        $out = ['findings' => $findings, 'surface' => $surface, 'kinds' => ($m['kind'] ?? '') === 'vuln' ? [] : ['host', 'port'], 'complete' => true];
+        if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
+            // a run the target cut short saw nothing: say so, and never mark earlier findings fixed because of it
+            $run = $this->pipelineRun($m, 20) ?? [];
+            $blocked = in_array((string) ($run['status'] ?? ''), ['failed', 'cancelled'], true) && $this->blockedByTarget($m);
+            $out['partial'] = $blocked ? self::BLOCKED : '';
+            $out['complete'] = !$blocked && (string) ($run['status'] ?? '') === 'completed';
+        }
+        return $out;
     }
 
     /** One OASM vulnerability → MC-Sec finding. */
@@ -366,6 +500,9 @@ final class Oasm implements Engine
     {
         $this->cid = (int) $asset->client_id;
         $m = json_decode((string) $scan->backend_meta, true) ?: [];
+        if (($m['run'] ?? '') !== '') {
+            return $this->call('POST', '/api/jobs-registry/histories/' . rawurlencode((string) $m['run']) . '/cancel', null, (string) ($m['ws'] ?? ''), 8)['ok'];
+        }
         $r = $this->call('GET', '/api/targets/' . rawurlencode((string) $scan->backend_ref) . '/runs?limit=5&active=true', null, (string) ($m['ws'] ?? ''), 8);
         $ok = true;
         foreach ((array) ($r['json']['data'] ?? []) as $run) {
@@ -394,12 +531,21 @@ final class Oasm implements Engine
         }
         $msg = 'OASM ' . $ver . ' در دسترس است و حساب سرویس وارد شد؛ کشف سطح حمله آماده است.';
         $sws = (string) ($w['json']['data'][0]['id'] ?? '');
-        $n = $sws !== '' ? $this->nuclei($sws, false, 0) : ['known' => false, 'installed' => false, 'workers' => 0];
-        if ($n['known'] && $n['workers'] < 1) {
-            $msg .= ' ولی «اسکن آسیب‌پذیری» اجرا نمی‌شود: در OASM کارگری برای nuclei نیست (کارگر حالت node با Docker لازم است). تا آن موقع این نوع اسکن را در «قیمت و پلن» خاموش کنید؛ اگر مشتری بگیرد، فوراً ناموفق می‌شود و اعتبارش برمی‌گردد.';
-        } elseif ($n['known']) {
-            $msg .= ' اسکن آسیب‌پذیری (nuclei) هم آماده است.';
+        $n = $sws !== '' ? $this->tool($sws, 'nuclei', false, 0) : ['known' => false, 'installed' => false, 'ready' => false, 'id' => ''];
+        $online = 0;
+        if ($sws !== '') {
+            foreach ((array) ($this->call('GET', '/api/workers?scope=cloud&limit=50', null, $sws, 20, 0)['json']['data'] ?? []) as $wk) {
+                $online += !empty($wk['isOnline']) ? 1 : 0;
+            }
         }
-        return ['ok' => true, 'message' => $msg, 'version' => $ver, 'ms' => $h['ms'], 'vuln' => $n['known'] ? $n['workers'] > 0 : null];
+        $msg .= ' کارگر آنلاین: ' . \McSec\Text::fa($online) . '.';
+        if ($online < 1) {
+            $msg .= ' هیچ کارگری آنلاین نیست؛ اسکن‌ها در صف OASM می‌مانند.';
+        } elseif ($n['known']) {
+            $msg .= ' nuclei در فهرست ابزارهاست؛ برای اجرای آن (و هر ابزار نصب‌شدنی) دست‌کم یک کارگر باید در حالت node با Docker باشد. MC-Sec آن را در فضای هر مشتری خودکار نصب و با تنظیم ملایم اجرا می‌کند.';
+        } else {
+            $msg .= ' nuclei در فهرست ابزارهای OASM پیدا نشد؛ «اسکن آسیب‌پذیری» اجرا نمی‌شود.';
+        }
+        return ['ok' => true, 'message' => $msg, 'version' => $ver, 'ms' => $h['ms'], 'vuln' => $sws === '' ? null : ($n['known'] && $online > 0), 'workers' => $online];
     }
 }

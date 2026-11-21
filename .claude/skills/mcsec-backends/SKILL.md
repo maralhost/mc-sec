@@ -44,3 +44,12 @@ description: >
 3. IP اسکنرها (OASM workers، Osmedeus، سرور WHMCS برای بررسی داخلی) را در فایروال‌ها و WAF خود مارال allowlist کنید و در صفحه‌ی راهنمای مشتری اعلام کنید.
 4. یک دارایی آزمایشی را با هر profile اسکن کنید و نتیجه را با پنل خود موتور مقایسه کنید.
 5. `php tools/selftest.php` روی سرور WHMCS.
+
+## OASM: رفتارهای زنده‌ی ۳۰ آبان ۱۴۰۵ (staging، v0.12.1) که کد ۰٫۳٫۰ بر آن‌هاست
+- **اسکن آسیب‌پذیری فقط از راه پروژه:** `POST /api/projects` با `scopeRules:[{mode:include,type:target,value:<targetId>}]` و `tools:[{toolId, category:'vulnerabilities', input:['web','host'], stage:1, config:{…}}]`؛ بعد `GET /api/projects/{id}` برای `projectWorkflows[0].id` و `POST /api/projects/{id}/workflows/{binding}/run` ← `{jobHistoryId}`. پیشرفت: `GET /api/projects/{id}/runs` (همان `id`، با `status`، `isCompleted`، `stepsTotal/Done/Failed`). تنظیم پروژه دقیقاً اعمال می‌شود. `POST /api/vulnerabilities/scan` تنظیم پیش‌فرض ورک‌فلو را می‌گذارد (۱۵۰ درخواست در ثانیه، interactsh روشن) و پروفایل ابزار فقط بخشی را عوض می‌کند: از آن استفاده نکن.
+- **`availableWorkersCount` برای ابزارهای connector همیشه ۰ است**، حتی وقتی کارگر node آن‌ها را اجرا می‌کند. هرگز با آن تصمیم نگیر. شمار کارگر آنلاین: `GET /api/workers?scope=cloud` (با `X-Workspace-Id`)، فیلد `isOnline`؛ حالت کارگر (node یا cli) در پاسخ نیست.
+- **`isReady` فقط پس از داشتن پروفایل تنظیم:** `POST /api/tools/{id}/config-profiles` با `{name, isDefault:true, config}`؛ طرح‌واره از `GET /api/tools/{id}/schema`. nuclei: `concurrency`، `rateLimit`، `interactsh`، `excludeTags`، `tags`، `templateIds`، `severity`، `followRedirects`.
+- **هدفِ مسدودکننده:** محافظ وب سرور هدف IP اسکنر را در چند ثانیه می‌بندد (حتی با ۱۰ درخواست در ثانیه)؛ OASM اجرا را `failed` می‌کند و هر کار را تا ۴ بار دوباره می‌فرستد. دلیل در `GET /api/jobs-registry?jobHistoryId=<run>` ← `data[].errorLogs[].logMessage` («target marked unresponsive»). `Oasm::blockedByTarget` همین را می‌خواند و اسکن «ارزیابی ناقص» می‌شود.
+- nuclei روی هدفی که سرویس وب ندارد هم همین پیام را می‌دهد.
+- **هدف IP، بی نام دامنه اسکن می‌شود** (صفحه‌ی پیش‌فرض سرور، نه vhost). برای سرور اصلی دامنه‌ی پشت CDN هنوز راهی نداریم (نقشه‌ی راه).
+- **زیرساخت staging:** OASM روی `185.165.119.147` (compose در `/opt/security-platform/oasm-docker`، درگاه gRPC `16276` فقط روی loopback) با یک کارگر node؛ کارگر دوم روی `88.198.128.141` در `/opt/oasm-worker` که با سرویس `oasm-tunnel` (تونل SSH محدود) وصل می‌شود. Docker Hub از سرور OASM 403 می‌دهد؛ imageهای connector از ghcr.io می‌آیند.

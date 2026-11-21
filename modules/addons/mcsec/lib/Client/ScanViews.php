@@ -147,6 +147,7 @@ final class ScanViews
             $partial = trim((string) ($sum['partial'] ?? ''));
             if ($partial !== '') {
                 $out .= Ui::alert('warning', '<strong>ارزیابی ناقص.</strong> ' . Ui::plain($partial) . ' این اسکن «سالم» به حساب نمی‌آید و یافته‌هایی که این بار سنجیده نشدند باز می‌مانند تا اسکن کامل بعدی.'
+                    . ((int) ($sum['refunded'] ?? 0) > 0 ? ' ' . self::e(Text::fa((int) $sum['refunded'])) . ' اعتبار این اسکن به حسابتان برگشت.' : '')
                     . (trim(Settings::get('scanner_ips')) !== '' ? ' <a href="index.php?m=mcsec&amp;p=scanner" target="_blank" rel="noopener">IPهای اسکنر برای مجاز کردن</a>' : ''), 'alert');
             }
             $out .= '<div class="mcs-grid3">' . Ui::card('<ul class="mcs-diff"><li><strong>' . self::e(Text::fa((int) ($sum['new'] ?? 0))) . '</strong><span>تازه</span></li><li class="is-ok"><strong>' . self::e(Text::fa((int) ($sum['fixed'] ?? 0)))

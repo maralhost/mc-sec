@@ -12,7 +12,13 @@ if (!preg_match("~define\('MCSEC_VERSION', '([0-9]+\.[0-9]+\.[0-9]+)'\)~", $boot
     exit(1);
 }
 $version = $m[1];
-$include = ['modules/addons/mcsec', 'modules/servers/mcsecplan', 'README.md'];
+// every version tells admins what changed (the "تغییرات نسخه‌ها" page reads this file)
+$changes = include $root . '/modules/addons/mcsec/changelog.php';
+if (!is_array($changes) || empty($changes[$version]['items'])) {
+    fwrite(STDERR, "changelog.php has no entry for version {$version}: add it before releasing\n");
+    exit(1);
+}
+$include =['modules/addons/mcsec', 'modules/servers/mcsecplan', 'README.md'];
 $files = [];
 foreach ($include as $rel) {
     $path = $root . '/' . $rel;

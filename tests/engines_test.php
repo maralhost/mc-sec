@@ -21,7 +21,7 @@ $asset = Db::table('mod_mcsec_assets')->where('id', 50)->first();
 
 section('OASM: per-client user, workspace, target, discovery, results');
 $calls = [];
-$state = ['run_done' => false, 'nuclei_installed' => false, 'nuclei_workers' => 1];
+$state = ['run_done' => false, 'nuclei_installed' => false, 'nuclei_profile' => false, 'workers_online' => 2, 'pl_status' => 'in_progress', 'pl_error' => '', 'project_gone' => false, 'projects' => 0];
 http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
     $path = (string) parse_url($url, PHP_URL_PATH) . (parse_url($url, PHP_URL_QUERY) ? '?' . parse_url($url, PHP_URL_QUERY) : '');
     $calls[] = [$method, $path, $headers['X-Workspace-Id'] ?? '', $headers['Origin'] ?? '', $body];
@@ -62,14 +62,51 @@ http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
             'description' => 'XML-RPC is enabled', 'solution' => 'Disable it', 'references' => ['https://wordpress.org'], 'cveId' => [], 'cweId' => ['CWE-200'], 'cvssScore' => 5.3, 'tags' => ['wordpress'],
             'extractedResults' => ['<methodResponse>']]], 'hasNextPage' => false])];
     }
+    if (str_starts_with($path, '/api/tools?')) {
+        // live shape (0.12.1): availableWorkersCount is 0 for every connector, even while a node worker runs them
+        return ['status' => 200, 'body' => json_encode(['data' => [
+            ['id' => 'tool-zap', 'name' => 'zap', 'type' => 'connector', 'isInstalled' => false, 'isReady' => null, 'hasConfigProfile' => false, 'availableWorkersCount' => 0],
+            ['id' => 'tool-nuclei', 'name' => 'nuclei', 'type' => 'connector', 'isInstalled' => $state['nuclei_installed'], 'isReady' => $state['nuclei_installed'] && $state['nuclei_profile'], 'hasConfigProfile' => $state['nuclei_profile'], 'availableWorkersCount' => 0],
+        ]])];
+    }
+    if ($method === 'POST' && $path === '/api/tools/tool-nuclei/config-profiles') {
+        $state['nuclei_profile'] = true;
+        return ['status' => 201, 'body' => json_encode(['id' => 'prof-1', 'config' => $b['config'] ?? []])];
+    }
+    if ($method === 'POST' && $path === '/api/projects') {
+        $state['projects']++;
+        $state['project_gone'] = false;
+        return ['status' => 201, 'body' => json_encode(['id' => 'proj-' . $state['projects'], 'name' => $b['name'], 'totalAssets' => 1])];
+    }
+    if ($method === 'GET' && preg_match('~^/api/projects/(proj-\d+)$~', $path, $pm)) {
+        return ['status' => 200, 'body' => json_encode(['id' => $pm[1], 'projectWorkflows' => [['id' => 'bind-' . $pm[1]]]])];
+    }
+    if ($method === 'POST' && preg_match('~^/api/projects/(proj-\d+)/workflows/(bind-proj-\d+)/run$~', $path, $pm)) {
+        return $state['project_gone'] ? ['status' => 404, 'body' => '{"message":"Project not found"}'] : ['status' => 201, 'body' => json_encode(['jobHistoryId' => 'jh-' . $pm[1], 'assets' => 1])];
+    }
+    if ($method === 'POST' && preg_match('~^/api/projects/proj-\d+/archive$~', $path)) {
+        return ['status' => 201, 'body' => '{}'];
+    }
+    if ($method === 'GET' && preg_match('~^/api/projects/(proj-\d+)/runs~', $path, $pm)) {
+        $done = $state['pl_status'] !== 'in_progress';
+        return ['status' => 200, 'body' => json_encode(['data' => [['id' => 'jh-' . $pm[1], 'status' => $state['pl_status'], 'isCompleted' => $done, 'stepsTotal' => 1,
+            'stepsDone' => $state['pl_status'] === 'completed' ? 1 : 0, 'stepsFailed' => $state['pl_status'] === 'failed' ? 1 : 0, 'newVulnerabilities' => 0], ['id' => 'jh-other', 'status' => 'completed', 'isCompleted' => true]]])];
+    }
+    if (str_starts_with($path, '/api/jobs-registry?jobHistoryId=')) {
+        return ['status' => 200, 'body' => json_encode(['data' => [['status' => 'failed', 'tool' => ['name' => 'nuclei'], 'errorLogs' => $state['pl_error'] !== '' ? [['logMessage' => $state['pl_error']]] : []]], 'total' => 1])];
+    }
+    if ($method === 'POST' && str_starts_with($path, '/api/jobs-registry/histories/')) {
+        return ['status' => 201, 'body' => '{}'];
+    }
     if ($path === '/api/vulnerabilities/scan') {
         return ['status' => 201, 'body' => '{"message":"ok"}'];
     }
-    if (str_starts_with($path, '/api/tools?category=vulnerabilities')) {
-        return ['status' => 200, 'body' => json_encode(['data' => [
-            ['id' => 'tool-zap', 'name' => 'zap', 'isInstalled' => false, 'availableWorkersCount' => 0],
-            ['id' => 'tool-nuclei', 'name' => 'nuclei', 'isInstalled' => $state['nuclei_installed'], 'availableWorkersCount' => $state['nuclei_workers']],
-        ]])];
+    if (str_starts_with($path, '/api/workers?')) {
+        $ws = [];
+        for ($i = 0; $i < 3; $i++) {
+            $ws[] = ['id' => 'w' . $i, 'isOnline' => $i < $state['workers_online']];
+        }
+        return ['status' => 200, 'body' => json_encode(['data' => $ws, 'total' => 3])];
     }
     if ($path === '/api/health') {
         return ['status' => 200, 'body' => '{"status":"ok"}'];
@@ -118,7 +155,7 @@ ok(count($exp) === 1 && $exp[0]['key'] === 'builtin.port.3306' && $exp[0]['sever
 $v = Oasm::normalize(['name' => 'X', 'severity' => 'HIGH', 'host' => 'h', 'ports' => ['8080'], 'cveId' => ['CVE-2024-1'], 'extractedResults' => ['a']]);
 ok($v['location'] === 'h:8080' && $v['key'] === 'oasm.cve-2024-1' && $v['evidence'] === 'a', 'normalize: location from host+port, key from CVE');
 
-section('OASM: vulnerability scan, session renewal on 401');
+section('OASM: vulnerability scan through a polite pipeline, session renewal on 401');
 Db::table('mod_mcsec_scans')->insert(['id' => 701, 'client_id' => 1, 'asset_id' => 50, 'profile' => 'vuln', 'engine' => 'oasm', 'status' => 'queued', 'queued_at' => Clock::now(), 'started_at' => Clock::now()]);
 $asset = Db::table('mod_mcsec_assets')->where('id', 50)->first();
 \McSec\Kv::set('oasm:s:1', Crypto::encrypt('session=expired'), 3600);
@@ -130,32 +167,97 @@ http_mock(function ($m, $u, $h, $b, $o) use ($prev) {
     }
     return $prev($m, $u, $h, $b, $o);
 });
-$r = $oasm->start(Db::table('mod_mcsec_scans')->where('id', 701)->first(), $asset, \McSec\Catalog::get('vuln'));
-ok($r['ok'] && $r['meta']['kind'] === 'vuln', 'vuln scan started after signing in again');
+$vuln = \McSec\Catalog::get('vuln');
+$r = $oasm->start(Db::table('mod_mcsec_scans')->where('id', 701)->first(), $asset, $vuln);
+ok($r['ok'] && $r['meta']['kind'] === 'vuln' && $r['meta']['project'] === 'proj-1' && $r['meta']['run'] === 'jh-proj-1', 'vuln scan started as a project run, after signing in again (' . json_encode($r['meta'] ?? $r) . ')');
 ok(Crypto::decrypt((string) \McSec\Kv::get('oasm:s:1')) === 'session=c1-cookie', 'fresh client session cached');
 $inst = array_values(array_filter($calls, fn ($c) => $c[1] === '/api/tools/install'));
-ok(count($inst) === 1 && $inst[0][2] === 'ws-1' && str_contains((string) $inst[0][4], 'tool-nuclei'), 'nuclei installed in the client workspace before the first vulnerability scan');
+ok(count($inst) === 1 && $inst[0][2] === 'ws-1' && str_contains((string) $inst[0][4], 'tool-nuclei'), 'nuclei installed in the client workspace (availableWorkersCount 0 does not stop it)');
+$prof = array_values(array_filter($calls, fn ($c) => $c[1] === '/api/tools/tool-nuclei/config-profiles'));
+ok(count($prof) === 1 && $prof[0][2] === 'ws-1', 'a default config profile is created so OASM calls the tool ready');
+$proj = json_decode((string) array_values(array_filter($calls, fn ($c) => $c[0] === 'POST' && $c[1] === '/api/projects'))[0][4], true);
+$cfg = $proj['tools'][0]['config'] ?? [];
+ok(($cfg['rateLimit'] ?? 0) === 10 && ($cfg['concurrency'] ?? 0) === 5 && ($cfg['interactsh'] ?? null) === false && ($cfg['excludeTags'] ?? []) === ['dos', 'fuzz', 'intrusive'], 'pipeline carries the polite settings (10 req/s, no interactsh, no dos/fuzz/intrusive)');
+ok($proj['scopeRules'] === [['mode' => 'include', 'type' => 'target', 'value' => 't-1']] && $proj['tools'][0]['toolId'] === 'tool-nuclei' && empty($proj['runNow']), 'scope is exactly this asset\'s target');
+ok(!array_filter($calls, fn ($c) => $c[1] === '/api/vulnerabilities/scan'), 'OASM\'s default scan (150 req/s, interactsh) is never used');
 Db::table('mod_mcsec_scans')->where('id', 701)->update(['status' => 'running', 'backend_ref' => 't-1', 'backend_meta' => json_encode($r['meta'])]);
-$c = $oasm->collect(Db::table('mod_mcsec_scans')->where('id', 701)->first(), $asset, \McSec\Catalog::get('vuln'));
-ok(count($c['findings']) === 1 && $c['findings'][0]['severity'] === 'medium' && $c['findings'][0]['cvss'] == 5.3, 'nuclei finding normalized');
-ok(str_contains(implode("\n", array_map(fn ($c) => $c[1], $calls)), '') || true, 'calls recorded');
+$s701 = Db::table('mod_mcsec_scans')->where('id', 701)->first();
+$p = $oasm->poll($s701, $asset, $vuln);
+ok($p['status'] === 'running' && str_contains($p['stage'], 'nuclei'), 'running: found by its own run id among the project runs');
+$state['pl_status'] = 'completed';
+ok($oasm->poll($s701, $asset, $vuln)['status'] === 'completed', 'completed');
+$c = $oasm->collect($s701, $asset, $vuln);
+ok(count($c['findings']) === 1 && $c['findings'][0]['severity'] === 'medium' && $c['findings'][0]['cvss'] == 5.3 && $c['complete'] === true && $c['partial'] === '', 'nuclei finding normalized; a complete run');
+ok($oasm->cancel($s701, $asset) && (bool) array_filter($calls, fn ($c) => $c[1] === '/api/jobs-registry/histories/jh-proj-1/cancel'), 'cancel targets the pipeline run');
 
-// staging today: the only OASM worker runs the built-in tools, none can run nuclei
-Db::table('mod_mcsec_scans')->whereIn('id', [700, 701])->update(['status' => 'completed']);
-$state['nuclei_workers'] = 0;
+// second scan of the same asset: the project is reused; changed settings make a new one
 $calls = [];
+$r2 = $oasm->start($s701, $asset, $vuln);
+ok($r2['ok'] && $r2['meta']['project'] === 'proj-1' && !array_filter($calls, fn ($c) => $c[0] === 'POST' && $c[1] === '/api/projects'), 'next scan reuses the asset\'s project');
+setting('nuclei_rate', '25');
+$calls = [];
+$r3 = $oasm->start($s701, $asset, $vuln);
+$proj3 = json_decode((string) (array_values(array_filter($calls, fn ($c) => $c[0] === 'POST' && $c[1] === '/api/projects'))[0][4] ?? '{}'), true);
+ok($r3['ok'] && $r3['meta']['project'] === 'proj-2' && ($proj3['tools'][0]['config']['rateLimit'] ?? 0) === 25 && (bool) array_filter($calls, fn ($c) => $c[1] === '/api/projects/proj-1/archive'), 'changed settings: old project archived, new one with the new rate');
+setting('nuclei_rate', '100000');
+setting('nuclei_exclude_tags', 'dos, bad tag!, <script>');
+ok(Oasm::toolConfig('nuclei')['rateLimit'] === 150 && Oasm::toolConfig('nuclei')['excludeTags'] === ['dos'], 'settings are bounded and cleaned before they reach OASM');
+setting('nuclei_rate', '10');
+setting('nuclei_exclude_tags', 'dos,fuzz,intrusive');
+$oasm->start($s701, $asset, $vuln);
+$state['project_gone'] = true;
+$before = $state['projects'];
+$r4 = $oasm->start($s701, $asset, $vuln);
+ok($r4['ok'] && $state['projects'] === $before + 1 && $r4['meta']['project'] === 'proj-' . $state['projects'], 'project deleted in OASM: made again');
+
+// the target bans the scanner mid-scan (seen live): an incomplete assessment, credits back, nothing marked fixed
+Db::table('mod_mcsec_scans')->whereIn('id', [700, 701])->update(['status' => 'completed']);
+$old = Db::table('mod_mcsec_findings')->insertGetId(['client_id' => 1, 'asset_id' => 50, 'fp' => sha1('old-vuln'), 'engine' => 'oasm', 'profile' => 'vuln', 'title' => 'Earlier finding', 'severity' => 'high', 'status' => 'open', 'last_scan_id' => 701]);
+$state['pl_status'] = 'in_progress';
 $bal = \McSec\Credits::balance(1)['total'];
 $q = \McSec\Scans::queue(1, $asset, 'vuln', 0, 1);
 ok($q['ok'] && $q['credits'] > 0 && \McSec\Credits::balance(1)['total'] === $bal - $q['credits'], 'vuln scan queued and charged');
 \McSec\Scans::dispatch(microtime(true) + 10);
+ok(Db::table('mod_mcsec_scans')->where('id', $q['scan_id'])->value('status') === 'running', 'running in OASM');
+$state['pl_status'] = 'failed';
+$state['pl_error'] = "nuclei scan: 0 findings but 8069 template results were skipped (target marked unresponsive) — check target reachability and container network egress\n--- container logs ---";
+$prevV = \McSec\Http::$mock;
+http_mock(function ($m, $u, $h, $b, $o) use ($prevV) {
+    return str_contains($u, '/api/vulnerabilities?') ? ['status' => 200, 'body' => '{"data":[],"hasNextPage":false}'] : $prevV($m, $u, $h, $b, $o);
+});
+Clock::$fixed += 120;
+\McSec\Scans::pollRunning(microtime(true) + 10);
 $s = Db::table('mod_mcsec_scans')->where('id', $q['scan_id'])->first();
-ok($s->status === 'failed' && $s->error_ref !== '' && \McSec\Credits::balance(1)['total'] === $bal, 'no worker for nuclei: failed at once (not after hours), credits back, support code');
-ok(!array_filter($calls, fn ($c) => $c[1] === '/api/vulnerabilities/scan'), 'nothing left pending in OASM');
+$sum = json_decode((string) $s->summary, true);
+ok($s->status === 'completed' && str_contains((string) ($sum['partial'] ?? ''), 'مسدود'), 'banned by the target: completed as an incomplete assessment, with the reason (' . $s->status . ' ' . $s->error . ')');
+ok(\McSec\Credits::balance(1)['total'] === $bal && ($sum['refunded'] ?? 0) === $q['credits'], 'the customer got nothing, so the credits went back (' . \McSec\Credits::balance(1)['total'] . ' vs ' . $bal . ' ' . json_encode($sum, JSON_UNESCAPED_UNICODE) . ')');
+ok(Db::table('mod_mcsec_findings')->where('id', $old)->value('status') === 'open', 'an earlier finding is not marked fixed by a scan that saw nothing');
+ok(str_contains((string) Db::table('mod_mcsec_assets')->where('id', 50)->value('partial'), 'IP اسکنر'), 'asset marked incomplete, telling to allow the scanner IP');
+$state['pl_status'] = 'in_progress';
+$state['pl_error'] = 'connector image pull failed';
+$q2 = \McSec\Scans::queue(1, Db::table('mod_mcsec_assets')->where('id', 50)->first(), 'vuln', 0, 1);
+if (empty($q2['ok'])) {
+    echo '  q2: ' . json_encode($q2, JSON_UNESCAPED_UNICODE) . "\n";
+}
+\McSec\Scans::dispatch(microtime(true) + 10);
+$state['pl_status'] = 'failed';
+Clock::$fixed += 120;
+\McSec\Scans::pollRunning(microtime(true) + 10);
+$s2 = Db::table('mod_mcsec_scans')->where('id', $q2['scan_id'])->first();
+ok($s2->status === 'failed' && $s2->error_ref !== '' && \McSec\Credits::balance(1)['total'] === $bal, 'any other OASM failure: failed with a support code, credits back (' . $s2->status . ')');
+http_mock($prevV);
+$state['pl_status'] = 'in_progress';
+$state['pl_error'] = '';
+
+$calls = [];
 $h = $oasm->health();
-ok($h['ok'] && $h['vuln'] === false && str_contains($h['message'], 'nuclei') && str_contains($h['message'], 'خاموش کنید'), 'setup test: discovery ready, vulnerability scan flagged as not runnable');
-ok(!array_filter($calls, fn ($c) => $c[1] === '/api/tools/install' && $c[2] === 'svc-ws'), 'the test only reads (installs nothing)');
-$state['nuclei_workers'] = 1;
-ok($oasm->health()['vuln'] === true, 'with a worker: vulnerability scan ready');
+ok($h['ok'] && $h['vuln'] === true && $h['workers'] === 2 && str_contains($h['message'], '۲'), 'setup test: workers online counted, nuclei known');
+ok(!array_filter($calls, fn ($c) => $c[0] === 'POST' && $c[2] === 'svc-ws'), 'the test only reads (installs and creates nothing)');
+$state['workers_online'] = 0;
+$h = $oasm->health();
+ok($h['ok'] && $h['vuln'] === false && str_contains($h['message'], 'هیچ کارگری'), 'no worker online: said plainly');
+$state['workers_online'] = 2;
+ok(\McSec\Catalog::get('recon') === null && \McSec\Catalog::get('deep') === null && isset(\McSec\Catalog::all(true)['deep']), 'Osmedeus profiles are off for customers by default (an admin can turn them on)');
 
 section('Osmedeus: API key, run, progress, results');
 setting('osm_url', 'http://osm.test:8811');
