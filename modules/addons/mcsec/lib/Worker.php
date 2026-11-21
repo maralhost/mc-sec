@@ -78,6 +78,7 @@ final class Worker
             'kv' => fn () => Kv::purge(),
             'notices' => fn () => Notify::purge(),
             'reports' => fn () => Reports::purge(),
+            'chat' => fn () => Assistant::purge(),
         ];
         foreach ($steps as $step => $fn) {
             try {

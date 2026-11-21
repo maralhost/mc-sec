@@ -439,3 +439,36 @@ body:not(.lagom) .mcs .btn-primary{background:var(--t-primary);border:1px solid 
 .mcs .mcs-tool{border:1.5px solid var(--t-line);border-radius:12px;padding:.6rem .8rem}.mcs .mcs-tool .mcs-check{margin:0}.mcs .mcs-tool .mcs-check small{display:block;color:var(--t-muted)}
 .mcs .mcs-tool-opts{display:flex;flex-wrap:wrap;gap:.5rem 1rem;margin-block-start:.5rem;padding-inline-start:1.9rem}.mcs .mcs-tool-opt{display:flex;flex-direction:column;gap:.2rem;font-size:.85rem;color:var(--t-muted);margin:0;min-inline-size:180px}
 .mcs .mcs-tool:has(input:checked){border-color:var(--t-primary)}
+/* the assistant: a conversation, cards that wait for «تأیید و انجام», and the box to write in */
+.mcs .mcs-chat{list-style:none;margin:0 0 var(--t-gap);padding:0;display:flex;flex-direction:column;gap:.7rem}
+.mcs .mcs-msg{display:flex;flex-direction:column;gap:.2rem;max-inline-size:min(100%,46rem);scroll-margin-block-start:5rem}
+.mcs .mcs-msg-user{align-self:flex-start;align-items:flex-start}.mcs .mcs-msg-bot,.mcs .mcs-msg-card{align-self:flex-end;align-items:flex-end}
+.mcs .mcs-bubble{padding:.6rem .9rem;border-radius:14px;background:var(--t-bg);border:1px solid var(--t-line);box-shadow:var(--t-shadow);overflow-wrap:anywhere}
+.mcs .mcs-msg-user .mcs-bubble{background:var(--t-primary-soft2);border-color:transparent;border-start-start-radius:4px;color:var(--t-head)}
+.mcs .mcs-msg-bot .mcs-bubble{border-start-end-radius:4px}
+.mcs .mcs-bubble p{margin:0 0 .4rem}.mcs .mcs-bubble p:last-child{margin:0}
+.mcs .mcs-msg-meta{font-size:.74rem;color:var(--t-muted);padding-inline:.3rem}.mcs .mcs-msg-fail{color:var(--t-err)}
+.mcs .mcs-chat-links{display:flex;flex-wrap:wrap;gap:.4rem}
+.mcs a.mcs-chat-link{display:inline-flex;align-items:center;gap:.3rem;padding:.15rem .6rem;border-radius:999px;background:var(--t-soft);font-size:.82rem;text-decoration:none;max-inline-size:100%}
+.mcs a.mcs-chat-link:hover,.mcs a.mcs-chat-link:focus-visible{background:var(--t-primary-soft2)}.mcs .mcs-chat-link .mcs-ico{width:14px;height:14px;flex:none}
+.mcs .mcs-chat-link span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mcs .mcs-act{inline-size:min(100%,34rem);padding:.8rem 1rem;border-radius:14px;background:var(--t-bg);border:1.5px solid var(--t-line);box-shadow:var(--t-shadow)}
+.mcs .mcs-msg-card.is-pending .mcs-act{border-color:var(--t-primary)}
+.mcs .mcs-act p{margin:0 0 .45rem}.mcs .mcs-act-title{display:flex;align-items:center;gap:.4rem;font-size:.82rem;color:var(--t-muted)}.mcs .mcs-act-title .mcs-ico{width:16px;height:16px;color:var(--t-primary)}
+.mcs .mcs-act-what{font-weight:700;color:var(--t-head);font-size:1.02rem}.mcs .mcs-act-cost{display:flex;align-items:center;gap:.35rem}.mcs .mcs-act-cost .mcs-ico{width:16px;height:16px}
+.mcs .mcs-act .mcs-actions{margin-block-start:.6rem}.mcs .mcs-act .mcs-terms{flex-basis:100%;margin-block-end:.5rem}
+.mcs .mcs-chat-wait{display:none}.mcs .mcs-chat.is-sending .mcs-chat-wait{display:flex}
+.mcs .mcs-chat-wait .mcs-bubble{color:var(--t-muted);display:flex;align-items:center;gap:.5rem}
+.mcs .mcs-dots{display:inline-flex;gap:3px}.mcs .mcs-dots i{width:6px;height:6px;border-radius:50%;background:currentColor;animation:mcs-pulse 1.2s ease-in-out infinite}
+.mcs .mcs-dots i:nth-child(2){animation-delay:.2s}.mcs .mcs-dots i:nth-child(3){animation-delay:.4s}
+.mcs .mcs-chat-box{position:sticky;inset-block-end:.5rem;z-index:2}.mcs .mcs-chat-box .card-body{padding-block:.8rem}
+.mcs .mcs-chat-form{margin:0}.mcs .mcs-composer{display:flex;gap:.5rem;align-items:flex-end}
+.mcs .mcs-composer textarea{flex:1;min-block-size:3.2rem;max-block-size:12rem;resize:vertical}
+.mcs .mcs-composer .btn{flex:none;display:inline-flex;align-items:center;gap:.35rem}
+.mcs .mcs-chat-form .mcs-help{margin:.35rem 0 0}
+.mcs .mcs-starters{display:flex;flex-wrap:wrap;gap:.4rem;margin-block-end:.6rem}
+.mcs .mcs-starter{border:1px solid var(--t-line);background:var(--t-bg);color:var(--t-text);border-radius:999px;padding:.25rem .8rem;font:inherit;font-size:.88rem;cursor:pointer;min-block-size:36px}
+.mcs .mcs-starter:hover,.mcs .mcs-starter:focus-visible{border-color:var(--t-primary);color:var(--t-primary)}
+@media (max-width:640px){.mcs .mcs-composer{flex-direction:column;align-items:stretch}.mcs .mcs-msg{max-inline-size:100%}}
+@media (prefers-reduced-motion:reduce){.mcs .mcs-dots i{animation:none}}
+.mcs .mcs-act-what bdi{display:inline-block;max-inline-size:100%}

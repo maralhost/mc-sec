@@ -12,13 +12,16 @@ function demo_data(): void
     $tz = new DateTimeZone('Asia/Tehran');
     Clock::$fixed = (new DateTimeImmutable('2026-11-11 10:00', $tz))->getTimestamp();
     foreach (['enabled' => '1', 'access_mode' => 'all', 'max_assets_free' => '20', 'ai_enabled' => '1', 'ai_model' => 'gpt-4.1-mini', 'allow_private_ips' => '1',
-        'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
+        'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'assistant_enabled' => '1', 'assistant_all' => '1', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
         setting($k, $v);
     }
     \McSec\Rules::save(['scope' => 'group', 'target' => 2, 'monthly' => 30, 'max_assets' => 10]);
     \McSec\Settings::setSecret('ai_key', 'demo');
     \McSec\Settings::setSecret('bale_token', 'demo');
     \McSec\Ai::$mock = function (array $body) {
+        if (($a = demo_assistant($body)) !== null) {
+            return $a;
+        }
         $user = (string) ($body['messages'][1]['content'] ?? '');
         preg_match_all('~"id":(\d+)~', $user, $m);
         $ids = array_slice(array_values(array_unique(array_map('intval', $m[1]))), 0, 20);
@@ -121,4 +124,55 @@ function demo_data(): void
         $score = max(20, min(95, $score + random_int(-4, 6)));
         Db::table('mod_mcsec_snapshots')->insertOrIgnore(['client_id' => 1, 'day' => Clock::today(-$d), 'score' => $score, 'counts' => '{}']);
     }
+}
+
+/** A stand-in for the model behind «دستیار امنیت» in the preview: a few fixed turns in the assistant's JSON protocol. */
+function demo_assistant(array $body): ?array
+{
+    if (!str_contains((string) ($body['messages'][0]['content'] ?? ''), 'دستیار امنیت')) {
+        return null;
+    }
+    $user = (string) ($body['messages'][1]['content'] ?? '');
+    $talk = json_decode((string) (preg_match('~<conversation>\n(.*)\n</conversation>~s', $user, $m) ? $m[1] : '[]'), true) ?: [];
+    $last = '';
+    foreach ($talk as $t) {
+        $last = ($t['role'] ?? '') === 'customer' ? (string) $t['text'] : $last;
+    }
+    $data = json_decode((string) (preg_match('~<scan_data>\n(.*)\n</scan_data>~s', $user, $m) ? $m[1] : '{}'), true) ?: [];
+    $acc = (array) ($data['account'] ?? []);
+    $site = null;
+    foreach ((array) ($acc['assets'] ?? []) as $a) {
+        $site ??= ($a['status'] ?? '') === 'verified' && ($a['kind'] ?? '') === 'domain' ? $a : null;
+    }
+    $out = fn (string $reply, string $tool = '', array $args = []) => ['ok' => true, 'text' => json_encode(['reply' => $reply, 'tool' => $tool, 'args' => (object) $args], JSON_UNESCAPED_UNICODE)];
+    if (!empty($data['tool_results'])) {
+        $r = (array) end($data['tool_results']);
+        if (isset($r['error'])) {
+            return $out('این کار الان شدنی نیست: ' . $r['error']);
+        }
+        $f = (array) ($r['result'] ?? []);
+        if (isset($f['fix'])) {
+            return $out('مشکل «' . ($f['title'] ?? '') . '» روی ' . ($f['asset'] ?? '') . " است.\n" . ($f['fix']['why'] ?? '') . "\n\nقدم‌ها:\n- " . implode("\n- ", array_slice((array) ($f['fix']['steps'] ?? []), 0, 3)) . "\n\nوقتی رفع کردید بگویید تا دوباره بسنجم.");
+        }
+        return $out('اطلاعات را دیدم؛ جزئیات در پیوند زیر است.');
+    }
+    if (preg_match('~هفته|خودکار|زمان‌بندی~u', $last) && $site) {
+        return $out('زمان‌بندی هفتگی «بررسی سلامت پایه» را برای ' . $site['value'] . ' آماده کردم. اگر درست است روی کارت تأیید کنید.', 'create_schedule', ['asset' => $site['id'], 'type' => 'hygiene', 'every' => 'weekly', 'hour' => 3, 'weekday' => 6]);
+    }
+    if (preg_match('~اسکن~u', $last) && $site) {
+        return $out('«بررسی سلامت پایه» را برای ' . $site['value'] . ' آماده کردم. هزینه روی کارت نوشته شده؛ اگر موافقید تأیید کنید.', 'start_scan', ['asset' => $site['id'], 'type' => 'hygiene']);
+    }
+    if (preg_match('~([a-z0-9-]+(?:\.[a-z0-9-]+)+)~i', $last, $d) && preg_match('~اضافه|افزود|بیفزا~u', $last)) {
+        return $out('افزودن ' . $d[1] . ' را آماده کردم. پس از تأیید شما، باید مالکیتش هم تأیید شود.', 'add_target', ['value' => $d[1]]);
+    }
+    if (preg_match('~اضافه|افزود~u', $last)) {
+        return $out('نشانی دامنه یا IP را بنویسید، مثل example.com، تا برای افزودن آماده‌اش کنم.');
+    }
+    $top = (array) (($acc['most_important_findings'] ?? [])[0] ?? []);
+    if (preg_match('~رفع|چطور|مهم‌ترین~u', $last) && $top) {
+        return $out('', 'investigate_vulnerability', ['finding' => $top['id']]);
+    }
+    $o = (array) ($acc['open_findings'] ?? []);
+    return $out('امتیاز امنیت حساب شما ' . ($acc['score'] ?? '—') . ' از 100 است (' . ($acc['score_label'] ?? '') . '). ' . (int) ($o['critical'] ?? 0) . ' مورد بحرانی و ' . (int) ($o['high'] ?? 0)
+        . ' مورد مهم باز دارید و ' . ($acc['credits'] ?? 0) . " اعتبار.\nاگر بخواهید، مهم‌ترین مورد را توضیح می‌دهم یا یک اسکن تازه آماده می‌کنم.");
 }

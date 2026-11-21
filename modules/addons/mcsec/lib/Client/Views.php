@@ -31,11 +31,12 @@ use McSec\Text;
 final class Views
 {
     private const PAGES = ['home' => 'نمای کلی', 'assets' => 'دارایی‌ها', 'asset' => 'دارایی', 'scans' => 'اسکن‌ها', 'scan' => 'اسکن', 'findings' => 'یافته‌ها',
-        'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'recipes' => 'اسکن سفارشی', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
+        'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'recipes' => 'اسکن سفارشی', 'assistant' => 'دستیار امنیت', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
 
     private const DESC = ['home' => 'وضعیت امنیت سایت‌ها و سرورهایتان، آنچه تغییر کرده و مهم‌ترین کار بعدی.', 'assets' => 'دامنه‌ها و IPهایی که بررسی می‌شوند؛ فقط دارایی تأییدشده اسکن می‌شود.',
         'scans' => 'اسکن تازه بگیرید و تاریخچه‌ی اسکن‌ها را ببینید.', 'findings' => 'مشکل‌های پیدا شده، از مهم‌ترین، با راه رفع هر کدام.',
         'reports' => 'گزارش‌های پایه و هوش مصنوعی برای خودتان، مدیرتان یا تیم فنی.', 'schedules' => 'اسکن خودکار روزانه، هفتگی یا ماهانه؛ تغییرها را خبر می‌دهیم.', 'recipes' => 'حالت پیشرفته: از ابزارهای اسکن، اسکن خودتان را بسازید و ذخیره کنید.',
+        'assistant' => 'بپرسید یا بگویید چه کاری می‌خواهید؛ دستیار از داده‌ی همین حساب جواب می‌دهد و کار را برای تأیید شما آماده می‌کند.',
         'notify' => 'خبرها و این‌که از چه راهی و برای چه چیزهایی خبرتان کنیم.', 'credits' => 'مانده‌ی اعتبار اسکن، پلن، خرید بسته و ریز تراکنش‌ها.', 'activity' => 'هر کاری که در این بخش انجام شده است.'];
 
     private const MENU = [
@@ -76,6 +77,9 @@ final class Views
         $menu = self::MENU;
         if (\McSec\Recipes::allowed($cid)) {
             $menu['surface'][1][] = ['recipes', 'layers'];
+        }
+        if (\McSec\Assistant::allowed($cid)) {
+            $menu[''][1][] = ['assistant', 'sparkle'];
         }
         foreach ($menu as [$title, $items]) {
             $links = '';
@@ -164,6 +168,7 @@ final class Views
             'scan' => ScanViews::detail($ctx),
             'schedules' => ScanViews::schedules($ctx),
             'recipes' => ScanViews::recipes($ctx),
+            'assistant' => AssistantViews::page($ctx),
             'findings' => FindingViews::list($ctx),
             'finding' => FindingViews::detail($ctx),
             'reports' => ReportViews::list($ctx),

@@ -11,7 +11,7 @@ namespace McSec;
 final class Audit
 {
     public const ACTIONS = [
-        'recipe' => 'اسکن سفارشی', 'code' => 'ثبت کد', 'rule' => 'قاعده‌ی قیمت', 'auto_topup' => 'شارژ خودکار',
+        'assistant' => 'کار با دستیار', 'recipe' => 'اسکن سفارشی', 'code' => 'ثبت کد', 'rule' => 'قاعده‌ی قیمت', 'auto_topup' => 'شارژ خودکار',
         'asset_add' => 'افزودن دارایی', 'asset_remove' => 'حذف دارایی', 'asset_verified' => 'تأیید مالکیت', 'asset_lapsed' => 'منقضی شدن تأیید',
         'scan_start' => 'شروع اسکن', 'scan_cancel' => 'لغو اسکن', 'finding_status' => 'تغییر وضعیت یافته', 'schedule_save' => 'زمان‌بندی',
         'schedule_delete' => 'حذف زمان‌بندی', 'report_request' => 'درخواست گزارش', 'notify_save' => 'تنظیم اعلان', 'topup' => 'خرید اعتبار',

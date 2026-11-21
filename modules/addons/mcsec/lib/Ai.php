@@ -17,9 +17,18 @@ final class Ai
     /** Tests: fn(array $body): array{ok:bool,text:string,error?:string} */
     public static $mock = null;
 
+    /** Seconds; 0 = the ai_timeout setting. The assistant sets a shorter one because a customer is waiting. */
+    public static int $timeout = 0;
+
+    /** A model is set up (address, model, key), whether or not AI reports are switched on. */
+    public static function ready(): bool
+    {
+        return Settings::get('ai_base_url') !== '' && Settings::get('ai_model') !== '' && (Settings::secret('ai_key') !== '' || self::$mock !== null);
+    }
+
     public static function configured(): bool
     {
-        return Settings::bool('ai_enabled') && Settings::get('ai_base_url') !== '' && Settings::get('ai_model') !== '' && (Settings::secret('ai_key') !== '' || self::$mock !== null);
+        return Settings::bool('ai_enabled') && self::ready();
     }
 
     /**
@@ -76,7 +85,7 @@ final class Ai
             return ['ok' => false, 'error' => 'AI base URL must be http(s)', 'status' => 0];
         }
         $r = Http::request('POST', $url, ['Authorization' => 'Bearer ' . Settings::secret('ai_key')], $body,
-            ['timeout' => max(15, Settings::int('ai_timeout')), 'connect' => 8, 'max_bytes' => 4 * 1024 * 1024]);
+            ['timeout' => self::$timeout > 0 ? self::$timeout : max(15, Settings::int('ai_timeout')), 'connect' => 8, 'max_bytes' => 4 * 1024 * 1024]);
         if (!$r['ok']) {
             $msg = (string) ($r['json']['error']['message'] ?? $r['json']['message'] ?? $r['error'] ?? '');
             return ['ok' => false, 'error' => 'HTTP ' . $r['status'] . ' ' . mb_substr($msg !== '' ? $msg : $r['body'], 0, 300), 'status' => $r['status']];

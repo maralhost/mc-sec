@@ -436,6 +436,19 @@ final class Installer
             $t->integer('updated_at')->default(0);
         });
 
+        // 0.9.0 the assistant: one conversation per user of an account; an action the model asked for waits here for the customer
+        $make('mod_mcsec_chat', function ($t) {
+            $t->increments('id');
+            $t->integer('client_id');
+            $t->integer('user_id')->default(0);
+            $t->string('role', 10);                   // user | assistant | action
+            $t->text('body')->nullable();
+            $t->text('data')->nullable();            // assistant: links; action: tool, args, cost, note, result
+            $t->string('status', 10)->default('');   // action: pending | running | done | failed | cancelled | expired; user: failed = no answer came
+            $t->integer('created_at')->default(0);
+            $t->index(['client_id', 'user_id', 'id']);
+        });
+
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)
         $col = function (string $table, string $column, callable $def) use ($s): void {
             if ($s->hasTable($table) && !$s->hasColumn($table, $column)) {

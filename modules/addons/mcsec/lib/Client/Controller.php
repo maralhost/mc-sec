@@ -38,10 +38,10 @@ final class Controller
     /** Tests: return arrays instead of printing JSON and exiting. */
     public static bool $testMode = false;
 
-    public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'notify', 'credits', 'activity'];
+    public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'assistant', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
@@ -364,6 +364,19 @@ final class Controller
                 }
                 $r = \McSec\Recipes::save($who, ['id' => $int('id'), 'name' => $in('name'), 'tools' => array_map(fn ($t) => is_scalar($t) ? (string) $t : '', (array) ($_POST['tools'] ?? [])), 'options' => $opts]);
                 return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=recipes&saved=' . (int) $r['id']] : ['flash' => 'err:' . $r['error']];
+            case 'chat_send':
+                // the model is called here, in the customer's own POST; it can only answer or put a card up for confirmation
+                $r = \McSec\Assistant::send($who, $in('preset') !== '' ? $in('preset') : $in('text'));
+                return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=assistant#mcs-chat-end'] : ['flash' => 'err:' . $r['error']];
+            case 'chat_confirm':
+                $r = \McSec\Assistant::confirm($who, $int('id'), ($_POST['terms'] ?? '') === '1');
+                return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=assistant#mcs-chat-end'] : ['flash' => 'err:' . $r['error']];
+            case 'chat_cancel':
+                \McSec\Assistant::cancel($who, $int('id'));
+                return ['redirect' => 'index.php?m=mcsec&p=assistant#mcs-chat-end'];
+            case 'chat_clear':
+                \McSec\Assistant::clear($who);
+                return ['redirect' => 'index.php?m=mcsec&p=assistant'];
             case 'recipe_remove':
                 $r = \McSec\Recipes::remove($who, $int('id'));
                 return ['flash' => $r['ok'] ? 'ok:اسکن سفارشی حذف شد. اسکن‌های قبلی و یافته‌هایش می‌مانند؛ زمان‌بندی‌هایش متوقف می‌شوند.' : 'err:' . $r['error']];

@@ -30,7 +30,7 @@ if ($fresh) {
 } else {
     $tz = new DateTimeZone('Asia/Tehran');
     \McSec\Clock::$fixed = (new DateTimeImmutable('2026-11-11 10:30', $tz))->getTimestamp();
-    \McSec\Ai::$mock = fn () => ['ok' => false, 'error' => 'preview'];
+    \McSec\Ai::$mock = fn (array $body) => demo_assistant($body) ?? ['ok' => false, 'error' => 'preview'];
 }
 $dark = ($_GET['dark'] ?? '') === '1';
 $who = match ($_GET['as'] ?? '') {

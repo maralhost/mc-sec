@@ -375,7 +375,7 @@ final class Views
     {
         $out = self::guide('<p>هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است. روال پیشنهادی: «چه کسانی» = list با چند حساب آزمایشی ← آزمودن ← groups یا all.</p>');
         foreach (['general' => 'عمومی و دسترسی', 'scope' => 'محدوده‌ی اسکن: فهرست ممنوع و CDN', 'scans' => 'ظرفیت و اسکن', 'checks' => 'فهرست سیاه، پایش و اولویت آسیب‌پذیری‌ها',
-            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'advanced' => 'حالت پیشرفته: اسکن سفارشی مشتری', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
+            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'advanced' => 'حالت پیشرفته: اسکن سفارشی مشتری', 'assistant' => 'دستیار امنیت (گفت‌وگوی هوش مصنوعی)', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
             $out .= self::box($l, self::form('settings', 'save_settings', self::fields($g) . '<button class="btn btn-primary">ذخیره</button>')
                 . ($g === 'checks' ? self::intelStatus() : '')
                 . ($g === 'scope' ? '<hr>' . self::form('settings', 'scope_test', '<div class="mcsa-field"><label for="mcsa-scope-t">این دامنه یا IP اسکن می‌شود؟</label>'

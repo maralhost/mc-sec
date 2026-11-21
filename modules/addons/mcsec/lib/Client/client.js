@@ -51,6 +51,12 @@ root.addEventListener('submit',function(e){var f=e.target;if(e.defaultPrevented|
  if(f.hasAttribute('data-mcs-quiet')){quiet(f,u,d,bs);return;}
  go(u.href,true,d).then(function(){bs.forEach(function(b){b.disabled=false;});});});
 
+// the assistant: "thinking" while the answer is on its way; Enter sends, Shift+Enter makes a new line
+root.addEventListener('submit',function(e){var f=e.target;if(!f||!f.hasAttribute||!f.hasAttribute('data-mcs-chat'))return;var c=view.querySelector('.mcs-chat');if(!c)return;
+ c.classList.add('is-sending');var w=c.querySelector('.mcs-chat-wait');if(w)w.scrollIntoView({block:'nearest'});setTimeout(function(){c.classList.remove('is-sending');},120000);},true);
+root.addEventListener('keydown',function(e){var t=e.target;if(e.key!=='Enter'||e.shiftKey||e.isComposing||!t||t.id!=='mcs-chat-text'||!t.form)return;
+ e.preventDefault();if(t.value.trim()==='')return;if(t.form.requestSubmit)t.form.requestSubmit();else t.form.submit();});
+
 document.addEventListener('click',function(e){qa('details.mcs-menu[open]').forEach(function(d){if(!d.contains(e.target))d.removeAttribute('open');});});
 document.addEventListener('keydown',function(e){if(e.key!=='Escape')return;qa('details.mcs-menu[open]').forEach(function(d){d.removeAttribute('open');});
  var sh=view.querySelector('.mcs-shell.is-menu-open');if(sh){setMenu(false);var b=view.querySelector('[data-mcs-menu]');if(b)b.focus();}});
