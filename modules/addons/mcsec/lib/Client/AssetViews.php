@@ -235,7 +235,7 @@ final class AssetViews
             ? Ui::alert('warning', '<strong>آخرین بررسی (' . self::e(Views::when((int) $a->checked_at)) . '):</strong> ' . self::e($a->check_note), 'alert') : '';
         $check = $ctx['manage'] && $a->kind !== 'cidr' ? Ui::form($ctx, 'asset', 'verify_check', '<input type="hidden" name="asset" value="' . (int) $a->id . '"><button type="submit" class="btn btn-primary">' . Ui::ico('refresh') . 'الان بررسی کن</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $a->id) : '';
         $intro = '<p>' . ($fresh ? 'دارایی افزوده شد. ' : '') . 'برای این‌که اسکن فقط روی دارایی‌های خودتان انجام شود، یکی از راه‌های زیر را انجام دهید. لازم نیست این صفحه را باز نگه دارید: هر چند دقیقه خودمان بررسی می‌کنیم و پس از تأیید خبرتان می‌کنیم'
-            . ((string) ($a->autoscan ?? '') !== '' ? ' و اسکن «' . self::e(Catalog::all(true)[$a->autoscan]['label'] ?? $a->autoscan) . '» خودکار شروع می‌شود' : '') . '.</p>';
+            . ((string) ($a->autoscan ?? '') !== '' ? ' و اسکن «' . self::e(Catalog::label((string) ($a->autoscan))) . '» خودکار شروع می‌شود' : '') . '.</p>';
         return Ui::card($intro . $tabs . $note . '<div class="mcs-actions">' . $check . '</div>', $a->status === 'lapsed' ? 'تأیید دوباره‌ی مالکیت' : 'تأیید مالکیت', 'key', '', 'is-attention');
     }
 

@@ -111,7 +111,7 @@ final class FindingViews
             'احتمال سوءاستفاده (EPSS)' => $f->epss !== null ? self::e(Text::fa(round((float) $f->epss * 100, 1)) . '٪') . ' <small class="mcs-muted">احتمال بهره‌برداری در ۳۰ روز آینده</small>' : '',
             'در حال بهره‌برداری (KEV)' => (int) ($f->kev ?? 0) === 1 ? Ui::chip('بله', 'err') : '',
             'اولویت' => (int) ($f->priority ?? 0) > 0 && $f->status === 'open' ? self::e(Text::fa((int) $f->priority) . ' از ۱۰۰') . ' <small class="mcs-muted">از شدت، احتمال و بهره‌برداری فعال</small>' : '',
-            'پیدا شده با' => self::e((Catalog::all(true)[$f->profile]['label'] ?? '') . ' (' . Catalog::engineLabel((string) $f->engine) . ')'),
+            'پیدا شده با' => self::e((Catalog::label((string) ($f->profile))) . ' (' . Catalog::engineLabel((string) $f->engine) . ')'),
             'اولین بار' => self::e(Text::date((int) $f->first_seen_at)),
             'آخرین بار' => self::e(Text::date((int) $f->last_seen_at)) . ((int) $f->reopened > 0 ? ' — ' . self::e(Text::fa((int) $f->reopened)) . ' بار پس از رفع دوباره دیده شد' : ''),
         ]);

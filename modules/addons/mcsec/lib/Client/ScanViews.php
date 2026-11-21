@@ -42,7 +42,7 @@ final class ScanViews
                 'failed' => '<span class="mcs-small">' . self::e($s->error) . '</span>',
                 default => '',
             };
-            $rows .= '<tr>' . Ui::td('اسکن', '<a href="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '">' . self::e(Catalog::all(true)[$s->profile]['label'] ?? $s->profile) . '</a>'
+            $rows .= '<tr>' . Ui::td('اسکن', '<a href="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '">' . self::e(Catalog::label((string) ($s->profile))) . '</a>'
                     . ((int) $s->schedule_id > 0 ? ' ' . Ui::chip('خودکار', 'info') : ''))
                 . ($withAsset ? Ui::td('دارایی', Ui::ltr($s->asset_value ?? '')) : '')
                 . Ui::td('وضعیت', self::statusChip($s))
@@ -100,7 +100,7 @@ final class ScanViews
                     . ($why !== '' ? ' · ' . Ui::ico('lock') . self::e($why) : '') . '</span></label>';
             $first = $first && $disabled;
         }
-        $cards .= '</fieldset>';
+        $cards .= '</fieldset>' . (\McSec\Recipes::allowed($cid) ? '<p class="mcs-help">' . Ui::ico('layers') . 'ترکیب دیگری می‌خواهید؟ <a href="index.php?m=mcsec&amp;p=recipes">اسکن سفارشی خودتان را بسازید</a>.</p>' : '');
         $acc = Accounts::get($cid);
         $terms = (int) $acc->terms_at === 0 ? '<label class="mcs-check mcs-terms"><input type="checkbox" name="terms" value="1" required><span>' . self::e(Settings::get('terms_text')) . '</span></label>' : '';
         $submit = '<div class="mcs-launch-foot"><button type="submit" class="btn btn-primary btn-lg" data-mcs-launch>' . Ui::ico('play') . '<span data-mcs-launch-text>شروع اسکن</span></button>'
@@ -109,6 +109,65 @@ final class ScanViews
         return Ui::card(Ui::form($ctx, 'scans', 'scan_start', $assets . $cards . $terms . $submit, '', 'mcs-launcher'), 'اسکن تازه', 'play', '', '" id="new');
     }
 
+    /** Advanced mode: the account's own scans and the builder (works without JavaScript: ticks and selects). */
+    public static function recipes(array $ctx): string
+    {
+        $cid = $ctx['who']['client_id'];
+        $guide = '<p>در حالت پیشرفته خودتان انتخاب می‌کنید کدام ابزارها روی دارایی‌تان اجرا شوند. اسکنی که می‌سازید ذخیره می‌شود و مثل اسکن‌های آماده در «اسکن‌ها» و «زمان‌بندی‌ها» دیده می‌شود.</p>'
+            . '<p>ترتیب اجرا را خودمان می‌چینیم (اول پیدا کردن صفحه‌ها، بعد سنجیدن آن‌ها). هزینه = جمع هزینه‌ی ابزارها برای هر دارایی. اسکن فقط روی دارایی تأییدشده‌ی خودتان اجرا می‌شود و سرعت ابزارها از حد ایمن بالاتر نمی‌رود.</p>';
+        if (!\McSec\Recipes::allowed($cid)) {
+            return Ui::guide($guide, true) . Ui::card(Ui::emptyState('layers', 'اسکن سفارشی برای حساب‌های دارای پلن است', 'با پلن امنیت سایبری می‌توانید از ابزارهای اسکن، ترکیب دلخواه خودتان را بسازید.',
+                '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=credits">دیدن پلن و اعتبار</a>'));
+        }
+        $mine = \McSec\Recipes::forClient($cid);
+        $out = Ui::guide($guide, !$mine);
+        if (isset($_GET['saved'])) {
+            $out .= Ui::alert('success', 'اسکن سفارشی ذخیره شد. برای اجرا به <a href="index.php?m=mcsec&amp;p=scans#new">اسکن تازه</a> بروید و آن را انتخاب کنید.', 'check');
+        }
+        if ($mine) {
+            $rows = '';
+            foreach ($mine as $r) {
+                $p = \McSec\Recipes::profile($r);
+                $act = $ctx['manage'] ? '<div class="mcs-actions"><a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=recipes&amp;edit=' . (int) $r->id . '#build">ویرایش</a>'
+                    . Ui::form($ctx, 'recipes', 'recipe_remove', '<input type="hidden" name="id" value="' . (int) $r->id . '"><button type="submit" class="btn btn-default btn-sm">حذف</button>', 'اسکن سفارشی «' . $r->name . '» حذف شود؟', 'mcs-inline') . '</div>' : '';
+                $rows .= '<tr>' . Ui::td('نام', '<strong dir="auto">' . self::e($r->name) . '</strong>' . (!$p['enabled'] ? ' ' . Ui::chip('یکی از ابزارها در دسترس نیست', 'warn') : ''))
+                    . Ui::td('ابزارها', Ui::ltr(implode(' → ', array_map(fn ($t) => Catalog::TOOLS[$t]['label'], $p['tools']))) . (Catalog::risk($p) === 'heavy' ? ' ' . Ui::chip('درخواست زیاد به هدف', 'warn') : ''))
+                    . Ui::td('برای', self::e(implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $p['kinds']))))
+                    . Ui::td('هزینه', self::e(Text::fa(\McSec\Rules::cost($cid, (int) $p['credits'])) . ' اعتبار برای هر دارایی')) . Ui::td('', $act) . '</tr>';
+            }
+            $out .= Ui::card(Ui::table(['نام', 'ابزارها', 'برای', 'هزینه', ''], $rows), 'اسکن‌های سفارشی شما', 'layers',
+                '<a class="btn btn-primary btn-sm" href="index.php?m=mcsec&amp;p=scans#new">' . Ui::ico('play') . 'اجرا</a>');
+        }
+        if (!$ctx['manage']) {
+            return $out;
+        }
+        $edit = \McSec\Recipes::get($cid, (int) Text::toAscii((string) ($_GET['edit'] ?? '0')));
+        $has = $edit ? explode(',', (string) $edit->tools) : [];
+        $chosen = $edit ? \McSec\Db::decode((string) $edit->options, []) : [];
+        $tools = \McSec\Recipes::tools();
+        if (!$tools) {
+            return $out . Ui::card('<p class="mcs-muted">فعلاً ابزاری برای اسکن سفارشی در دسترس نیست. کمی بعد دوباره سر بزنید.</p>', 'ساختن اسکن سفارشی', 'layers');
+        }
+        $list = '<fieldset class="mcs-tools"><legend>' . Ui::ico('layers') . 'کدام ابزارها؟ (تا ' . self::e(Text::fa(\McSec\Recipes::MAX_TOOLS)) . ' ابزار)</legend>';
+        foreach ($tools as $name => $t) {
+            $opts = '';
+            foreach (\McSec\Recipes::OPTIONS[$name] ?? [] as $o => [$label, $choices]) {
+                $id = 'mcs-o-' . $name . '-' . $o;
+                $opts .= '<label class="mcs-tool-opt" for="' . $id . '"><span>' . self::e($label) . '</span>'
+                    . Ui::select('opt[' . $name . '][' . $o . ']', array_map(fn ($c) => $c[0], $choices), (string) ($chosen[$name][$o] ?? array_key_first($choices)), $id) . '</label>';
+            }
+            $list .= '<div class="mcs-tool"><label class="mcs-check"><input type="checkbox" name="tools[]" value="' . self::e($name) . '"' . (in_array($name, $has, true) ? ' checked' : '') . '>'
+                . '<span><strong>' . Ui::ltr($t['label']) . '</strong> ' . self::e($t['what']) . '<small>' . self::e(Text::fa((int) $t['credits']) . ' اعتبار · ' . Catalog::RISK[$t['risk']] . ' · برای ' . implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $t['kinds']))) . '</small></span></label>'
+                . ($opts !== '' ? '<div class="mcs-tool-opts">' . $opts . '</div>' : '') . '</div>';
+        }
+        $list .= '</fieldset>';
+        $form = Ui::form($ctx, 'recipes', 'recipe_save', ($edit ? '<input type="hidden" name="id" value="' . (int) $edit->id . '">' : '')
+            . Ui::field('mcs-rname', 'نام این اسکن', '<input class="form-control" id="mcs-rname" name="name" maxlength="80" dir="auto" value="' . self::e($edit->name ?? '') . '" placeholder="مثلاً بررسی هفتگی فروشگاه">')
+            . $list . '<p class="mcs-help">ابزارهایی که نوع دارایی مشترک ندارند (مثلاً یکی فقط دامنه و دیگری فقط IP) با هم ذخیره نمی‌شوند.</p>'
+            . '<div class="mcs-actions"><button type="submit" class="btn btn-primary">' . ($edit ? 'ذخیره‌ی تغییرها' : 'ذخیره‌ی اسکن سفارشی') . '</button>'
+            . ($edit ? '<a class="btn btn-default" href="index.php?m=mcsec&amp;p=recipes">انصراف</a>' : '') . '</div>');
+        return $out . Ui::card($form, $edit ? 'ویرایش «' . $edit->name . '»' : 'ساختن اسکن سفارشی', 'layers', '', '" id="build');
+    }
     public static function detail(array $ctx): string
     {
         $cid = $ctx['who']['client_id'];
@@ -117,7 +176,7 @@ final class ScanViews
             return Views::missing('این اسکن', 'index.php?m=mcsec&p=scans', 'بازگشت به اسکن‌ها');
         }
         $asset = Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->first();
-        $profile = Catalog::all(true)[$s->profile] ?? ['label' => $s->profile, 'eta' => '', 'desc' => ''];
+        $profile = Catalog::find((string) $s->profile) ?? ['label' => $s->profile, 'eta' => '', 'desc' => ''];
         Views::$pageTitle = self::e($profile['label']) . ' ' . Ui::ltr($asset->value ?? '', 'mcs-title-ltr') . ' ' . self::statusChip($s);
         $out = '';
         // a scan of the real server behind a CDN domain says which domain it is for
@@ -221,7 +280,7 @@ final class ScanViews
                     . Ui::form($ctx, 'schedules', 'schedule_delete', '<input type="hidden" name="id" value="' . (int) $s->id . '"><button type="submit" class="btn btn-default btn-sm btn-danger-text">' . Ui::ico('trash') . '<span class="mcs-sr">حذف</span></button>',
                         'این زمان‌بندی حذف شود؟', 'mcs-inline');
             }
-            $rows .= '<tr>' . Ui::td('اسکن', self::e(Catalog::all(true)[$s->profile]['label'] ?? $s->profile))
+            $rows .= '<tr>' . Ui::td('اسکن', self::e(Catalog::label((string) ($s->profile))))
                 . Ui::td('دارایی', $asset !== null ? Ui::ltr($asset) : self::e('همه‌ی دارایی‌های تأییدشده'))
                 . Ui::td('تکرار', self::e(Schedules::describe($s)))
                 . Ui::td('اجرای بعدی', self::e($s->status === 'active' ? Text::date((int) $s->next_run_at) : '—'))

@@ -244,7 +244,7 @@ final class Schedules
     private static function pause(object $s, string $reason, string $detail = ''): void
     {
         Db::table('mod_mcsec_schedules')->where('id', $s->id)->update(['status' => 'paused', 'pause_reason' => $reason]);
-        Notify::event((int) $s->client_id, 'schedule_paused', ['schedule_id' => (int) $s->id, 'profile' => (string) (Catalog::all(true)[$s->profile]['label'] ?? $s->profile),
+        Notify::event((int) $s->client_id, 'schedule_paused', ['schedule_id' => (int) $s->id, 'profile' => (string) (Catalog::label((string) ($s->profile))),
             'reason' => self::PAUSE[$reason] ?? $reason, 'detail' => $detail], 'sp:' . $s->id . ':' . Clock::today());
     }
 

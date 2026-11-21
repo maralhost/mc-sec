@@ -59,6 +59,9 @@ final class Scans
         if (!$profile) {
             return ['ok' => false, 'error' => 'این نوع اسکن در دسترس نیست.'];
         }
+        if (isset($profile['owner']) && (int) $profile['owner'] !== $clientId) {
+            return ['ok' => false, 'error' => 'این نوع اسکن در دسترس نیست.']; // another account's own scan
+        }
         if (Settings::bool('scans_paused') && empty($opt['admin'])) {
             return ['ok' => false, 'error' => 'اسکن‌ها برای نگهداری موقتاً متوقف‌اند. لطفاً کمی بعد امتحان کنید.'];
         }
@@ -212,7 +215,7 @@ final class Scans
             return false;
         }
         $asset = Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->first();
-        $profile = Catalog::get((string) $s->profile) ?? (Catalog::all(true)[$s->profile] ?? null);
+        $profile = Catalog::find((string) $s->profile);
         if (!$asset || $asset->status !== 'verified' || !$profile) {
             self::fail($s, 'دارایی دیگر تأییدشده نیست یا نوع اسکن خاموش شد.', true);
             return false;
@@ -286,7 +289,7 @@ final class Scans
             return $s;
         }
         $asset = Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->first();
-        $profile = Catalog::all(true)[(string) $s->profile] ?? null;
+        $profile = Catalog::find((string) $s->profile);
         if (!$asset || !$profile) {
             self::fail($s, 'دارایی یا نوع اسکن دیگر وجود ندارد.', true);
             return Db::table('mod_mcsec_scans')->where('id', $id)->first();
@@ -431,7 +434,7 @@ final class Scans
             $back = Credits::refund((int) $s->client_id, 'scan:' . $s->id, 'بازگشت اعتبار اسکن ناموفق', (int) $s->id);
         }
         $asset = Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->first();
-        Notify::event((int) $s->client_id, 'scan_failed', ['scan_id' => (int) $s->id, 'asset' => (string) ($asset->value ?? ''), 'profile' => (string) (Catalog::all(true)[$s->profile]['label'] ?? $s->profile),
+        Notify::event((int) $s->client_id, 'scan_failed', ['scan_id' => (int) $s->id, 'asset' => (string) ($asset->value ?? ''), 'profile' => (string) (Catalog::label((string) ($s->profile))),
             'error' => $why, 'ref' => $ref, 'refunded' => $back], 'sf:' . $s->id);
     }
 

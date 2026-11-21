@@ -162,9 +162,25 @@ final class Catalog
         return $out;
     }
 
+    /** A profile that can start a scan now (a customer's own scan, key u<id>, included). */
     public static function get(string $key): ?array
     {
+        if (Recipes::idOf($key) > 0) {
+            $p = Recipes::find($key);
+            return $p && $p['enabled'] ? $p : null;
+        }
         return self::all()[$key] ?? null;
+    }
+
+    /** Any profile a scan may have been made with: switched-off ones and removed customer scans too. */
+    public static function find(string $key): ?array
+    {
+        return Recipes::idOf($key) > 0 ? Recipes::find($key) : (self::all(true)[$key] ?? null);
+    }
+
+    public static function label(string $key, string $default = ''): string
+    {
+        return (string) (self::find($key)['label'] ?? ($default !== '' ? $default : $key));
     }
 
     public static function engineLabel(string $engine): string
@@ -185,6 +201,19 @@ final class Catalog
             $p['full'] = (int) $p['credits'];
             $p['credits'] = Rules::cost($clientId, (int) $p['credits']); // what this account pays
             $out[$k] = $p;
+        }
+        // advanced mode: the account's own scans, and nobody else's
+        if (Recipes::allowed($clientId)) {
+            foreach (Recipes::forClient($clientId) as $row) {
+                $p = Recipes::profile($row);
+                if (!$p['enabled'] || ($kind !== '' && !in_array($kind, $p['kinds'], true))) {
+                    continue;
+                }
+                $p['allowed'] = true;
+                $p['full'] = (int) $p['credits'];
+                $p['credits'] = Rules::cost($clientId, (int) $p['credits']);
+                $out[$p['key']] = $p;
+            }
         }
         return $out;
     }

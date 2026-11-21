@@ -423,6 +423,19 @@ final class Installer
             $t->unique(['code_id', 'client_id']);     // a code works once per account
         });
 
+        // 0.8.0 advanced mode: a customer's own scans (a saved pipeline of allowed tools with named choices)
+        $make('mod_mcsec_recipes', function ($t) {
+            $t->increments('id');
+            $t->integer('client_id')->index();
+            $t->string('name', 80);
+            $t->string('tools', 160);                 // csv, in pipeline order
+            $t->text('options')->nullable();          // json: tool => option => choice key (Recipes::OPTIONS)
+            $t->string('status', 10)->default('active'); // active | removed
+            $t->integer('created_by')->default(0);
+            $t->integer('created_at')->default(0);
+            $t->integer('updated_at')->default(0);
+        });
+
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)
         $col = function (string $table, string $column, callable $def) use ($s): void {
             if ($s->hasTable($table) && !$s->hasColumn($table, $column)) {

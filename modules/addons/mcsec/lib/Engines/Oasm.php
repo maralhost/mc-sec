@@ -209,7 +209,7 @@ final class Oasm implements Engine
                 if (!$n['known'] || !$n['installed']) {
                     return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run ' . $name . ': ' . (!$n['known'] ? 'tool list not readable or tool missing' : 'not installed in workspace')];
                 }
-                $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1, 'config' => self::toolConfig($name)];
+                $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1, 'config' => \McSec\Recipes::apply(self::toolConfig($name), (array) ($profile['options'][$name] ?? []))];
             }
             try {
                 $run = $this->runPipeline($asset, $ws, $t['id'], (string) $profile['key'], $steps);

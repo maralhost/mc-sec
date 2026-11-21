@@ -434,3 +434,8 @@ body:not(.lagom) .mcs .btn-primary{background:var(--t-primary);border:1px solid 
 .mcs .mcs-codebox input{letter-spacing:.08em;text-transform:uppercase}
 .mcs .mcs-pack.is-offer{border-color:var(--t-primary)}.mcs .mcs-pack-why{color:var(--t-primary);font-weight:600}.mcs .mcs-pack form .btn+.btn{margin-block-start:.4rem}
 @media (max-width:575px){.mcs .mcs-codebox .btn{margin-block-start:0;inline-size:100%}}
+/* 0.8.0: advanced mode */
+.mcs .mcs-tools{border:0;padding:0;margin:0 0 .75rem;display:grid;gap:.5rem}.mcs .mcs-tools legend{font-weight:600;margin-block-end:.5rem;display:flex;gap:.4rem;align-items:center;font-size:1rem}
+.mcs .mcs-tool{border:1.5px solid var(--t-line);border-radius:12px;padding:.6rem .8rem}.mcs .mcs-tool .mcs-check{margin:0}.mcs .mcs-tool .mcs-check small{display:block;color:var(--t-muted)}
+.mcs .mcs-tool-opts{display:flex;flex-wrap:wrap;gap:.5rem 1rem;margin-block-start:.5rem;padding-inline-start:1.9rem}.mcs .mcs-tool-opt{display:flex;flex-direction:column;gap:.2rem;font-size:.85rem;color:var(--t-muted);margin:0;min-inline-size:180px}
+.mcs .mcs-tool:has(input:checked){border-color:var(--t-primary)}

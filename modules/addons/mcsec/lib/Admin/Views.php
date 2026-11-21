@@ -363,7 +363,7 @@ final class Views
                 $btn = Auth::adminCan('ops') ? ($st === 'failed'
                     ? self::form('scans', 'retry_scan', '<input type="hidden" name="scan_id" value="' . (int) $s->id . '"><button class="btn btn-default btn-sm">دوباره</button>')
                     : self::form('scans', 'cancel_scan', '<input type="hidden" name="scan_id" value="' . (int) $s->id . '"><button class="btn btn-default btn-sm">توقف</button>', 'این اسکن متوقف شود؟')) : '';
-                $rows .= '<tr><td>' . (int) $s->id . '</td><td>#' . (int) $s->client_id . '</td><td dir="ltr">' . self::e($s->value) . '</td><td>' . self::e(Catalog::all(true)[$s->profile]['label'] ?? $s->profile) . ' <small>(' . self::e($s->engine) . ')</small></td>'
+                $rows .= '<tr><td>' . (int) $s->id . '</td><td>#' . (int) $s->client_id . '</td><td dir="ltr">' . self::e($s->value) . '</td><td>' . self::e(Catalog::label((string) ($s->profile))) . ' <small>(' . self::e($s->engine) . ')</small></td>'
                     . '<td>' . self::e($st === 'failed' ? $s->error . ' ' . $s->error_ref : Text::fa((int) $s->progress) . '٪ ' . $s->stage) . '</td><td>' . self::e(Text::ago((int) ($s->started_at ?: $s->queued_at))) . '</td><td>' . $btn . '</td></tr>';
             }
             $out .= self::box($label . ' (' . Text::fa(count($list)) . ')', $rows !== '' ? '<table class="table"><thead><tr><th>#</th><th>حساب</th><th>دارایی</th><th>اسکن</th><th>وضعیت</th><th>زمان</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">چیزی نیست.</p>');
@@ -375,7 +375,7 @@ final class Views
     {
         $out = self::guide('<p>هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است. روال پیشنهادی: «چه کسانی» = list با چند حساب آزمایشی ← آزمودن ← groups یا all.</p>');
         foreach (['general' => 'عمومی و دسترسی', 'scope' => 'محدوده‌ی اسکن: فهرست ممنوع و CDN', 'scans' => 'ظرفیت و اسکن', 'checks' => 'فهرست سیاه، پایش و اولویت آسیب‌پذیری‌ها',
-            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
+            'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'advanced' => 'حالت پیشرفته: اسکن سفارشی مشتری', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
             $out .= self::box($l, self::form('settings', 'save_settings', self::fields($g) . '<button class="btn btn-primary">ذخیره</button>')
                 . ($g === 'checks' ? self::intelStatus() : '')
                 . ($g === 'scope' ? '<hr>' . self::form('settings', 'scope_test', '<div class="mcsa-field"><label for="mcsa-scope-t">این دامنه یا IP اسکن می‌شود؟</label>'

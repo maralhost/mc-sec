@@ -81,7 +81,7 @@ final class Reports
         $asset = $assetId > 0 ? Db::table('mod_mcsec_assets')->where('id', $assetId)->first() : null;
         $s = $scanId > 0 ? Db::table('mod_mcsec_scans')->where('id', $scanId)->first() : null;
         return match ($kind) {
-            'scan' => (Catalog::all(true)[$s->profile ?? '']['label'] ?? 'اسکن') . ' — ' . ($asset->value ?? ''),
+            'scan' => (Catalog::label((string) ($s->profile ?? ''), 'اسکن')) . ' — ' . ($asset->value ?? ''),
             'asset' => 'وضعیت امنیت ' . ($asset->value ?? ''),
             'periodic' => 'گزارش دوره‌ای امنیت — ' . Text::date(Clock::now(), false),
             default => 'گزارش کامل امنیت — ' . Text::date(Clock::now(), false),
@@ -183,14 +183,14 @@ final class Reports
         if ($r->kind === 'periodic' || $r->kind === 'account') {
             foreach (Db::rows(Db::table('mod_mcsec_scans')->where('client_id', $clientId)->where('finished_at', '>=', $from ?: Clock::now() - 30 * 86400)->where('finished_at', '<=', $to)
                 ->orderByDesc('id')->limit(50)) as $s) {
-                $scans[] = ['id' => (int) $s->id, 'profile' => (string) (Catalog::all(true)[$s->profile]['label'] ?? $s->profile), 'asset' => (string) ($byId[(int) $s->asset_id]->value ?? ''),
+                $scans[] = ['id' => (int) $s->id, 'profile' => (string) (Catalog::label((string) ($s->profile))), 'asset' => (string) ($byId[(int) $s->asset_id]->value ?? ''),
                     'status' => (string) $s->status, 'finished_at' => (int) $s->finished_at];
             }
         }
         $newCount = count(array_filter($findings, fn ($f) => $f['new']));
         return [
             'v' => 1, 'kind' => (string) $r->kind, 'title' => (string) $r->title, 'generated_at' => Clock::now(), 'client' => Whmcs::clientName($clientId),
-            'period' => ['from' => $from, 'to' => $to], 'scan' => $scan ? ['id' => (int) $scan->id, 'profile' => (string) (Catalog::all(true)[$scan->profile]['label'] ?? $scan->profile),
+            'period' => ['from' => $from, 'to' => $to], 'scan' => $scan ? ['id' => (int) $scan->id, 'profile' => (string) (Catalog::label((string) ($scan->profile))),
                 'started_at' => (int) $scan->started_at, 'finished_at' => (int) $scan->finished_at, 'summary' => Scans::summary($scan)] : null,
             'assets' => array_map(fn ($a) => ['id' => (int) $a->id, 'value' => (string) $a->value, 'status' => (string) $a->status, 'score' => (int) $a->score, 'counts' => Assets::counts($a)], $assets),
             'score' => $score, 'score_label' => Score::label($score), 'counts' => $counts, 'open_total' => count($open),

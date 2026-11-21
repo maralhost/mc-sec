@@ -38,10 +38,10 @@ final class Controller
     /** Tests: return arrays instead of printing JSON and exiting. */
     public static bool $testMode = false;
 
-    public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'notify', 'credits', 'activity'];
+    public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
@@ -354,6 +354,19 @@ final class Controller
             case 'schedule_save':
                 $r = Schedules::save($who, ['id' => $int('id'), 'asset' => $int('asset'), 'profile' => $in('profile'), 'freq' => $in('freq'), 'dow' => $int('dow'), 'dom' => $int('dom'), 'hour' => $int('hour')]);
                 return ['flash' => $r['ok'] ? 'ok:زمان‌بندی ذخیره شد.' : 'err:' . $r['error']];
+            case 'recipe_save':
+                // tools and choices are matched against fixed lists in Recipes::save; nothing typed reaches a tool
+                $opts = [];
+                foreach ((array) ($_POST['opt'] ?? []) as $tool => $set) {
+                    foreach ((array) $set as $o => $c) {
+                        $opts[(string) $tool][(string) $o] = is_scalar($c) ? (string) $c : '';
+                    }
+                }
+                $r = \McSec\Recipes::save($who, ['id' => $int('id'), 'name' => $in('name'), 'tools' => array_map(fn ($t) => is_scalar($t) ? (string) $t : '', (array) ($_POST['tools'] ?? [])), 'options' => $opts]);
+                return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=recipes&saved=' . (int) $r['id']] : ['flash' => 'err:' . $r['error']];
+            case 'recipe_remove':
+                $r = \McSec\Recipes::remove($who, $int('id'));
+                return ['flash' => $r['ok'] ? 'ok:اسکن سفارشی حذف شد. اسکن‌های قبلی و یافته‌هایش می‌مانند؛ زمان‌بندی‌هایش متوقف می‌شوند.' : 'err:' . $r['error']];
             case 'schedule_toggle':
                 $r = Schedules::setActive($who, $int('id'), ($_POST['active'] ?? '') === '1');
                 return ['flash' => $r['ok'] ? 'ok:ذخیره شد.' : 'err:' . $r['error']];

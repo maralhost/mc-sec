@@ -31,11 +31,11 @@ use McSec\Text;
 final class Views
 {
     private const PAGES = ['home' => 'نمای کلی', 'assets' => 'دارایی‌ها', 'asset' => 'دارایی', 'scans' => 'اسکن‌ها', 'scan' => 'اسکن', 'findings' => 'یافته‌ها',
-        'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
+        'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'recipes' => 'اسکن سفارشی', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
 
     private const DESC = ['home' => 'وضعیت امنیت سایت‌ها و سرورهایتان، آنچه تغییر کرده و مهم‌ترین کار بعدی.', 'assets' => 'دامنه‌ها و IPهایی که بررسی می‌شوند؛ فقط دارایی تأییدشده اسکن می‌شود.',
         'scans' => 'اسکن تازه بگیرید و تاریخچه‌ی اسکن‌ها را ببینید.', 'findings' => 'مشکل‌های پیدا شده، از مهم‌ترین، با راه رفع هر کدام.',
-        'reports' => 'گزارش‌های پایه و هوش مصنوعی برای خودتان، مدیرتان یا تیم فنی.', 'schedules' => 'اسکن خودکار روزانه، هفتگی یا ماهانه؛ تغییرها را خبر می‌دهیم.',
+        'reports' => 'گزارش‌های پایه و هوش مصنوعی برای خودتان، مدیرتان یا تیم فنی.', 'schedules' => 'اسکن خودکار روزانه، هفتگی یا ماهانه؛ تغییرها را خبر می‌دهیم.', 'recipes' => 'حالت پیشرفته: از ابزارهای اسکن، اسکن خودتان را بسازید و ذخیره کنید.',
         'notify' => 'خبرها و این‌که از چه راهی و برای چه چیزهایی خبرتان کنیم.', 'credits' => 'مانده‌ی اعتبار اسکن، پلن، خرید بسته و ریز تراکنش‌ها.', 'activity' => 'هر کاری که در این بخش انجام شده است.'];
 
     private const MENU = [
@@ -73,7 +73,11 @@ final class Views
         $running = Scans::activeCount($cid);
         $nav = '';
         $parent = ['asset' => 'assets', 'scan' => 'scans', 'finding' => 'findings', 'report' => 'reports'];
-        foreach (self::MENU as [$title, $items]) {
+        $menu = self::MENU;
+        if (\McSec\Recipes::allowed($cid)) {
+            $menu['surface'][1][] = ['recipes', 'layers'];
+        }
+        foreach ($menu as [$title, $items]) {
             $links = '';
             foreach ($items as [$p, $icon]) {
                 $on = $p === $active || ($parent[$active] ?? '') === $p;
@@ -159,6 +163,7 @@ final class Views
             'scans' => ScanViews::list($ctx),
             'scan' => ScanViews::detail($ctx),
             'schedules' => ScanViews::schedules($ctx),
+            'recipes' => ScanViews::recipes($ctx),
             'findings' => FindingViews::list($ctx),
             'finding' => FindingViews::detail($ctx),
             'reports' => ReportViews::list($ctx),
@@ -227,7 +232,7 @@ final class Views
         // running scans banner
         foreach (Db::rows(Db::table('mod_mcsec_scans as s')->join('mod_mcsec_assets as a', 'a.id', '=', 's.asset_id')->where('s.client_id', $cid)->whereIn('s.status', ['queued', 'running'])
             ->select(['s.id', 's.status', 's.progress', 's.profile', 'a.value'])->limit(3)) as $s) {
-            $out .= Ui::alert('info', 'اسکن «' . self::e(\McSec\Catalog::all(true)[$s->profile]['label'] ?? $s->profile) . '» روی ' . Ui::ltr($s->value) . ' '
+            $out .= Ui::alert('info', 'اسکن «' . self::e(\McSec\Catalog::label((string) ($s->profile))) . '» روی ' . Ui::ltr($s->value) . ' '
                 . ($s->status === 'queued' ? 'در صف است' : 'در حال اجراست (' . self::e(Text::fa((int) $s->progress)) . '٪)') . '. <a href="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '">دیدن پیشرفت</a>', 'radar');
         }
         // sites the light monitoring sees as down
