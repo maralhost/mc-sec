@@ -13,6 +13,8 @@ namespace McSec;
  *  open ⇄ false_positive  with a reason.
  * Accepted and false-positive findings stay out of the score and of alerts, but are still updated when seen.
  * Each finding has a priority (Intel::priority: CVSS or severity, EPSS, CISA KEV); lists are sorted by it.
+ * One issue, one row: a finding whose location is on a host the account also registered as an asset of its own
+ * (a subdomain next to its domain) is filed under that asset, whichever of the two was scanned.
  * Engines hand normalized arrays to ingest() (see Engines\Engine::collect).
  */
 final class Findings
@@ -67,6 +69,12 @@ final class Findings
             $cves = array_merge($cves, Intel::cves(implode(',', array_map('strval', (array) ($it['cve'] ?? [])))));
         }
         $facts = $cves ? Intel::lookup($cves) : [];
+        // the account's other assets by host name: a finding located on one of them belongs to it
+        $owners = [];
+        foreach (Db::rows(Db::table('mod_mcsec_assets')->where('client_id', $asset->client_id)->where('status', 'verified')->where('id', '!=', $asset->id)->whereIn('kind', ['domain', 'ip'])->limit(2000)->select(['id', 'value'])) as $o) {
+            $owners[strtolower((string) $o->value)] = (int) $o->id;
+        }
+        $touched = [];
         foreach ($items as $it) {
             $title = Text::name((string) ($it['title'] ?? ''), 255);
             $key = mb_substr((string) ($it['key'] ?? $title), 0, 160);
@@ -74,7 +82,9 @@ final class Findings
                 continue;
             }
             $loc = mb_substr((string) ($it['location'] ?? $asset->value), 0, 500);
-            $fp = self::fingerprint((int) $asset->id, $key, $loc);
+            $owner = $owners[self::hostOf($loc)] ?? (int) $asset->id;
+            $touched[$owner] = true;
+            $fp = self::fingerprint($owner, $key, $loc);
             if (isset($seenFps[$fp])) {
                 continue;
             }
@@ -104,7 +114,7 @@ final class Findings
                 Db::table('mod_mcsec_findings')->where('id', $old->id)->update($row);
             } else {
                 $id = Db::table('mod_mcsec_findings')->insertGetId($row + [
-                    'client_id' => (int) $asset->client_id, 'asset_id' => (int) $asset->id, 'fp' => $fp, 'status' => 'open',
+                    'client_id' => (int) $asset->client_id, 'asset_id' => $owner, 'fp' => $fp, 'status' => 'open',
                     'first_scan_id' => (int) $scan->id, 'first_seen_at' => $now,
                 ]);
                 $out['new'][] = (int) $id;
@@ -112,16 +122,35 @@ final class Findings
         }
         if ($complete) {
             // what this profile reported before and did not see now is fixed (only for the same asset and profile)
-            $gone = Db::table('mod_mcsec_findings')->where('asset_id', $asset->id)->where('profile', (string) $scan->profile)->where('status', 'open')
-                ->where('last_scan_id', '!=', (int) $scan->id);
-            foreach (Db::rows($gone->select(['id'])) as $g) {
+            // its own findings, and those it filed under another asset of the account in an earlier scan
+            $mine = Db::table('mod_mcsec_scans')->where('asset_id', $asset->id)->where('profile', (string) $scan->profile)->select('id');
+            $gone = Db::table('mod_mcsec_findings')->where('client_id', $asset->client_id)->where('profile', (string) $scan->profile)->where('status', 'open')
+                ->where('last_scan_id', '!=', (int) $scan->id)->where(function ($w) use ($asset, $mine) {
+                    $w->where('asset_id', $asset->id)->orWhereIn('last_scan_id', $mine);
+                });
+            foreach (Db::rows($gone->select(['id', 'asset_id'])) as $g) {
+                $touched[(int) $g->asset_id] = true;
                 Db::table('mod_mcsec_findings')->where('id', $g->id)->where('status', 'open')
                     ->update(['status' => 'fixed', 'fixed_at' => $now, 'fixed_scan_id' => (int) $scan->id, 'status_note' => 'در اسکن ' . $scan->id . ' دیگر دیده نشد']);
                 $out['fixed'][] = (int) $g->id;
             }
         }
-        Assets::refreshStats((int) $asset->id);
+        foreach (array_keys($touched + [(int) $asset->id => true]) as $aid) {
+            Assets::refreshStats((int) $aid);
+        }
         return $out;
+    }
+
+    /** The host a finding's location is on ("https://shop.example.com:8443/x" → shop.example.com). */
+    public static function hostOf(string $location): string
+    {
+        $l = strtolower(trim($location));
+        $l = preg_replace('~^[a-z][a-z0-9+.-]*://~', '', $l) ?? $l;
+        $l = (string) preg_replace('~[/?#].*$~', '', $l);
+        if (str_starts_with($l, '[')) {
+            return trim((string) strstr($l, ']', true), '[');
+        }
+        return substr_count($l, ':') === 1 ? (string) strstr($l, ':', true) : $l;
     }
 
     private static function clip($v, int $max): string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace McSec\Engines;
 
 use McSec\Accounts;
+use McSec\Catalog;
 use McSec\Clock;
 use McSec\Crypto;
 use McSec\Db;
@@ -190,20 +191,32 @@ final class Oasm implements Engine
             return ['ok' => false, 'error' => mb_substr($e->getMessage(), 0, 200), 'retry' => true];
         }
         $since = gmdate('Y-m-d\TH:i:s\Z', Clock::now() - 30);
-        $kind = $profile['key'] === 'vuln' ? 'vuln' : 'discovery';
-        if ($kind === 'vuln') {
-            // nuclei runs through a project pipeline with MC-Sec's own polite settings: POST /vulnerabilities/scan uses
-            // OASM's defaults (150 requests a second, interactsh on), which gets the scanner banned by the target
-            $n = $this->tool($ws, 'nuclei', true);
-            if (!$n['known'] || !$n['installed']) {
-                return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run nuclei: ' . (!$n['known'] ? 'tool list not readable or nuclei missing' : 'not installed in workspace')];
+        $tools = array_values(array_filter(array_map('strval', (array) ($profile['tools'] ?? [])), fn ($n) => isset(Catalog::TOOLS[$n])));
+        $kind = $tools ? 'pipeline' : 'discovery';
+        if ($tools) {
+            // tools run through a project pipeline with MC-Sec's own settings: OASM's built-in vulnerability scan uses
+            // its defaults (150 requests a second, interactsh on), which gets the scanner banned by the target
+            $steps = [];
+            foreach ($tools as $i => $name) {
+                $def = Catalog::TOOLS[$name];
+                if (!in_array((string) $asset->kind, $def['kinds'], true)) {
+                    return ['ok' => false, 'retry' => false, 'error' => $def['label'] . ' does not accept a ' . $asset->kind . ' target'];
+                }
+                if (isset($def['needs']) && Settings::secret($def['needs']) === '') {
+                    return ['ok' => false, 'retry' => false, 'error' => $def['label'] . ' is not set up (setting ' . $def['needs'] . ' is empty)'];
+                }
+                $n = $this->tool($ws, $name, true);
+                if (!$n['known'] || !$n['installed']) {
+                    return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run ' . $name . ': ' . (!$n['known'] ? 'tool list not readable or tool missing' : 'not installed in workspace')];
+                }
+                $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1, 'config' => self::toolConfig($name)];
             }
             try {
-                $run = $this->runPipeline($asset, $ws, $t['id'], 'vuln', 'nuclei', $n['id']);
+                $run = $this->runPipeline($asset, $ws, $t['id'], (string) $profile['key'], $steps);
             } catch (\Throwable $e) {
                 return ['ok' => false, 'error' => mb_substr($e->getMessage(), 0, 200), 'retry' => true];
             }
-            return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'project' => $run['project'], 'run' => $run['run']], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
+            return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'tools' => $tools, 'project' => $run['project'], 'run' => $run['run']], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
         } elseif (!$t['created']) {
             $r = $this->call('POST', '/api/targets/' . rawurlencode($t['id']) . '/re-scan', null, $ws);
         } else {
@@ -238,8 +251,8 @@ final class Oasm implements Engine
             if ($prepare && !$installed) {
                 $installed = $this->call('POST', '/api/tools/install', ['toolId' => $id], $ws, 20, $clientId)['ok'];
             }
-            if ($prepare && $installed && empty($t['hasConfigProfile'])) {
-                $ready = $this->call('POST', '/api/tools/' . rawurlencode($id) . '/config-profiles', ['name' => 'MC-Sec', 'isDefault' => true, 'config' => self::toolConfig($name)], $ws, 20, $clientId)['ok'];
+            if ($prepare && $installed) {
+                $ready = $this->profile($ws, $id, $name, !empty($t['hasConfigProfile']), $clientId) || $ready;
             }
             return ['known' => true, 'installed' => $installed, 'ready' => $ready, 'id' => $id];
         }
@@ -247,31 +260,92 @@ final class Oasm implements Engine
     }
 
     /**
-     * MC-Sec's settings for a tool. nuclei: gentle by default (10 requests a second, 5 templates at once, no
-     * out-of-band probes to public interactsh servers, no dos/fuzz/intrusive templates).
+     * The default config profile of a tool in a workspace (name "MC-Sec"): MC-Sec's settings plus the tool's secrets
+     * (Acunetix URL and key, WPScan token), which stay in the profile and never go into a pipeline. Written again only
+     * when the settings changed (hash in Kv), so a rotated key reaches every workspace at its next scan.
      */
-    public static function toolConfig(string $name): array
+    private function profile(string $ws, string $toolId, string $name, bool $has, int $clientId): bool
     {
-        if ($name !== 'nuclei') {
-            return [];
+        $config = self::toolConfig($name) + self::toolSecrets($name);
+        $hash = sha1((string) json_encode($config));
+        $key = 'oasm:tp:' . substr(sha1($ws . '|' . $toolId), 0, 24);
+        if ($has && Kv::get($key) === $hash) {
+            return true;
         }
-        return [
-            'concurrency' => max(1, min(50, Settings::int('nuclei_concurrency'))), 'rateLimit' => max(1, min(150, Settings::int('nuclei_rate'))),
-            'interactsh' => Settings::bool('nuclei_interactsh'), 'excludeTags' => array_values(array_filter(Settings::csv('nuclei_exclude_tags'), fn ($t) => preg_match('~^[a-z0-9_-]{1,40}$~i', $t) === 1)),
-            'followRedirects' => false, 'severity' => ['info', 'low', 'medium', 'high', 'critical'],
-        ];
+        $base = '/api/tools/' . rawurlencode($toolId) . '/config-profiles';
+        $ok = false;
+        if ($has) {
+            foreach ((array) ($this->call('GET', $base, null, $ws, 20, $clientId)['json'] ?? []) as $p) {
+                if (is_array($p) && (string) ($p['name'] ?? '') === 'MC-Sec' && (string) ($p['id'] ?? '') !== '') {
+                    $ok = $this->call('PATCH', $base . '/' . rawurlencode((string) $p['id']), ['config' => $config], $ws, 20, $clientId)['ok'];
+                }
+            }
+            if (!$ok && Kv::get($key) === null) {
+                $ok = true; // a profile made by an operator in OASM: left as it is
+            }
+        }
+        if (!$ok && !$has) {
+            $ok = $this->call('POST', $base, ['name' => 'MC-Sec', 'isDefault' => true, 'config' => $config], $ws, 20, $clientId)['ok'];
+        }
+        if ($ok) {
+            Kv::set($key, $hash);
+        }
+        return $ok;
     }
 
     /**
-     * Runs one tool on one target through an OASM project (the only place where a pipeline with its own tool settings
-     * can be run on demand). The project of an asset and scan kind is kept (Kv) and reused; when the settings changed
-     * it is archived and a new one made.
+     * MC-Sec's settings for a tool, gentle by default: one request rate for every tool that has one (setting
+     * nuclei_rate), no out-of-band probes, no dos/fuzz/intrusive templates, ZAP in baseline mode (spider and passive
+     * checks, no active attack). An admin may override single keys per tool in the setting tool_configs.
+     */
+    public static function toolConfig(string $name): array
+    {
+        $rate = max(1, min(150, Settings::int('nuclei_rate')));
+        $c = match ($name) {
+            'nuclei' => [
+                'concurrency' => max(1, min(50, Settings::int('nuclei_concurrency'))), 'rateLimit' => $rate,
+                'interactsh' => Settings::bool('nuclei_interactsh'), 'excludeTags' => array_values(array_filter(Settings::csv('nuclei_exclude_tags'), fn ($t) => preg_match('~^[a-z0-9_-]{1,40}$~i', $t) === 1)),
+                'followRedirects' => false, 'severity' => ['info', 'low', 'medium', 'high', 'critical'],
+            ],
+            'katana' => ['rateLimit' => $rate, 'concurrency' => 5, 'parallelism' => 2, 'depth' => 3, 'maxUrls' => 2000, 'crawlDuration' => 600, 'jsCrawl' => true],
+            'zap' => ['scanMode' => 'baseline', 'maxSpiderDuration' => 5, 'maxSpiderDepth' => 5, 'threadPerHost' => 2],
+            'gau' => ['threads' => 2, 'subs' => false],
+            'nmap' => ['topPorts' => 1000, 'noPing' => true, 'retries' => 1, 'hostTimeout' => 600],
+            'ffuf' => ['rate' => $rate, 'threads' => 5, 'wordlist' => 'common', 'maxTime' => 600, 'maxUrls' => 2000, 'autoCalibration' => true],
+            'wpscan' => ['detectionMode' => 'passive', 'pluginsDetection' => 'passive', 'maxThreads' => 2],
+            'acunetix' => ['criticality' => 10, 'maxScanTime' => 240],
+            default => [],
+        };
+        $over = Settings::json('tool_configs')[$name] ?? null;
+        foreach (is_array($over) ? $over : [] as $k => $v) {
+            // secrets and addresses are settings of their own; anything else an admin may tune
+            if (is_string($k) && preg_match('~^[A-Za-z][A-Za-z0-9]{1,40}$~', $k) && !in_array($k, ['apiKey', 'apiToken', 'url', 'proxy', 'headers', 'cookieString', 'httpAuth'], true) && (is_scalar($v) || is_array($v))) {
+                $c[$k] = $v;
+            }
+        }
+        return $c;
+    }
+
+    /** Secrets and addresses a tool needs, for its config profile only. */
+    private static function toolSecrets(string $name): array
+    {
+        return match ($name) {
+            'acunetix' => ['url' => rtrim(Settings::get('acunetix_url'), '/'), 'apiKey' => Settings::secret('acunetix_key'), 'disableTlsChecks' => !Settings::bool('acunetix_verify_tls')],
+            'wpscan' => ['apiToken' => Settings::secret('wpscan_token')],
+            default => [],
+        };
+    }
+
+    /**
+     * Runs a profile's tools on one target through an OASM project (the only place where a pipeline with its own tool
+     * settings can be run on demand; checked live with katana → nuclei + zap). The project of an asset and profile is
+     * kept (Kv) and reused; when the tools or settings changed it is archived and a new one made.
+     * @param array<int,array{toolId:string,category:string,input:array,stage:int,config:array}> $steps
      * @return array{project:string,run:string}
      */
-    private function runPipeline(object $asset, string $ws, string $targetId, string $kind, string $tool, string $toolId): array
+    private function runPipeline(object $asset, string $ws, string $targetId, string $kind, array $steps): array
     {
-        $config = self::toolConfig($tool);
-        $hash = substr(sha1($targetId . '|' . $toolId . '|' . json_encode($config)), 0, 16);
+        $hash = substr(sha1($targetId . '|' . json_encode($steps)), 0, 16);
         $key = 'oasm:pl:' . (int) $asset->id . ':' . $kind;
         $pl = Kv::json($key);
         if (($pl['hash'] ?? '') === $hash && ($pl['project'] ?? '') !== '' && ($pl['binding'] ?? '') !== '') {
@@ -289,8 +363,8 @@ final class Oasm implements Engine
         $c = $this->call('POST', '/api/projects', [
             'name' => mb_substr('mcsec a' . (int) $asset->id . ' ' . $kind . ' ' . $asset->value, 0, 80), 'description' => 'MC-Sec ' . $kind . ' pipeline',
             'scopeRules' => [['mode' => 'include', 'type' => 'target', 'value' => $targetId]], 'autoAddAssets' => true,
-            'tools' => [['toolId' => $toolId, 'category' => 'vulnerabilities', 'input' => ['web', 'host'], 'stage' => 1, 'config' => $config]],
-            'workflowName' => 'MC-Sec ' . $tool,
+            'tools' => $steps,
+            'workflowName' => 'MC-Sec ' . $kind,
         ], $ws, 30);
         $pid = (string) ($c['json']['id'] ?? '');
         if (!$c['ok'] || $pid === '') {
@@ -361,7 +435,9 @@ final class Oasm implements Engine
                 return $bad && !$this->blockedByTarget($m) ? ['status' => 'failed', 'error' => 'OASM: ' . $run['status']] : ['status' => 'completed', 'progress' => 100, 'stage' => 'تمام شد'];
             }
             $total = (int) ($run['stepsTotal'] ?? 0);
-            return ['status' => 'running', 'progress' => max(3, $total > 0 ? (int) min(95, floor(100 * (int) ($run['stepsDone'] ?? 0) / $total)) : 5), 'stage' => 'در حال اجرا: nuclei'];
+            $names = implode('، ', array_map(fn ($n) => Catalog::TOOLS[$n]['label'] ?? $n, (array) ($m['tools'] ?? ['nuclei'])));
+            return ['status' => 'running', 'progress' => max(3, $total > 0 ? (int) min(95, floor(100 * (int) ($run['stepsDone'] ?? 0) / $total)) : 5),
+                'stage' => 'در حال اجرا: ' . $names . ($total > 1 ? ' (گام ' . ((int) ($run['stepsDone'] ?? 0) + 1) . ' از ' . $total . ')' : '')];
         }
         $r = $this->call('GET', '/api/targets/' . rawurlencode((string) $scan->backend_ref) . '/runs?limit=10&sortOrder=DESC', null, $ws, 8);
         if (!$r['ok']) {
@@ -373,7 +449,7 @@ final class Oasm implements Engine
             $created = strtotime((string) ($run['createdAt'] ?? '')) ?: 0;
             $name = strtolower((string) ($run['workflowName'] ?? ''));
             $isVuln = str_contains($name, 'vulnerab') || str_contains($name, 'nuclei');
-            if ($created >= $since && (($m['kind'] ?? '') === 'vuln') === $isVuln) {
+            if ($created >= $since && in_array($m['kind'] ?? '', ['vuln', 'pipeline'], true) === $isVuln) {
                 $runs[] = $run;
             }
         }
@@ -449,21 +525,27 @@ final class Oasm implements Engine
             }
         }
         $findings = [];
-        if (($m['kind'] ?? '') === 'vuln') {
+        $piped = in_array($m['kind'] ?? '', ['vuln', 'pipeline'], true);
+        $mine = array_map('strtolower', (array) ($m['tools'] ?? ['nuclei']));
+        if ($piped) {
             for ($page = 1; $page <= 20; $page++) {
                 $r = $this->call('GET', '/api/vulnerabilities?targetId=' . rawurlencode($tid) . '&limit=100&page=' . $page, null, $ws, 30);
                 if (!$r['ok']) {
                     throw new \RuntimeException('OASM vulnerabilities: HTTP ' . $r['status']);
                 }
                 foreach ((array) ($r['json']['data'] ?? []) as $v) {
-                    $findings[] = self::normalize($v);
+                    // the target's list holds every tool's findings: each profile owns the findings of its own tools
+                    $by = strtolower((string) (is_array($v['tool'] ?? null) ? ($v['tool']['name'] ?? '') : ''));
+                    if ($by === '' || in_array($by, $mine, true)) {
+                        $findings[] = self::normalize($v);
+                    }
                 }
                 if (empty($r['json']['hasNextPage'])) {
                     break;
                 }
             }
         }
-        $out = ['findings' => $findings, 'surface' => $surface, 'kinds' => ($m['kind'] ?? '') === 'vuln' ? [] : ['host', 'port'], 'complete' => true];
+        $out = ['findings' => $findings, 'surface' => $surface, 'kinds' => $piped ? [] : ['host', 'port'], 'complete' => true];
         if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
             // a run the target cut short saw nothing: say so, and never mark earlier findings fixed because of it
             $run = $this->pipelineRun($m, 20) ?? [];

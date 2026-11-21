@@ -155,6 +155,8 @@ final class Views
             . '<li><strong>اعلان:</strong> ربات بله (درون ایران در دسترس) و/یا تلگرام. مشتری با کد ۸ نویسه‌ای در صفحه‌ی «اعلان‌ها» وصل می‌شود.</li></ol><p>هر بخش را ذخیره و بعد «آزمودن» را بزنید.</p>')
             . self::box('OASM', self::form('setup', 'save_engines', self::fields('engines', ['oasm_url', 'oasm_email', 'oasm_password', 'oasm_verify_tls', 'oasm_user_domain']) . '<button class="btn btn-primary">ذخیره</button>') . $test('oasm', 'OASM'))
             . self::box('Osmedeus', self::form('setup', 'save_engines', self::fields('engines', ['osm_url', 'osm_api_key', 'osm_username', 'osm_password', 'osm_verify_tls']) . '<button class="btn btn-primary">ذخیره</button>') . $test('osmedeus', 'Osmedeus'))
+            . self::box('ابزارهای کلیددار OASM (Acunetix، WPScan) و تنظیم ابزارها', self::form('setup', 'save_engines', self::fields('engines', ['acunetix_url', 'acunetix_key', 'acunetix_verify_tls', 'wpscan_token', 'tool_configs']) . '<button class="btn btn-primary">ذخیره</button>')
+                . '<p class="mcsa-help">کلیدها در فضای کار هر مشتری در OASM به‌عنوان پروفایل ابزار گذاشته می‌شوند و با تغییرشان، در اسکن بعدی هر مشتری به‌روز می‌شوند. پس از گذاشتن کلید، نوع اسکن مربوط را در «قیمت و پلن» روشن کنید.</p>')
             . self::box('بررسی‌های داخلی', '<p>روی همین سرور WHMCS اجرا می‌شوند (DNS، TLS، هدرها، چند درگاه پرخطر روی IPهای خود مشتری). اگر فایروال خروجی دارید، درگاه‌های ۸۰ و ۴۴۳ و درگاه‌های «بررسی پایه» باید باز باشند.</p>' . $test('builtin', 'بررسی داخلی'))
             . self::box('هوش مصنوعی', self::form('setup', 'save_settings', self::fields('ai') . '<button class="btn btn-primary">ذخیره</button>') . $test('ai', 'مدل'))
             . self::box('اعلان‌ها', self::form('setup', 'save_settings', self::fields('notify') . '<button class="btn btn-primary">ذخیره</button>') . $test('bots', 'ربات‌ها'));
@@ -164,7 +166,9 @@ final class Views
     {
         $rows = '';
         foreach (Catalog::all(true) as $k => $p) {
-            $rows .= '<tr><td><code dir="ltr">' . self::e($k) . '</code><br><small>' . self::e(Catalog::engineLabel($p['engine'])) . '</small></td>'
+            $risk = Catalog::risk($p);
+            $rows .= '<tr><td><code dir="ltr">' . self::e($k) . '</code><br><small>' . self::e(Catalog::engineLabel($p['engine']))
+                . (!empty($p['tools']) ? ': <bdi dir="ltr">' . self::e(implode(' → ', $p['tools'])) . '</bdi> · ' . self::e(Catalog::RISK[$risk] ?? '') : '') . '</small></td>'
                 . '<td><input class="form-control" name="pl[' . $k . ']" value="' . self::e($p['label']) . '"></td>'
                 . '<td><input class="form-control" name="pc[' . $k . ']" value="' . (int) $p['credits'] . '" dir="ltr" style="max-width:90px"></td>'
                 . '<td>' . (isset($p['workflow']) ? '<input class="form-control" name="pw[' . $k . ']" value="' . self::e($p['workflow']) . '" dir="ltr" style="max-width:150px">' : '—') . '</td>'
@@ -188,9 +192,33 @@ final class Views
         return self::guide('<p><strong>مدل قیمت:</strong> پلن‌ها (محصول WHMCS با ماژول سرور «MC-Sec») سقف دارایی، اعتبار ماهانه، نوع‌های اسکن و کوتاه‌ترین فاصله‌ی زمان‌بندی را می‌دهند؛ هر اسکن به اندازه‌ی عمقش اعتبار مصرف می‌کند؛ بسته‌های اعتبار با فاکتور WHMCS فروخته می‌شوند؛ گروه‌های مشتری می‌توانند اعتبار ماهانه‌ی رایگان بگیرند.</p>'
             . '<p>هزینه‌ی هر نوع اسکن برای یک دامنه یا IP است؛ بازه‌ی IP به ازای هر ۱۶ آدرس. نوعی که «بی‌پلن» نیست فقط برای مشتری‌های دارای پلنی است که آن را دارد.</p>'
             . '<p><strong>ساختن پلن:</strong> Setup › Products › محصول تازه، تب Module Settings، ماژول «MC-Sec — پلن امنیت سایبری»، و اعتبار ماهانه، سقف دارایی، نوع‌ها و گزارش هوش مصنوعی را بگذارید. تمدید هر ماه اعتبار ماه را یک بار می‌دهد.</p>')
-            . self::box('نوع‌های اسکن و هزینه', $prof) . self::box('بسته‌های خرید اعتبار', $packsForm)
+            . self::box('نوع‌های اسکن و هزینه', $prof) . self::box('نوع اسکن سفارشی از ابزارهای OASM', self::customProfiles()) . self::box('بسته‌های خرید اعتبار', $packsForm)
             . self::box('هزینه‌های دیگر', self::form('pricing', 'save_settings', self::fields('credits', ['ai_report_cost', 'ai_fix_cost', 'welcome_credits', 'low_credit_alert', 'refund_on_fail', 'invoice_due_days']) . '<button class="btn btn-primary">ذخیره</button>'))
             . self::box('پلن‌ها (محصول‌های ماژول MC-Sec)', $plans !== '' ? '<ul>' . $plans . '</ul>' : '<p class="mcsa-muted">هنوز محصولی با ماژول MC-Sec نساخته‌اید.</p>');
+    }
+
+    /** Build a scan type from OASM tools: no code needed when OASM gains a tool MC-Sec knows (Catalog::TOOLS). */
+    private static function customProfiles(): string
+    {
+        $tools = '';
+        foreach (Catalog::TOOLS as $name => $t) {
+            $tools .= '<tr><td><code dir="ltr">' . self::e($name) . '</code></td><td>' . self::e($t['what']) . '</td><td>' . self::e(Catalog::RISK[$t['risk']]) . '</td><td>'
+                . self::e(implode('، ', array_map(fn ($k) => \McSec\Assets::KINDS[$k] ?? $k, $t['kinds']))) . '</td><td>' . (isset($t['needs']) ? (Settings::secret($t['needs']) !== '' ? '<b class="ok">کلید دارد</b>' : '<b class="err">کلید می‌خواهد</b>') : '—') . '</td></tr>';
+        }
+        $list = '';
+        foreach (Catalog::custom() as $k => $p) {
+            $list .= '<li><code dir="ltr">' . self::e($k) . '</code> — ' . self::e($p['label']) . ' <small class="mcsa-muted"><bdi dir="ltr">' . self::e(implode(' → ', $p['tools'])) . '</bdi></small> '
+                . self::form('pricing', 'delete_custom', '<input type="hidden" name="cp_key" value="' . self::e($k) . '"><button class="btn btn-default btn-xs">برداشتن</button>', 'این نوع اسکن برداشته شود؟') . '</li>';
+        }
+        $form = self::form('pricing', 'save_custom', '<div class="mcsa-row"><div class="mcsa-field"><label for="mcsa-cpk">کلید</label><input class="form-control" id="mcsa-cpk" name="cp_key" dir="ltr" placeholder="web_full" required><small>لاتین کوچک؛ «c_» خودکار جلویش می‌آید. کلید موجود را بازنویسی می‌کند.</small></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cpl">نام برای مشتری</label><input class="form-control" id="mcsa-cpl" name="cp_label" required></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cpt">ابزارها، به ترتیب اجرا</label><input class="form-control" id="mcsa-cpt" name="cp_tools" dir="ltr" placeholder="katana,nuclei,zap" required><small>با ویرگول. هر ابزار پس از ابزار قبلی اجرا می‌شود.</small></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cpc">اعتبار هر دارایی</label><input class="form-control" id="mcsa-cpc" name="cp_credits" dir="ltr" value="10"></div></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cpd">توضیح برای مشتری</label><input class="form-control" id="mcsa-cpd" name="cp_desc" maxlength="300"></div>'
+            . '<label class="mcsa-inline"><input type="checkbox" name="cp_free" value="1"> بی‌پلن هم در دسترس</label> <label class="mcsa-inline"><input type="checkbox" name="cp_enabled" value="1"> روشن</label> <button class="btn btn-primary">ذخیره‌ی نوع اسکن</button>');
+        return '<p class="mcsa-help">نوع اسکن تازه را از ابزارهای زیر بسازید. MC-Sec ابزار را در فضای کار هر مشتری خودکار نصب می‌کند و با تنظیم ملایم خودش اجرا می‌کند. ابزار «پرفشار» درخواست زیادی به هدف می‌فرستد؛ آن را فقط برای پلن‌های حرفه‌ای بگذارید. قانون‌های مالکیت، فهرست ممنوع و CDN برای همه‌ی نوع‌ها یکی است.</p>'
+            . '<table class="table"><thead><tr><th>ابزار</th><th>کار</th><th>فشار</th><th>نوع دارایی</th><th>کلید</th></tr></thead><tbody>' . $tools . '</tbody></table>'
+            . ($list !== '' ? '<p><strong>نوع‌های سفارشی فعلی</strong> (قیمت و روشن بودنشان در جدول بالا):</p><ul>' . $list . '</ul>' : '') . $form;
     }
 
     private static function credits(): string

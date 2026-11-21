@@ -95,8 +95,9 @@ final class ScanViews
                 . ($disabled ? ' disabled' : '') . ($first && !$disabled ? ' checked' : '') . '>'
                 . '<span class="mcs-profile-head"><span class="mcs-profile-ico">' . Ui::ico($p['icon'] ?? 'radar') . '</span><strong>' . self::e($p['label']) . '</strong>'
                 . '<span class="mcs-profile-cost">' . ((int) $p['credits'] > 0 ? self::e(Text::fa((int) $p['credits'])) . ' اعتبار' : 'رایگان') . '</span></span>'
-                . '<span class="mcs-profile-desc">' . self::e($p['desc']) . '</span>'
-                . '<span class="mcs-profile-meta">' . Ui::ico('clock') . self::e($p['eta']) . ' · ' . self::e(implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $p['kinds']))) . ($why !== '' ? ' · ' . Ui::ico('lock') . self::e($why) : '') . '</span></label>';
+                . '<span class="mcs-profile-desc">' . self::e($p['desc']) . (Catalog::risk($p) === 'heavy' ? ' ' . Ui::chip('درخواست زیاد به هدف', 'warn') : '') . '</span>'
+                . '<span class="mcs-profile-meta">' . Ui::ico('clock') . self::e($p['eta']) . ' · ' . self::e(implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $p['kinds'])))
+                    . ($why !== '' ? ' · ' . Ui::ico('lock') . self::e($why) : '') . '</span></label>';
             $first = $first && $disabled;
         }
         $cards .= '</fieldset>';

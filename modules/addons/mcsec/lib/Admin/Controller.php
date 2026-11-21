@@ -33,7 +33,7 @@ final class Controller
         'scans' => 'صف اسکن', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
 
     private const ACTIONS = [
-        'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_groups' => 'settings',
+        'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_groups' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
         'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
     ];
 
@@ -107,7 +107,7 @@ final class Controller
                     return 'ok:تنظیمات ذخیره شد.';
                 case 'save_profiles':
                     $over = [];
-                    foreach (Catalog::DEFAULTS as $k => $p) {
+                    foreach (Catalog::DEFAULTS + Catalog::custom() as $k => $p) {
                         $over[$k] = ['enabled' => ($_POST['pe'][$k] ?? '') === '1', 'free' => ($_POST['pf'][$k] ?? '') === '1',
                             'credits' => max(0, (int) Text::toAscii((string) ($_POST['pc'][$k] ?? $p['credits']))), 'label' => Text::name(html_entity_decode((string) ($_POST['pl'][$k] ?? ''), ENT_QUOTES, 'UTF-8'), 80)];
                         if (isset($p['workflow'])) {
@@ -118,6 +118,44 @@ final class Controller
                     Settings::set('profiles', (string) json_encode($over, JSON_UNESCAPED_UNICODE));
                     Audit::log(0, 'settings', 'profiles', $over);
                     return 'ok:نوع‌های اسکن و قیمت‌ها ذخیره شد.';
+                case 'save_custom':
+                    $key = 'c_' . preg_replace('~[^a-z0-9_]~', '', strtolower(Text::toAscii((string) ($_POST['cp_key'] ?? ''))));
+                    $tools = array_values(array_unique(array_filter(array_map('trim', explode(',', strtolower(Text::toAscii((string) ($_POST['cp_tools'] ?? ''))))), fn ($t) => isset(Catalog::TOOLS[$t]))));
+                    $label = Text::name(html_entity_decode((string) ($_POST['cp_label'] ?? ''), ENT_QUOTES, 'UTF-8'), 80);
+                    if (!preg_match('~^c_[a-z0-9_]{2,24}$~', $key) || $label === '') {
+                        return 'err:کلید (۲ تا ۲۴ حرف لاتین کوچک، رقم یا _) و نام فارسی لازم است.';
+                    }
+                    if (!$tools) {
+                        return 'err:دست‌کم یک ابزار شناخته‌شده لازم است: ' . implode('، ', array_keys(Catalog::TOOLS)) . '.';
+                    }
+                    $list = array_values(array_filter(Settings::json('custom_profiles'), fn ($c) => is_array($c) && ($c['key'] ?? '') !== $key));
+                    if (count($list) >= 20) {
+                        return 'err:بیش از ۲۰ نوع سفارشی پذیرفته نیست.';
+                    }
+                    $list[] = ['key' => $key, 'label' => $label, 'desc' => Text::name(html_entity_decode((string) ($_POST['cp_desc'] ?? ''), ENT_QUOTES, 'UTF-8'), 300), 'tools' => $tools,
+                        'credits' => max(0, (int) Text::toAscii((string) ($_POST['cp_credits'] ?? '0'))), 'free' => ($_POST['cp_free'] ?? '') === '1', 'enabled' => ($_POST['cp_enabled'] ?? '') === '1'];
+                    Settings::set('custom_profiles', (string) json_encode($list, JSON_UNESCAPED_UNICODE));
+                    Settings::forget();
+                    if (!isset(Catalog::custom()[$key])) {
+                        // the tools share no asset kind (e.g. katana takes domains only, nmap IPs only)
+                        Settings::set('custom_profiles', (string) json_encode(array_values(array_filter($list, fn ($c) => $c['key'] !== $key)), JSON_UNESCAPED_UNICODE));
+                        return 'err:این ابزارها نوع دارایی مشترک ندارند (مثلاً Katana فقط دامنه و Nmap فقط IP می‌پذیرد).';
+                    }
+                    Audit::log(0, 'settings', 'custom_profile', ['key' => $key, 'tools' => $tools]);
+                    return 'ok:نوع اسکن «' . $label . '» ذخیره شد.';
+                case 'delete_custom':
+                    $key = (string) ($_POST['cp_key'] ?? '');
+                    if (Db::table('mod_mcsec_scans')->where('profile', $key)->whereIn('status', ['queued', 'running'])->exists()) {
+                        return 'err:اسکنی از این نوع در صف یا در حال اجراست؛ پس از پایانش دوباره امتحان کنید.';
+                    }
+                    $list = Settings::json('custom_profiles');
+                    $left = array_values(array_filter($list, fn ($c) => is_array($c) && ($c['key'] ?? '') !== $key));
+                    if (count($left) === count($list)) {
+                        return 'err:این نوع اسکن پیدا نشد.';
+                    }
+                    Settings::set('custom_profiles', (string) json_encode($left, JSON_UNESCAPED_UNICODE));
+                    Audit::log(0, 'settings', 'custom_profile_delete', ['key' => $key]);
+                    return 'ok:نوع اسکن برداشته شد. یافته‌ها و اسکن‌های قبلی آن می‌مانند.';
                 case 'save_packs':
                     $packs = [];
                     foreach ((array) ($_POST['pk_key'] ?? []) as $i => $key) {

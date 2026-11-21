@@ -169,7 +169,7 @@ http_mock(function ($m, $u, $h, $b, $o) use ($prev) {
 });
 $vuln = \McSec\Catalog::get('vuln');
 $r = $oasm->start(Db::table('mod_mcsec_scans')->where('id', 701)->first(), $asset, $vuln);
-ok($r['ok'] && $r['meta']['kind'] === 'vuln' && $r['meta']['project'] === 'proj-1' && $r['meta']['run'] === 'jh-proj-1', 'vuln scan started as a project run, after signing in again (' . json_encode($r['meta'] ?? $r) . ')');
+ok($r['ok'] && $r['meta']['kind'] === 'pipeline' && $r['meta']['tools'] === ['nuclei'] && $r['meta']['project'] === 'proj-1' && $r['meta']['run'] === 'jh-proj-1', 'vuln scan started as a project run, after signing in again (' . json_encode($r['meta'] ?? $r) . ')');
 ok(Crypto::decrypt((string) \McSec\Kv::get('oasm:s:1')) === 'session=c1-cookie', 'fresh client session cached');
 $inst = array_values(array_filter($calls, fn ($c) => $c[1] === '/api/tools/install'));
 ok(count($inst) === 1 && $inst[0][2] === 'ws-1' && str_contains((string) $inst[0][4], 'tool-nuclei'), 'nuclei installed in the client workspace (availableWorkersCount 0 does not stop it)');
@@ -183,7 +183,7 @@ ok(!array_filter($calls, fn ($c) => $c[1] === '/api/vulnerabilities/scan'), 'OAS
 Db::table('mod_mcsec_scans')->where('id', 701)->update(['status' => 'running', 'backend_ref' => 't-1', 'backend_meta' => json_encode($r['meta'])]);
 $s701 = Db::table('mod_mcsec_scans')->where('id', 701)->first();
 $p = $oasm->poll($s701, $asset, $vuln);
-ok($p['status'] === 'running' && str_contains($p['stage'], 'nuclei'), 'running: found by its own run id among the project runs');
+ok($p['status'] === 'running' && str_contains($p['stage'], 'Nuclei'), 'running: found by its own run id among the project runs');
 $state['pl_status'] = 'completed';
 ok($oasm->poll($s701, $asset, $vuln)['status'] === 'completed', 'completed');
 $c = $oasm->collect($s701, $asset, $vuln);
