@@ -171,3 +171,7 @@ description: >
 - Patchstack، وضعیت امنیت وردپرس ۲۰۲۶: https://patchstack.com/whitepaper/state-of-wordpress-security-in-2026/
 - NIST SP 800-61r3، پاسخ به رخداد: https://csrc.nist.gov/pubs/sp/800/61/r3/final · NIST SP 800-115: https://csrc.nist.gov/pubs/sp/800/115/final
 - پژوهش‌های همین مخزن: `docs/research/competitive-analysis.md`، `ux-research.md`، `oasm-api.md`، `osmedeus-api.md`
+
+## تأیید مالکیت: آنچه مدرک نیست (۰٫۱۱٫۰)
+- **ساختن رکورد در حساب پنل DNS مدرک نیست:** هر کسی می‌تواند هر دامنه‌ای را به‌صورت zone غیرفعال در حساب Cloudflare خودش اضافه کند. فقط دیده شدن رکورد در DNS عمومی مدرک است.
+- **تماس خروجی از یک IP مدرک مالکیت آن IP نیست:** روی هاست اشتراکی هر مشتری می‌تواند از IP مشترک درخواست بفرستد. به همین دلیل تأیید IP فقط با فایل روی درگاه 80 یا 443 (که دسترسی مدیر سرور می‌خواهد)، PTR زیر دامنه‌ی تأییدشده، سرویس مارال، یا تأیید مدیر است؛ درگاه بالای 1024 پذیرفته نمی‌شود.

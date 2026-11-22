@@ -12,7 +12,7 @@ function demo_data(): void
     $tz = new DateTimeZone('Asia/Tehran');
     Clock::$fixed = (new DateTimeImmutable('2026-11-11 10:00', $tz))->getTimestamp();
     foreach (['enabled' => '1', 'access_mode' => 'all', 'max_assets_free' => '20', 'ai_enabled' => '1', 'ai_model' => 'gpt-4.1-mini', 'allow_private_ips' => '1',
-        'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'assistant_enabled' => '1', 'assistant_all' => '1', 'export_csv' => '1', 'host_mute' => '1', 'ai_opinion' => '1', 'service_box' => '1', 'domain_watch' => '1', 'threat_alerts' => '1', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
+        'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'assistant_enabled' => '1', 'assistant_all' => '1', 'verify_dns_api' => '1', 'support_dept' => '1', 'export_csv' => '1', 'host_mute' => '1', 'ai_opinion' => '1', 'service_box' => '1', 'domain_watch' => '1', 'threat_alerts' => '1', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
         setting($k, $v);
     }
     \McSec\Rules::save(['scope' => 'group', 'target' => 2, 'monthly' => 30, 'max_assets' => 10]);

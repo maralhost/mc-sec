@@ -41,7 +41,7 @@ final class Controller
     public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'assistant', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
@@ -77,6 +77,11 @@ final class Controller
             return self::file(['mime' => 'text/csv; charset=utf-8', 'bytes' => Findings::csv($who['client_id'], $f), 'name' => 'mcsec-findings-' . date('Ymd', Clock::now()) . '.csv']);
         }
         Accounts::ensure($who['client_id']);
+        if (($_GET['p'] ?? '') === 'asset' && ($_GET['vfile'] ?? '') === '1' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+            // the proof file, ready to upload as it is: made here from the account's own code, for one of its own assets
+            $a = Assets::get($who['client_id'], (int) Text::toAscii((string) ($_GET['id'] ?? '0')));
+            return self::file($a && $a->kind !== 'cidr' ? ['mime' => 'text/plain; charset=utf-8', 'bytes' => Accounts::proof(Accounts::get($who['client_id'])) . "\n", 'name' => 'mcsec-verify.txt'] : null);
+        }
         $ctx = ['who' => $who, 'manage' => Auth::canManage($who) && Auth::mayAct($who), 'buy' => Auth::canBuy($who) && Auth::mayAct($who)];
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && ($_GET['progress'] ?? '') === '1') {
             return self::json(self::progress($ctx, (int) Text::toAscii((string) ($_GET['id'] ?? '0'))));
@@ -258,6 +263,30 @@ final class Controller
                 $r = Verify::check($asset);
                 return ['flash' => $r['ok'] ? 'ok:مالکیت ' . $asset->value . ' تأیید شد (' . (Verify::METHODS[$r['method']] ?? $r['method']) . '). حالا می‌توانید اسکن بگیرید.'
                     : 'err:هنوز تأیید نشد. ' . $r['note'] . "\nاگر رکورد را تازه گذاشته‌اید، تا یک ساعت صبر کنید؛ خودکار دوباره بررسی می‌کنیم و خبرتان می‌کنیم."];
+            case 'verify_auto':
+                // creates the proof record with the customer's own DNS-panel token (used now, kept nowhere); the public DNS still decides
+                $asset = Assets::get($cid, $int('asset'));
+                if (!$asset || $asset->kind !== 'domain') {
+                    return ['flash' => 'err:این دارایی پیدا نشد.'];
+                }
+                if ($asset->status === 'verified') {
+                    return ['flash' => 'ok:این دارایی تأییدشده است.'];
+                }
+                if (!RateLimit::hit('vauto:' . $cid, 10, 3600)) {
+                    return ['flash' => 'err:در یک ساعت اخیر چند بار امتحان کرده‌اید. کمی بعد دوباره امتحان کنید یا رکورد را دستی بسازید.'];
+                }
+                $r = \McSec\DnsApi::addProof($in('provider'), (string) ($_POST['dns_token'] ?? ''), (string) $asset->value, Accounts::proof(Accounts::get($cid)));
+                unset($_POST['dns_token']);
+                if (!$r['ok']) {
+                    return ['flash' => 'err:' . $r['error']];
+                }
+                Audit::log($cid, 'verify_auto', (string) $asset->value, ['provider' => $in('provider')], $who['user_id']);
+                $v = Verify::check($asset);
+                if ($v['ok']) {
+                    return ['flash' => 'ok:رکورد ساخته شد و مالکیت ' . $asset->value . ' تأیید شد. حالا می‌توانید اسکن بگیرید.'];
+                }
+                \McSec\Db::table('mod_mcsec_assets')->where('id', (int) $asset->id)->where('client_id', $cid)->update(['next_check_at' => Clock::now() + 60]);
+                return ['flash' => 'ok:رکورد تأیید در پنل DNS ساخته شد. دیده شدنش در اینترنت چند دقیقه طول می‌کشد؛ خودمان هر چند دقیقه بررسی می‌کنیم و پس از تأیید خبرتان می‌کنیم. توکن شما ذخیره نشد.'];
             case 'asset_save':
                 $r = Assets::setLabel($who, $int('asset'), $in('label'), $in('tags'));
                 return ['flash' => $r['ok'] ? 'ok:ذخیره شد.' : 'err:' . $r['error']];

@@ -472,3 +472,5 @@ body:not(.lagom) .mcs .btn-primary{background:var(--t-primary);border:1px solid 
 @media (max-width:640px){.mcs .mcs-composer{flex-direction:column;align-items:stretch}.mcs .mcs-msg{max-inline-size:100%}}
 @media (prefers-reduced-motion:reduce){.mcs .mcs-dots i{animation:none}}
 .mcs .mcs-act-what bdi{display:inline-block;max-inline-size:100%}
+.mcs .mcs-verify-h{display:flex;align-items:center;gap:.4rem;margin:1rem 0 .5rem;font-size:.95rem}.mcs .mcs-verify-h .mcs-ico{width:18px;height:18px;color:var(--t-primary)}
+.mcs a.btn[download]{white-space:normal;max-inline-size:100%;text-align:start}

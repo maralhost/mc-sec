@@ -210,33 +210,81 @@ final class AssetViews
         return Ui::card($body, 'این دامنه پشت CDN است', 'globe');
     }
 
-    /** The verification wizard: three ways, each with copyable values, and one button to check now. */
+    /**
+     * Proof of ownership in two parts: «تأیید خودکار» (what needs nothing, or one pasted token) and «تأیید دستی» (a
+     * record, a file, a tag: copyable values, a ready file to download), then one button to check now. An IP has its
+     * own complete path: Maral service, file on its web server (with ready commands), reverse DNS, and a manual request.
+     */
     private static function verifyPanel(array $ctx, object $a, bool $fresh): string
     {
         $acc = Accounts::ensure((int) $a->client_id);
         $proof = Accounts::proof($acc);
-        $tabs = '';
+        $days = max(1, Settings::int('verify_recheck_days'));
+        $file = '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '&amp;vfile=1" download>' . Ui::ico('file') . 'دانلود فایل آماده (mcsec-verify.txt)</a>';
+        $ask = self::manualRequest($a);
+        $auto = '';
+        $manual = '';
         if ($a->kind === 'domain') {
-            $tabs .= Ui::drawer('روش ۱ (پیشنهادی): رکورد DNS', '<p>در پنل DNS دامنه (DirectAdmin، cPanel، آروان‌کلاد، Cloudflare یا ثبت‌کننده‌ی دامنه) یک رکورد TXT با این مشخصات بسازید:</p>'
+            $providers = $ctx['manage'] ? \McSec\DnsApi::enabled() : [];
+            if ($providers) {
+                $opts = [];
+                $how = '';
+                foreach ($providers as $p) {
+                    $opts[$p] = \McSec\DnsApi::PROVIDERS[$p][0];
+                    $how .= '<li>' . self::e(\McSec\DnsApi::PROVIDERS[$p][1]) . '</li>';
+                }
+                $auto .= Ui::drawer('ساخت خودکار رکورد با توکن پنل DNS', '<p>اگر DNS این دامنه روی یکی از این پنل‌هاست، توکن همان پنل را یک بار این‌جا بچسبانید؛ رکورد تأیید را خودمان می‌سازیم و لازم نیست به پنل DNS بروید.</p>'
+                    . Ui::form($ctx, 'asset', 'verify_auto', '<input type="hidden" name="asset" value="' . (int) $a->id . '"><div class="mcs-form-row">'
+                        . Ui::field('mcs-dnsp', 'پنل DNS', Ui::select('provider', $opts, (string) array_key_first($opts), 'mcs-dnsp'))
+                        . Ui::field('mcs-dnst', 'توکن API', '<input class="form-control" type="password" id="mcs-dnst" name="dns_token" maxlength="220" dir="ltr" autocomplete="off" spellcheck="false" required>',
+                            'فقط برای همین یک بار استفاده می‌شود و هیچ‌جا ذخیره نمی‌شود. پس از تأیید می‌توانید آن را در پنل خودتان حذف کنید.')
+                        . '</div><button type="submit" class="btn btn-primary">' . Ui::ico('sparkle') . 'رکورد را بساز و تأیید کن</button>', '', '', false, '&amp;id=' . (int) $a->id)
+                    . '<details class="mcs-how"><summary>توکن را از کجا بسازم؟</summary><ul>' . $how . '</ul><p class="mcs-help">توکن را فقط با دسترسی «ویرایش DNS» همین دامنه بسازید، نه دسترسی کامل حساب.</p></details>', true, 'sparkle', 'verify');
+            }
+            $auto .= '<p class="mcs-small mcs-muted">' . Ui::ico('check') . 'دامنه‌ای که در همین حساب مارال کلاد ثبت یا میزبانی شده، و زیردامنه‌ی دامنه‌ای که قبلاً با DNS تأیید کرده‌اید، خودکار و بی هیچ کاری تأیید می‌شوند.</p>';
+            $manual .= Ui::drawer('روش ۱ (پیشنهادی): رکورد DNS', '<p>در پنل DNS دامنه (DirectAdmin، cPanel، آروان‌کلاد، Cloudflare یا ثبت‌کننده‌ی دامنه) یک رکورد TXT با این مشخصات بسازید:</p>'
                 . Ui::facts(['نوع' => '<code dir="ltr">TXT</code>', 'نام (Host)' => Ui::code('_mcsec-verify', '', false) . '<small class="mcs-help">بعضی پنل‌ها نام کامل می‌خواهند: ' . Ui::ltr('_mcsec-verify.' . $a->value) . '</small>', 'مقدار (Value)' => Ui::code($proof, '', false), 'TTL' => 'پیش‌فرض'])
-                . '<p class="mcs-help">این رکورد نام جداگانه دارد و به رکورد SPF یا رکوردهای دیگر دامنه دست نمی‌زند. با تأیید ' . Ui::ltr(Net::apex((string) $a->value)) . '، همه‌ی زیردامنه‌هایش هم تأیید می‌شوند.</p>', true, 'globe', 'verify')
-                . Ui::drawer('روش ۲: فایل روی سایت', '<p>فایلی متنی با این نام و محتوا بسازید و در ریشه‌ی سایت بگذارید (در File Manager هاست، پوشه‌ی <code dir="ltr">public_html/.well-known/</code>):</p>'
-                . Ui::facts(['نشانی' => Ui::code('https://' . $a->value . Verify::FILE_PATH, '', false), 'محتوا' => Ui::code($proof, '', false)]), false, 'file')
+                . '<p class="mcs-help">این رکورد نام جداگانه دارد و به رکورد SPF یا رکوردهای دیگر دامنه دست نمی‌زند. با تأیید ' . Ui::ltr(Net::apex((string) $a->value)) . '، همه‌ی زیردامنه‌هایش هم تأیید می‌شوند.</p>', !$providers, 'globe', $providers ? '' : 'verify')
+                . Ui::drawer('روش ۲: فایل روی سایت', '<p>فایل آماده را دانلود کنید و بی تغییر در پوشه‌ی <code dir="ltr">public_html/.well-known/</code> سایت بگذارید (با File Manager هاست یا FTP). اگر پوشه‌ی <code dir="ltr">.well-known</code> نیست، بسازیدش.</p>'
+                . '<p>' . $file . '</p>' . Ui::facts(['باید در این نشانی باز شود' => Ui::code('https://' . $a->value . Verify::FILE_PATH, '', false), 'محتوای فایل' => Ui::code($proof, '', false)]), false, 'file')
                 . Ui::drawer('روش ۳: تگ متا در صفحه‌ی اصلی', '<p>این تگ را در بخش <code dir="ltr">&lt;head&gt;</code> صفحه‌ی اصلی بگذارید (در وردپرس: افزونه‌ی سربرگ یا Theme Header):</p>'
                 . Ui::code('<meta name="mcsec-verification" content="' . $acc->verify_token . '">', 'HTML'), false, 'list');
         } elseif ($a->kind === 'ip') {
-            $tabs .= Ui::drawer('روش ۱: فایل روی وب‌سرور همین IP', '<p>اگر روی این سرور وب‌سرور دارید، این فایل را در ریشه‌ی سایت پیش‌فرض بگذارید:</p>'
-                . Ui::facts(['نشانی' => Ui::code('http://' . $a->value . Verify::FILE_PATH, '', false), 'محتوا' => Ui::code($proof, '', false)]), true, 'file', 'verify')
-                . Ui::drawer('روش ۲: DNS معکوس (PTR)', '<p>اگر رکورد PTR این IP به نامی زیر یکی از دامنه‌های تأییدشده‌ی شما اشاره کند (مثلاً ' . Ui::ltr('srv1.example.com') . ') و همان نام به این IP برگردد، خودکار تأیید می‌شود. PTR را در پنل سرور یا با تیکت به ارائه‌دهنده‌ی IP تنظیم کنید.</p>', false, 'server');
+            $auto .= '<p class="mcs-small mcs-muted">' . Ui::ico('check') . 'IP سرویس‌های همین حساب در مارال کلاد (سرور مجازی، سرور اختصاصی، IP اختصاصی هاست) خودکار و بی هیچ کاری تأیید می‌شود. اگر این IP از مارال کلاد است و تأیید نشده، به پشتیبانی خبر بدهید.</p>';
+            $manual .= Ui::drawer('روش ۱ (پیشنهادی): فایل متنی روی همین سرور', '<p>فایل آماده را دانلود کنید و بی تغییر روی وب‌سرور همین IP بگذارید، در پوشه‌ی <code dir="ltr">.well-known</code> از ریشه‌ی سایت پیش‌فرض (سایتی که با خود IP باز می‌شود).</p>'
+                . '<p>' . $file . '</p>' . Ui::facts(['باید در این نشانی باز شود' => Ui::code('http://' . $a->value . Verify::FILE_PATH, '', false), 'محتوای فایل' => Ui::code($proof, '', false)])
+                . '<p class="mcs-small"><strong>اگر با SSH وصل می‌شوید</strong>، یکی از این دو دستور کافی است:</p>'
+                . Ui::code("mkdir -p /var/www/html/.well-known && echo '" . $proof . "' > /var/www/html/.well-known/mcsec-verify.txt", 'وب‌سرور دارم (nginx یا Apache، ریشه‌ی پیش‌فرض)')
+                . Ui::code("mkdir -p /tmp/mcsec/.well-known && echo '" . $proof . "' > /tmp/mcsec/.well-known/mcsec-verify.txt && cd /tmp/mcsec && python3 -m http.server 80", 'وب‌سرور ندارم (موقت، با کاربر root)')
+                . '<p class="mcs-help">فقط درگاه‌های 80 و 443 سنجیده می‌شوند، چون باز کردنشان دسترسی مدیر سرور می‌خواهد. دستور دوم یک وب‌سرور موقت است؛ پس از تأیید با Ctrl+C ببندیدش. تأیید هر ' . self::e(Text::fa($days))
+                . ' روز دوباره سنجیده می‌شود؛ اگر فایل دیگر نباشد، پس از سه بار خبرتان می‌کنیم و تأیید منقضی می‌شود. برای تأیید ماندگار، فایل را روی وب‌سرور دائمی بگذارید یا از روش ۲ استفاده کنید.</p>', true, 'file', 'verify')
+                . Ui::drawer('روش ۲: DNS معکوس (PTR)', '<p>اگر رکورد PTR این IP به نامی زیر یکی از دامنه‌های تأییدشده‌ی شما اشاره کند (مثلاً ' . Ui::ltr('srv1.example.com') . ') و همان نام با رکورد A به همین IP برگردد، خودکار تأیید می‌شود و ماندگار است.</p>'
+                . '<ol><li>دامنه‌تان را در «دارایی‌ها» بیفزایید و تأیید کنید.</li><li>برای آن یک رکورد A بسازید، مثل ' . Ui::ltr('srv1.example.com → ' . $a->value) . '.</li><li>PTR این IP را در پنل سرور یا با تیکت به ارائه‌دهنده‌ی IP روی همان نام بگذارید.</li></ol>', false, 'server')
+                . ($ask !== '' ? Ui::drawer('روش ۳: درخواست تأیید از پشتیبانی', '<p>اگر هیچ‌کدام از دو روش بالا برایتان شدنی نیست (مثلاً سرور وب‌سرور ندارد و PTR دست شما نیست)، مدرک مالکیت IP را برای پشتیبانی بفرستید؛ پس از بررسی، دستی تأیید می‌کنیم.</p>' . $ask, false, 'heart') : '');
         } else {
-            $tabs .= Ui::alert('info', 'بازه‌ی IP خودکار تأیید نمی‌شود. برای تأیید، از پشتیبانی مارال کلاد تیکت بزنید (تأیید دستی)، یا IPها را تک‌تک بیفزایید.', 'info');
+            $manual .= Ui::alert('info', 'بازه‌ی IP خودکار تأیید نمی‌شود. مدرک تخصیص بازه را برای پشتیبانی مارال کلاد بفرستید تا دستی تأیید شود، یا IPها را تک‌تک بیفزایید.', 'info') . $ask;
         }
         $note = trim((string) $a->check_note) !== '' && (int) $a->checked_at > 0
             ? Ui::alert('warning', '<strong>آخرین بررسی (' . self::e(Views::when((int) $a->checked_at)) . '):</strong> ' . self::e($a->check_note), 'alert') : '';
         $check = $ctx['manage'] && $a->kind !== 'cidr' ? Ui::form($ctx, 'asset', 'verify_check', '<input type="hidden" name="asset" value="' . (int) $a->id . '"><button type="submit" class="btn btn-primary">' . Ui::ico('refresh') . 'الان بررسی کن</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $a->id) : '';
-        $intro = '<p>' . ($fresh ? 'دارایی افزوده شد. ' : '') . 'برای این‌که اسکن فقط روی دارایی‌های خودتان انجام شود، یکی از راه‌های زیر را انجام دهید. لازم نیست این صفحه را باز نگه دارید: هر چند دقیقه خودمان بررسی می‌کنیم و پس از تأیید خبرتان می‌کنیم'
+        $intro = '<p>' . ($fresh ? 'دارایی افزوده شد. ' : '') . 'برای این‌که اسکن فقط روی دارایی‌های خودتان انجام شود، یکی از راه‌های زیر کافی است. لازم نیست این صفحه را باز نگه دارید: هر چند دقیقه خودمان بررسی می‌کنیم و پس از تأیید خبرتان می‌کنیم'
             . ((string) ($a->autoscan ?? '') !== '' ? ' و اسکن «' . self::e(Catalog::label((string) ($a->autoscan))) . '» خودکار شروع می‌شود' : '') . '.</p>';
-        return Ui::card($intro . $tabs . $note . '<div class="mcs-actions">' . $check . '</div>', $a->status === 'lapsed' ? 'تأیید دوباره‌ی مالکیت' : 'تأیید مالکیت', 'key', '', 'is-attention');
+        $body = $intro . ($auto !== '' ? '<h4 class="mcs-verify-h">' . Ui::ico('sparkle') . 'تأیید خودکار</h4>' . $auto : '')
+            . ($a->kind !== 'cidr' ? '<h4 class="mcs-verify-h">' . Ui::ico('key') . 'تأیید دستی</h4>' : '') . $manual;
+        return Ui::card($body . $note . '<div class="mcs-actions">' . $check . '</div>', $a->status === 'lapsed' ? 'تأیید دوباره‌ی مالکیت' : 'تأیید مالکیت', 'key', '', 'is-attention');
+    }
+
+    /** A ready support ticket asking for manual verification (the admin approves it in the panel); '' when no department is set. */
+    private static function manualRequest(object $a): string
+    {
+        $dept = Settings::int('support_dept');
+        if ($dept <= 0) {
+            return '';
+        }
+        $msg = "سلام، برای این دارایی در بخش امنیت سایبری درخواست تأیید دستی مالکیت دارم:\n\n" . 'دارایی: ' . $a->value . "\n" . 'نوع: ' . (Assets::KINDS[(string) $a->kind] ?? $a->kind)
+            . "\n\nمدرک مالکیت (فاکتور یا نامه‌ی تخصیص IP، تصویر پنل سرور، یا هر چه نشان بدهد این دارایی مال من است) را پیوست می‌کنم.";
+        $url = 'submitticket.php?' . http_build_query(['step' => 2, 'deptid' => $dept, 'subject' => 'درخواست تأیید مالکیت: ' . $a->value, 'message' => $msg]);
+        return '<a class="btn btn-default" href="' . self::e($url) . '">' . Ui::ico('send') . 'درخواست تأیید از پشتیبانی</a>';
     }
 
     /** A target handed over in the address (the box on a hosting service's page): only a clean domain or IP is put in the form. */
