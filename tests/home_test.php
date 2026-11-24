@@ -97,8 +97,12 @@ foreach ([['kind' => 'port', 'value' => 'shop.example:443'], ['kind' => 'port', 
 Notify::event(1, 'site_down', ['asset' => 'blog.example', 'asset_id' => (int) $blog->id, 'note' => 'HTTP 502'], 't1');
 Notify::event(2, 'site_down', ['asset' => 'other.example', 'asset_id' => (int) $theirs->id, 'note' => 'secret-of-account-2'], 't2');
 $h = html(client_get(['p' => 'home']));
-ok(str_contains($h, 'class="mcs-console"') && str_contains($h, 'mcs-radar') && str_contains($h, 'class="mcs-donut"') && str_contains($h, 'کار فوری دارید') && str_contains($h, 'از دسترس خارج است'), 'a sentence says how things are');
-ok(str_contains($h, 'اول این‌ها را انجام دهید') && substr_count($h, 'چطور رفع کنم؟') === 3 && strpos($h, 'SQL Injection') < strpos($h, 'درگاه MySQL'), 'three jobs, the critical one first');
+ok(str_contains($h, 'class="mcs-dash"') && str_contains($h, 'mcs-status-say') && str_contains($h, 'کار فوری دارید') && str_contains($h, 'از دسترس خارج است'), 'a sentence says how things are');
+ok(substr_count($h, 'class="mcs-stat"') === 4 && substr_count($h, 'class="mcs-mini"') === 4 && str_contains($h, 'در ۷ روز'), 'four numbers, each with its week and its line');
+ok(str_contains($h, 'class="mcs-grade') && preg_match('~<strong dir="ltr">[A-F]</strong>~', $h) === 1 && str_contains($h, 'mcs-svgrid') && str_contains($h, 'severity=critical'), 'the score as a graded ring, with the open findings by severity as links');
+ok(str_contains($h, 'روند سطح حمله') && str_contains($h, 'میزبان‌های تازه کشف‌شده') && str_contains($h, 'پرتکرارترین درگاه‌های باز') && str_contains($h, 'پرتکرارترین فناوری‌ها') && str_contains($h, 'روند آسیب‌پذیری‌ها') && str_contains($h, 'آسیب‌پذیرترین دارایی‌ها') && str_contains($h, 'گواهی‌های SSL'), 'the dashboard cards: surface trend, new hosts, ports, technologies, vulnerability trend, worst assets, certificates');
+ok(!preg_match('~<script[^>]+src=~i', $h) && !preg_match('~<link\b~i', $h) && !preg_match('~<(img|image|use)[^>]+(src|href)="https?://~i', $h) && !str_contains($h, '@import'), 'every picture is inline: no library, nothing loaded from outside');
+ok(str_contains($h, 'اول این‌ها را انجام دهید') && substr_count($h, '<li><span class="mcs-act-sev">') === 3 && strpos($h, 'SQL Injection') < strpos($h, 'درگاه MySQL'), 'three jobs, the critical one first');
 ok(!str_contains($h, '<script>alert(9)') && !str_contains($h, '<b>nginx</b>'), 'finding titles and scanned technology names are escaped');
 ok(str_contains($h, 'class="mcs-sites"') && substr_count($h, 'class="mcs-site') >= 3 && str_contains($h, 'p=shot&amp;id=' . (int) $shop->id) && !str_contains($h, 'p=shot&amp;id=' . (int) $blog->id), 'a card per site; a picture only where one is stored');
 ok(str_contains($h, 'mcs-site is-down') && str_contains($h, 'SSL: ۱۱ روز') && str_contains($h, 'فوری') && str_contains($h, 'ناقص'), 'cards show outage, certificate days, urgent work and incomplete checks');
@@ -126,7 +130,7 @@ client_post('view_mode', ['view' => 'advanced'], [], false);
 
 section('advanced view');
 $h = html(client_get(['p' => 'home']));
-ok(str_contains($h, 'class="mcs-tiles"') && str_contains($h, 'سطح حمله از بیرون') && str_contains($h, 'کار فوری') && str_contains($h, '۱ بحرانی، ۱ بالا') && str_contains($h, '۱ از ۲') && str_contains($h, '۱۱ روز'), 'the strip: urgent work, availability and the nearest certificate');
+ok(str_contains($h, 'class="mcs-dash"') && str_contains($h, 'در دسترس: ۱ از ۲') && str_contains($h, '۱۱ روز') && str_contains($h, 'انقضا تا یک ماه'), 'the dashboard is there in the advanced view too: availability and certificates');
 ok(str_contains($h, 'دارایی‌های شما') && str_contains($h, 'mcs-dots') && substr_count($h, '<i class="c"></i>') >= 1 && str_contains($h, 'mcs-scorebar'), 'one row per asset with its findings as squares and a score bar');
 ok(str_contains($h, '443') && str_contains($h, 'WordPress') && !str_contains($h, '<b>nginx</b>') && str_contains($h, 'گواهی‌های SSL') && str_contains($h, 'Let&#039;s Encrypt'), 'ports, technologies and certificates, escaped');
 ok(str_contains($h, 'به تفکیک ابزار') && str_contains($h, 'Nuclei') && str_contains($h, 'ZAP') && str_contains($h, 'بررسی پایه'), 'open findings per tool');

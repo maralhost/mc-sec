@@ -24,8 +24,10 @@ use McSec\Text;
  *    site with its picture, availability and certificate; written for a site owner who is not technical;
  *  - advanced: the numbers in a strip, one table row per asset (open findings as squares, score, availability, last
  *    scan, ports, technologies, certificate), certificates and findings per tool; for people who run many assets.
- * Both start with the same top (0.13.0): a dark console with the score and a radar of the assets, six number tiles,
- * what the scanners are doing now, and three pictures (open findings, new against fixed, the score's trend).
+ * Both start with the same dashboard (0.17.0): four numbers with their 14-day line, one sentence with the first jobs,
+ * the score as a graded ring with the open findings, certificates, what the scanners are doing now, the attack
+ * surface over time, newly found hosts, the commonest ports and technologies, open findings over time and the assets
+ * with the most of them. Every number is counted here from MC-Sec's own tables.
  * Neither is a cut-down version of the other. Everything is read from MC-Sec's own tables: no network here.
  */
 final class HomeViews
@@ -57,17 +59,38 @@ final class HomeViews
         Views::$pageActions = self::switcher($ctx, $mode);
         $d = self::data($cid, $verified);
         $trend = Score::trend($cid, 60);
-        // the same top for both views: the console, the numbers, what is running now, and three pictures
-        $out = self::console($ctx, $verified, $score, $counts, $d, $trend) . self::tiles($assets, $verified, $counts, $d) . self::live($ctx, $d)
-            . '<div class="mcs-grid3 mcs-charts">'
-            . Ui::card(Charts::donut($counts, 'index.php?m=mcsec&p=findings'), 'یافته‌های باز', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings">' . Lang::t('همه') . '</a>')
-            . Ui::card(Charts::days($d['days'], $d['dayNew'], $d['dayFixed']), 'تازه و رفع‌شده', 'activity')
-            . Ui::card('<div class="mcs-tone-' . Score::tone($score['score']) . ' mcs-areawrap">' . Charts::area($trend, max(0, (int) $score['score'])) . '</div>', 'روند امتیاز', 'shield-check') . '</div>';
+        // the dashboard, the same for both views: numbers with their trend, the score, what to do, and the pictures
+        $out = '<div class="mcs-dash"><div class="mcs-dash-main">' . self::stats($verified, $d) . self::status($ctx, $verified, $score, $counts, $d, $trend) . '</div>'
+            . '<div class="mcs-dash-side">' . self::scoreCard($score, $counts, $d) . self::certCard($d) . '</div></div>'
+            . self::live($ctx, $d)
+            . '<div class="mcs-dash2">' . Ui::card(Charts::lines($d['days'], [
+                ['سرویس و درگاه', $d['hist']['port'], '#f59e0b'], ['میزبان', $d['hist']['host'], '#8b5cf6'], ['فناوری', $d['hist']['tech'], '#3b82f6'], ['نشانی', $d['hist']['url'], '#10b981'], ['دارایی', $d['hist']['asset'], '#ef4444'],
+            ]), 'روند سطح حمله', 'activity') . self::newHosts($d) . '</div>'
+            . '<div class="mcs-grid2">' . self::topPorts($d) . self::topTech($d) . '</div>'
+            . '<div class="mcs-dash2">' . Ui::card(Charts::trend($d['days'], $d['hist']['open'], Lang::t('یافته‌ی باز')), 'روند آسیب‌پذیری‌ها', 'bug',
+                '<span class="mcs-small mcs-muted">' . self::e(Lang::t('۱۴ روز: {new} تازه، {fixed} رفع‌شده', ['new' => Text::fa(array_sum($d['dayNew'])), 'fixed' => Text::fa(array_sum($d['dayFixed']))])) . '</span>')
+            . self::worst($verified) . '</div>';
         return $out . ($mode === 'advanced' ? self::advanced($ctx, $assets, $verified, $score, $counts, $d) : self::simple($ctx, $assets, $verified, $score, $counts, $d));
     }
 
-    /** The dark console at the top: the score, one sentence, what is watching, and the radar of the assets. */
-    private static function console(array $ctx, array $verified, array $score, array $counts, array $d, array $trend): string
+    /** Four numbers, each with what it gained in a week and its line of the last 14 days. */
+    private static function stats(array $verified, array $d): string
+    {
+        $card = function (string $icon, string $label, array $hist, string $href): string {
+            $now = (int) end($hist);
+            $then = (int) ($hist[max(0, count($hist) - 8)] ?? 0);
+            $diff = $now - $then;
+            $delta = $diff === 0 ? '<span class="mcs-stat-delta">' . self::e(Lang::t('بی تغییر در ۷ روز')) . '</span>'
+                : '<span class="mcs-stat-delta ' . ($diff > 0 ? 'is-up' : 'is-down') . '">' . ($diff > 0 ? '↗' : '↘') . ' ' . self::e(Lang::t('{n} در ۷ روز', ['n' => Text::fa(abs($diff))])) . '</span>';
+            return '<a class="mcs-stat" href="' . self::e($href) . '"><span class="mcs-stat-top"><span class="mcs-stat-label">' . self::e($label) . '</span><span class="mcs-stat-ico">' . Ui::ico($icon) . '</span></span>'
+                . '<span class="mcs-stat-num"><strong>' . self::e(Text::fa($now)) . '</strong>' . $delta . '</span>' . Charts::mini($hist) . '</a>';
+        };
+        return '<div class="mcs-statrow">' . $card('globe', 'دارایی‌ها', $d['hist']['asset'], 'index.php?m=mcsec&p=assets') . $card('server', 'میزبان‌ها', $d['hist']['host'], 'index.php?m=mcsec&p=assets')
+            . $card('layers', 'سرویس‌ها', $d['hist']['port'], 'index.php?m=mcsec&p=assets') . $card('sparkle', 'فناوری‌ها', $d['hist']['tech'], 'index.php?m=mcsec&p=assets') . '</div>';
+    }
+
+    /** One sentence, what is watching, the first jobs, and the two buttons a customer needs most. */
+    private static function status(array $ctx, array $verified, array $score, array $counts, array $d, array $trend): string
     {
         $down = count(array_filter($verified, fn ($a) => ($m = Monitor::status($a)) !== null && $m[1] === 'err'));
         $delta = '';
@@ -77,53 +100,122 @@ final class HomeViews
                 : ($x > 0 ? Lang::t('امتیاز از هفته‌ی پیش {n} واحد بالا رفته است.', ['n' => Text::fa(abs($x))]) : Lang::t('امتیاز از هفته‌ی پیش {n} واحد پایین آمده است.', ['n' => Text::fa(abs($x))]));
         }
         $partial = $score['partial'] > 0 ? ' ' . Ui::chip('ارزیابی ناقص', 'warn') . ' ' . self::e(Lang::t('{n} دارایی کامل سنجیده نشد.', ['n' => Text::fa($score['partial'])])) : '';
-        $monitored = count(array_filter($verified, fn ($a) => Monitor::status($a) !== null));
-        $lastScan = max(array_map(fn ($a) => (int) $a->last_scan_at, $verified) ?: [0]);
-        $facts = '<li class="' . ($monitored > 0 ? 'is-on' : '') . '"><i aria-hidden="true"></i>' . self::e($monitored > 0 ? Lang::t('پایش {n} دارایی روشن است', ['n' => Text::fa($monitored)]) : 'پایش در دسترس بودن روشن نیست') . '</li>'
-            . '<li>' . Ui::ico('clock') . self::e($lastScan > 0 ? Lang::t('آخرین اسکن: {when}', ['when' => Views::when($lastScan)]) : 'هنوز اسکنی نشده') . '</li>'
-            . '<li>' . Ui::ico('calendar') . ($d['next'] > 0 ? self::e(Lang::t('اسکن خودکار بعدی: {when}', ['when' => Text::date($d['next'])])) :'<a href="index.php?m=mcsec&amp;p=schedules">' . self::e('اسکن خودکار ندارید؛ بسازید') . '</a>') . '</li>';
-        $blips = [];
-        foreach ($verified as $a) {
-            $mon = Monitor::status($a);
-            $sc = (int) $a->last_scan_at > 0 ? (int) $a->score : -1;
-            $blips[] = ['name' => (string) $a->value, 'score' => $sc, 'tone' => $mon !== null && $mon[1] === 'err' ? 'err' : ($sc < 0 ? 'none' : Score::tone($sc))];
-        }
-        $btns = ($ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=scans#new">' . Ui::ico('play') . Lang::t('اسکن تازه') . '</a>' : '')
-            . '<a class="btn btn-default mcs-btn-ghost" href="index.php?m=mcsec&amp;p=findings">' . Ui::ico('bug') . Lang::t('یافته‌ها') . '</a>'
-            . SupportViews::link('', 'کمک کارشناس', 'btn btn-default mcs-btn-ghost');
-        return '<section class="mcs-console" aria-label="' . self::e(Lang::t('وضعیت امنیت')) . '">' . Ui::gauge($score['score'], '', $score['partial'] > 0 && $score['score'] >= 0)
-            . '<div class="mcs-console-say"><p class="mcs-console-kicker">' . Ui::ico('shield-check') . Lang::t('مرکز پایش امنیت') . '</p><strong>' . self::e(self::sentence($score, $counts, $down, count($verified))) . '</strong>'
-            . '<p class="mcs-console-sub">' . self::e($delta) . $partial . '</p><ul class="mcs-console-facts">' . $facts . '</ul><div class="mcs-actions">' . $btns . '</div>'
-            . '<details class="mcs-how"><summary>' . Lang::t('امتیاز چطور حساب می‌شود؟') . '</summary><p>' . Lang::t('از ۱۰۰ شروع می‌شود و هر یافته‌ی باز به اندازه‌ی اهمیتش کم می‌کند. یک یافته‌ی بحرانیِ باز، یا آسیب‌پذیری‌ای که مهاجمان همین حالا از آن استفاده می‌کنند (فهرست KEV)، امتیاز را حداکثر ۴۹ و یک یافته‌ی مهم حداکثر ۷۹ نگه می‌دارد، تا مشکل جدی پشت چند مورد سالم پنهان نماند.') . '</p>'
-            . '<p>' . Lang::t('اگر فایروال یا خطای سایت جلوی بخشی از بررسی را بگیرد، اسکن «ارزیابی ناقص» است، نه «سالم»؛ یافته‌هایی که این بار سنجیده نشدند باز می‌مانند.') . '</p></details></div>'
-            . Charts::radar($blips) . '</section>';
-    }
-
-    /** Six numbers, each a way into its page. */
-    private static function tiles(array $assets, array $verified, array $counts, array $d): string
-    {
         $monitored = array_values(array_filter(array_map(fn ($a) => Monitor::status($a), $verified)));
         $up = count(array_filter($monitored, fn ($m) => $m[1] !== 'err'));
-        $nearest = null;
-        foreach ($verified as $a) {
-            $c = $d['certs'][(int) $a->id] ?? null;
-            if ($c !== null && ($nearest === null || $c['days'] < $nearest[0]['days'])) {
-                $nearest = [$c, $a];
+        $lastScan = max(array_map(fn ($a) => (int) $a->last_scan_at, $verified) ?: [0]);
+        $facts = '<li class="' . ($monitored ? ($up < count($monitored) ? 'is-bad' : 'is-on') : '') . '"><i aria-hidden="true"></i>' . self::e($monitored ? Lang::t('در دسترس: {up} از {all}', ['up' => Text::fa($up), 'all' => Text::fa(count($monitored))]) : Lang::t('پایش در دسترس بودن روشن نیست')) . '</li>'
+            . '<li>' . Ui::ico('clock') . self::e($lastScan > 0 ? Lang::t('آخرین اسکن: {when}', ['when' => Views::when($lastScan)]) : Lang::t('هنوز اسکنی نشده')) . '</li>'
+            . '<li>' . Ui::ico('calendar') . ($d['next'] > 0 ? self::e(Lang::t('اسکن خودکار بعدی: {when}', ['when' => Text::date($d['next'])])) : '<a href="index.php?m=mcsec&amp;p=schedules">' . self::e(Lang::t('اسکن خودکار ندارید؛ بسازید')) . '</a>') . '</li>'
+            . '<li>' . Ui::ico('radar') . self::e($d['running'] > 0 ? Lang::t('{n} اسکن در جریان', ['n' => Text::fa($d['running'])]) : Lang::t('{n} اسکن در ۳۰ روز', ['n' => Text::fa($d['scans30'])])) . '</li>';
+        $btns = ($ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=scans#new">' . Ui::ico('play') . Lang::t('اسکن تازه') . '</a>' : '')
+            . '<a class="btn btn-default" href="index.php?m=mcsec&amp;p=findings">' . Ui::ico('bug') . Lang::t('یافته‌ها') . '</a>' . SupportViews::link('', 'کمک کارشناس', 'btn btn-default');
+        $jobs = '';
+        foreach (array_slice($d['top'], 0, 3) as $f) {
+            $jobs .= '<li><span class="mcs-act-sev">' . Ui::sev((string) $f->severity, true) . '</span><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '"><strong>' . self::e($f->title) . '</strong>'
+                . '<span class="mcs-act-meta">' . Ui::ltr(mb_substr((string) $f->location, 0, 70)) . '</span></a></li>';
+        }
+        return '<section class="card mcs-card mcs-status"><div class="card-body"><p class="mcs-status-kicker">' . Ui::ico('shield-check') . Lang::t('مرکز پایش امنیت') . '</p>'
+            . '<strong class="mcs-status-say">' . self::e(self::sentence($score, $counts, $down, count($verified))) . '</strong><p class="mcs-muted">' . self::e($delta) . $partial . '</p>'
+            . '<ul class="mcs-status-facts">' . $facts . '</ul>'
+            . ($jobs !== '' ? '<p class="mcs-status-h">' . Lang::t('اول این‌ها را انجام دهید') . '</p><ol class="mcs-status-jobs">' . $jobs . '</ol>' : '')
+            . '<div class="mcs-actions">' . $btns . '</div></div></section>';
+    }
+
+    /** The score as a ring with its grade, and the open findings by severity under it. */
+    private static function scoreCard(array $score, array $counts, array $d): string
+    {
+        $s = (int) $score['score'];
+        $total = array_sum(array_map('intval', $counts));
+        $cell = fn (string $k, string $label, int $n, string $cls = '') => '<a class="mcs-sv ' . $cls . '" href="index.php?m=mcsec&amp;p=findings' . ($k !== '' ? '&amp;severity=' . $k : '') . '"><span>' . self::e($label) . '</span><strong>' . self::e(Text::fa($n)) . '</strong></a>';
+        return '<section class="card mcs-card mcs-scorebox"><div class="card-body">' . Charts::grade($s, $score['partial'] > 0 && $s >= 0)
+            . '<p class="mcs-scorebox-h">' . Ui::ico('bug') . Lang::t('یافته‌های باز') . ($d['new'] > 0 ? ' <span class="mcs-stat-delta is-bad">↗ ' . self::e(Lang::t('{n} در ۷ روز', ['n' => Text::fa($d['new'])])) . '</span>' : '') . '</p>'
+            . '<div class="mcs-svgrid">' . $cell('', 'باز', $total) . $cell('critical', 'بحرانی', (int) $counts['critical'], 'is-c') . $cell('high', 'بالا', (int) $counts['high'], 'is-h') . '</div>'
+            . '<div class="mcs-svgrid is-soft">' . $cell('medium', 'متوسط', (int) $counts['medium'], 'is-m') . $cell('low', 'پایین', (int) $counts['low'], 'is-l') . $cell('info', 'اطلاعاتی', (int) $counts['info'], 'is-i') . '</div>'
+            . '<details class="mcs-how"><summary>' . Lang::t('امتیاز چطور حساب می‌شود؟') . '</summary><p>' . Lang::t('از ۱۰۰ شروع می‌شود و هر یافته‌ی باز به اندازه‌ی اهمیتش کم می‌کند. یک یافته‌ی بحرانیِ باز، یا آسیب‌پذیری‌ای که مهاجمان همین حالا از آن استفاده می‌کنند (فهرست KEV)، امتیاز را حداکثر ۴۹ و یک یافته‌ی مهم حداکثر ۷۹ نگه می‌دارد، تا مشکل جدی پشت چند مورد سالم پنهان نماند.') . '</p>'
+            . '<p>' . Lang::t('اگر فایروال یا خطای سایت جلوی بخشی از بررسی را بگیرد، اسکن «ارزیابی ناقص» است، نه «سالم»؛ یافته‌هایی که این بار سنجیده نشدند باز می‌مانند.') . '</p></details></div></section>';
+    }
+
+    /** Certificates by how long they still have. */
+    private static function certCard(array $d): string
+    {
+        $b = ['expired' => 0, 'month' => 0, 'quarter' => 0, 'long' => 0];
+        foreach ($d['certs'] as $c) {
+            $b[$c['days'] < 0 ? 'expired' : ($c['days'] <= 30 ? 'month' : ($c['days'] <= 90 ? 'quarter' : 'long'))]++;
+        }
+        $all = array_sum($b);
+        $bar = '';
+        foreach ($b as $k => $n) {
+            $bar .= $n > 0 ? '<i class="is-' . $k . '" style="flex:' . $n . '"></i>' : '';
+        }
+        $row = fn (string $k, string $label) => '<li><strong>' . self::e(Text::fa($b[$k])) . '</strong><i class="is-' . $k . '" aria-hidden="true"></i><span>' . self::e($label) . '</span></li>';
+        return Ui::card('<div class="mcs-certbar" aria-hidden="true">' . ($bar !== '' ? $bar : '<i style="flex:1"></i>') . '</div><ul class="mcs-certlist">' . $row('expired', 'منقضی') . $row('month', 'انقضا تا یک ماه')
+            . $row('quarter', 'انقضا در ۱ تا ۳ ماه') . $row('long', 'معتبر بیش از ۳ ماه') . '</ul>' . ($all === 0 ? '<p class="mcs-small mcs-muted">' . Lang::t('هنوز گواهی‌ای دیده نشده است.') . '</p>' : ''), 'گواهی‌های SSL', 'lock', '', 'mcs-certcard');
+    }
+
+    private static function newHosts(array $d): string
+    {
+        $li = '';
+        foreach ($d['newHosts'] as $hst) {
+            $li .= '<li><a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $hst->asset_id . '">' . Ui::ltr($hst->value) . '</a><time>' . self::e(Views::when((int) $hst->first_seen_at)) . '</time></li>';
+        }
+        return Ui::card($li !== '' ? '<ul class="mcs-rows">' . $li . '</ul>' : '<p class="mcs-muted">' . Lang::t('هنوز میزبانی کشف نشده است. «کشف سطح حمله» بگیرید تا زیردامنه‌ها و IPهایتان این‌جا بیاید.') . '</p>', 'میزبان‌های تازه کشف‌شده', 'clock');
+    }
+
+    private static function topPorts(array $d): string
+    {
+        $risky = ['21' => 'انتقال فایل', '23' => 'Telnet', '3306' => 'پایگاه داده', '5432' => 'پایگاه داده', '1433' => 'پایگاه داده', '27017' => 'پایگاه داده', '6379' => 'پایگاه داده', '9200' => 'پایگاه داده', '3389' => 'دسکتاپ از راه دور', '5900' => 'دسکتاپ از راه دور', '445' => 'اشتراک فایل', '139' => 'اشتراک فایل', '135' => 'اشتراک فایل'];
+        $n = [];
+        foreach ($d['surface'] as $byKind) {
+            foreach ($byKind['port'] ?? [] as $p) {
+                $port = (string) preg_replace('~^.*:~', '', (string) $p->value);
+                $n[$port] = ($n[$port] ?? 0) + 1;
             }
         }
-        $urgent = (int) $counts['critical'] + (int) $counts['high'];
-        $sc = $d['surfaceCounts'];
-        $tile = fn (string $icon, string $label, string $big, string $small, string $href, string $tone = '') => '<a class="mcs-tile' . ($tone !== '' ? ' mcs-tile-' . $tone : '') . '" href="' . self::e($href) . '">'
-            . '<span class="mcs-tile-ico">' . Ui::ico($icon) . '</span><span class="mcs-tile-label">' . self::e($label) . '</span><strong>' . $big . '</strong><small>' . $small . '</small></a>';
-        return '<div class="mcs-tiles">'
-            . $tile('globe', 'دارایی‌ها', self::e(Text::fa(count($verified))), self::e(count($assets) > count($verified) ? Lang::t('{n} در انتظار تأیید', ['n' => Text::fa(count($assets) - count($verified))]) : 'همه تأییدشده'), 'index.php?m=mcsec&p=assets', count($assets) > count($verified) ? 'warn' : '')
-            . $tile('alert', 'کار فوری', self::e(Text::fa($urgent)), self::e(Lang::t('{critical} بحرانی، {high} بالا', ['critical' => Text::fa((int) $counts['critical']), 'high' => Text::fa((int) $counts['high'])])), 'index.php?m=mcsec&p=findings', $urgent > 0 ? 'err' : 'ok')
-            . $tile('layers', 'سطح حمله', self::e(Text::fa((int) $sc['host'] + (int) $sc['port'])), self::e(Lang::t('{hosts} میزبان، {ports} درگاه، {techs} فناوری', ['hosts' => Text::fa((int) $sc['host']), 'ports' => Text::fa((int) $sc['port']), 'techs' => Text::fa((int) $sc['tech'])])), 'index.php?m=mcsec&p=assets')
-            . $tile('heart', 'در دسترس', $monitored ? self::e(Lang::t('{up} از {all}', ['up' => Text::fa($up), 'all' => Text::fa(count($monitored))])) : '—', $monitored ? ($up < count($monitored) ? self::e(Lang::t('{n} سایت خارج است', ['n' => Text::fa(count($monitored) - $up)])) : Lang::t('همه در دسترس‌اند')) : Lang::t('پایش روشن نیست'), 'index.php?m=mcsec&p=assets', $monitored && $up < count($monitored) ? 'err' : '')
-            . $tile('lock', 'انقضای SSL', $nearest ? ($nearest[0]['days'] < 0 ? Lang::t('منقضی') : self::e(Lang::t('{n} روز', ['n' => Text::fa($nearest[0]['days'])]))) : '—', $nearest ? Ui::ltr($nearest[1]->value) : Lang::t('گواهی‌ای دیده نشده'),
-                $nearest ? 'index.php?m=mcsec&p=asset&id=' . (int) $nearest[1]->id : 'index.php?m=mcsec&p=assets', $nearest && $nearest[0]['days'] <= max(1, Settings::int('monitor_ssl_days')) ? 'warn' : '')
-            . $tile('radar', 'اسکن‌های این ماه', self::e(Text::fa($d['scans30'])), self::e($d['running'] > 0 ? Lang::t('{n} در جریان', ['n' => Text::fa($d['running'])]) : 'اسکنی در جریان نیست'), 'index.php?m=mcsec&p=scans', $d['running'] > 0 ? 'run' : '')
-            . '</div>';
+        arsort($n);
+        $rows = [];
+        foreach (array_slice($n, 0, 6, true) as $port => $c) {
+            $rows[] = [(string) $port, $c, isset($risky[(string) $port]) ? Lang::t($risky[(string) $port]) : ''];
+        }
+        return Ui::card($rows ? Charts::ranked($rows) : '<p class="mcs-muted">' . Lang::t('درگاه بازی دیده نشده است.') . '</p>', 'پرتکرارترین درگاه‌های باز', 'server');
+    }
+
+    private static function topTech(array $d): string
+    {
+        $n = [];
+        foreach ($d['surface'] as $byKind) {
+            foreach ($byKind['tech'] ?? [] as $t) {
+                $n[(string) $t->value] = ($n[(string) $t->value] ?? 0) + 1;
+            }
+        }
+        arsort($n);
+        $rows = [];
+        foreach (array_slice($n, 0, 6, true) as $name => $c) {
+            $rows[] = [(string) $name, $c, ''];
+        }
+        return Ui::card($rows ? Charts::ranked($rows) : '<p class="mcs-muted">' . Lang::t('فناوری‌ای شناخته نشده است.') . '</p>', 'پرتکرارترین فناوری‌ها', 'layers');
+    }
+
+    /** The assets with the most open findings, each as a bar split by severity. */
+    private static function worst(array $verified): string
+    {
+        $list = [];
+        foreach ($verified as $a) {
+            $c = Assets::counts($a);
+            $n = (int) $c['critical'] + (int) $c['high'] + (int) $c['medium'] + (int) $c['low'];
+            if ($n > 0) {
+                $list[] = [$a, $c, $n, (int) $c['critical'] * 1000 + (int) $c['high'] * 100 + (int) $c['medium'] * 10 + (int) $c['low']];
+            }
+        }
+        usort($list, fn ($x, $y) => $y[3] <=> $x[3]);
+        $li = '';
+        foreach (array_slice($list, 0, 6) as [$a, $c, $n]) {
+            $bar = '';
+            foreach (['critical' => 'c', 'high' => 'h', 'medium' => 'm', 'low' => 'l'] as $sev => $cls) {
+                $bar .= (int) $c[$sev] > 0 ? '<i class="' . $cls . '" style="flex:' . (int) $c[$sev] . '"></i>' : '';
+            }
+            $li .= '<li><a href="index.php?m=mcsec&amp;p=findings&amp;asset=' . (int) $a->id . '">' . Ui::ltr($a->value) . '<strong>' . self::e(Text::fa($n)) . '</strong></a><span class="mcs-sevbar" aria-hidden="true">' . $bar . '</span></li>';
+        }
+        return Ui::card($li !== '' ? '<ul class="mcs-worst">' . $li . '</ul>' : '<p class="mcs-muted">' . Lang::t('دارایی‌ای با یافته‌ی باز نیست.') . '</p>', 'آسیب‌پذیرترین دارایی‌ها', 'alert');
     }
 
     /** What the scanners are doing now (each running scan with its path), then the latest finished ones. */
@@ -201,6 +293,30 @@ final class HomeViews
             $k = date('Y-m-d', (int) $f->fixed_at);
             $dayFixed[$k] = ($dayFixed[$k] ?? 0) + 1;
         }
+        // what there was at the end of each of the 14 days (a thing counts from when it was first seen until it went)
+        $ends = array_map(fn ($day) => (int) strtotime($day . ' 23:59:59'), $days);
+        $hist = ['host' => [], 'port' => [], 'tech' => [], 'url' => [], 'asset' => [], 'open' => []];
+        $rows = ['host' => [], 'port' => [], 'tech' => [], 'url' => []];
+        foreach (Db::rows(Db::table('mod_mcsec_surface')->where('client_id', $cid)->whereIn('kind', array_keys($rows))->limit(8000)->select(['kind', 'first_seen_at', 'gone_at'])) as $s) {
+            $rows[(string) $s->kind][] = [(int) $s->first_seen_at, (int) $s->gone_at];
+        }
+        $fr = [];
+        foreach (Db::rows(Db::table('mod_mcsec_findings')->where('client_id', $cid)->limit(8000)->select(['first_seen_at', 'fixed_at', 'status'])) as $f) {
+            // a finding closed without a time (accepted, false positive) is left out; a fixed one counts until it was fixed
+            if ((string) $f->status === 'open' || (int) $f->fixed_at > 0) {
+                $fr[] = [(int) $f->first_seen_at, (string) $f->status === 'open' ? 0 : (int) $f->fixed_at];
+            }
+        }
+        $at = fn (array $list, int $t) => count(array_filter($list, fn ($x) => $x[0] <= $t && ($x[1] === 0 || $x[1] > $t)));
+        $born = array_map(fn ($a) => [(int) ($a->verified_at ?: $a->created_at), 0], $verified);
+        foreach ($ends as $t) {
+            foreach (array_keys($rows) as $k) {
+                $hist[$k][] = $at($rows[$k], $t);
+            }
+            $hist['asset'][] = $at($born, $t);
+            $hist['open'][] = $at($fr, $t);
+        }
+        $newHosts = Db::rows(Db::table('mod_mcsec_surface')->where('client_id', $cid)->where('kind', 'host')->where('gone_at', 0)->orderByDesc('first_seen_at')->orderByDesc('id')->limit(7)->select(['asset_id', 'value', 'first_seen_at']));
         $scans = \McSec\Scans::recent($cid, 20);
         $liveScans = array_values(array_filter($scans, fn ($s) => in_array($s->status, ['queued', 'running'], true)));
         $shown = $liveScans ? array_slice($liveScans, 0, 4) : array_slice($scans, 0, 3);
@@ -212,7 +328,7 @@ final class HomeViews
         }
         $feed = Db::rows(Db::table('mod_mcsec_notices')->where('client_id', $cid)->where('created_at', '>=', Clock::now() - 14 * 86400)
             ->whereIn('event', ['new_findings', 'findings_fixed', 'new_exposure', 'site_down', 'site_up', 'ssl_expiring', 'kev_alert', 'asset_lapsed', 'asset_verified'])->orderByDesc('id')->limit(6));
-        return ['top' => $top, 'surface' => $surface, 'certs' => $certs, 'feed' => $feed, 'shots' => Shots::forClient($cid),
+        return ['top' => $top, 'surface' => $surface, 'certs' => $certs, 'feed' => $feed, 'shots' => Shots::forClient($cid), 'hist' => $hist, 'newHosts' => $newHosts,
             'days' => $days, 'dayNew' => $dayNew, 'dayFixed' => $dayFixed, 'scans' => $shown, 'running' => count($liveScans), 'next' => $next, 'surfaceCounts' => \McSec\Surface::counts($cid),
             'scans30' => Db::table('mod_mcsec_scans')->where('client_id', $cid)->where('queued_at', '>=', Clock::now() - 30 * 86400)->count(),
             'new' => Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('first_seen_at', '>=', $week)->count(),
@@ -289,11 +405,6 @@ final class HomeViews
     {
         $cid = (int) $ctx['who']['client_id'];
         $out = '';
-        $acts = self::actions($d['top'], 3, 'اول این‌ها را انجام دهید');
-        if ($acts === '' && $score['score'] >= 0) {
-            $acts = Ui::card(Ui::emptyState('shield-check', 'مشکل مهمی باز نیست', Lang::t('آفرین. با زمان‌بندی هفتگی، اگر چیزی تغییر کرد خبرتان می‌کنیم.'), !Schedules::forClient($cid) && $ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=schedules">' . Lang::t('زمان‌بندی بسازید') . '</a>' : ''));
-        }
-        $out .= $acts;
         if ($verified) {
             $cards = '';
             foreach (array_slice($verified, 0, 12) as $a) {
@@ -319,27 +430,7 @@ final class HomeViews
     private static function advanced(array $ctx, array $assets, array $verified, array $score, array $counts, array $d): string
     {
         $cid = (int) $ctx['who']['client_id'];
-        // the attack surface: what the scanners see from outside, by kind, with the commonest ports and technologies
-        $ports = [];
-        $techs = [];
-        foreach ($d['surface'] as $byKind) {
-            foreach ($byKind['port'] ?? [] as $p) {
-                $n = (string) preg_replace('~^.*:~', '', (string) $p->value);
-                $ports[$n] = ($ports[$n] ?? 0) + 1;
-            }
-            foreach ($byKind['tech'] ?? [] as $t) {
-                $techs[(string) $t->value] = ($techs[(string) $t->value] ?? 0) + 1;
-            }
-        }
-        arsort($ports);
-        arsort($techs);
-        $bars = [];
-        foreach (\McSec\Surface::KINDS as $k => $label) {
-            $bars[] = [$label, (int) ($d['surfaceCounts'][$k] ?? 0)];
-        }
-        $tags = fn (array $list) => implode(' ', array_map(fn ($name, $n) => '<span class="mcs-tag" dir="ltr">' . self::e($name) . ($n > 1 ? ' <small>×' . $n . '</small>' : '') . '</span>', array_keys($list), $list));
-        $out = Ui::card('<div class="mcs-surfacemap"><div>' . Charts::hbars($bars) . '</div><div><p class="mcs-small mcs-muted">' . Lang::t('درگاه‌های باز پرتکرار') . '</p><p>' . ($ports ? $tags(array_slice($ports, 0, 12, true)) : '<span class="mcs-muted">—</span>') . '</p>'
-            . '<p class="mcs-small mcs-muted">' . Lang::t('فناوری‌های دیده‌شده') . '</p><p>' . ($techs ? $tags(array_slice($techs, 0, 14, true)) : '<span class="mcs-muted">—</span>') . '</p></div></div>', 'سطح حمله از بیرون', 'layers');
+        $out = '';
         $rows = '';
         foreach ($verified as $a) {
             $c = Assets::counts($a);

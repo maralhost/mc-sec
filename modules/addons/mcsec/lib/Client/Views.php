@@ -164,6 +164,7 @@ final class Views
     public static function render(string $p, array $ctx, string $flash): string
     {
         Ui::$nonce = null;
+        Charts::$rtl = \McSec\Lang::rtl(); // before any page draws: time runs the way the page reads
         self::$pageTitle = '';
         self::$pageActions = '';
         $body = Ui::flash($flash) . match ($p) {
