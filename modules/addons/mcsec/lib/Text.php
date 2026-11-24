@@ -4,21 +4,28 @@ declare(strict_types=1);
 
 namespace McSec;
 
-/** Persian text helpers: escaping, digits, money and Jalali dates for display (same rules as MC-AI). */
+/**
+ * Text helpers for display: escaping, digits, money and dates. In Persian: Persian digits and Jalali dates (same rules
+ * as MC-AI); in English (Lang): Latin digits and Gregorian dates. e() also gives a whole string its English when the
+ * dictionary has one, so labels need no call of their own.
+ */
 final class Text
 {
+    // character tables, not text: i18n-skip-begin
     private const FA = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
     private const AR = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
     public const MONTHS = ['فروردین', 'اردیبهشت', 'خرداد', 'تیر', 'مرداد', 'شهریور', 'مهر', 'آبان', 'آذر', 'دی', 'بهمن', 'اسفند'];
+    // i18n-skip-end
 
     public static function e($s): string
     {
-        return htmlspecialchars((string) $s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        return htmlspecialchars(is_string($s) ? Lang::whole($s) : (string) $s, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
+    /** Digits for display: Persian in a Persian page, as they are in an English one. */
     public static function fa($s): string
     {
-        return str_replace(range(0, 9), self::FA, (string) $s);
+        return Lang::fa() ? str_replace(range(0, 9), self::FA, (string) $s) : (string) $s;
     }
 
     /** Persian/Arabic digits and separators to ASCII, for parsing user input. */
@@ -26,7 +33,7 @@ final class Text
     {
         $s = str_replace(self::FA, range(0, 9), $s);
         $s = str_replace(self::AR, range(0, 9), $s);
-        return str_replace(['٫', '٬', '،'], ['.', '', ''], $s);
+        return str_replace(['٫', '٬', '،'], ['.', '', ''], $s); // i18n-skip
     }
 
     /** 1234567 → "۱٬۲۳۴٬۵۶۷" */
@@ -34,7 +41,7 @@ final class Text
     {
         $neg = $n < 0;
         $groups = array_reverse(array_map('strrev', str_split(strrev((string) abs($n)), 3)));
-        return ($neg ? '−' : '') . self::fa(implode('٬', $groups));
+        return ($neg ? '−' : '') . self::fa(implode(Lang::fa() ? '٬' : ',', $groups)); // i18n-skip
     }
 
     /**
@@ -48,12 +55,14 @@ final class Text
             $s = self::num((int) round($amount));
         } else {
             $c = (int) round($amount * 100);
-            $s = self::num(intdiv($c, 100)) . '٫' . self::fa(str_pad((string) abs($c % 100), 2, '0', STR_PAD_LEFT));
+            $s = self::num(intdiv($c, 100)) . (Lang::fa() ? '٫' : '.') . self::fa( // i18n-skip
+                str_pad((string) abs($c % 100), 2, '0', STR_PAD_LEFT));
         }
-        $prefix = trim((string) ($currency->prefix ?? ''));
-        $suffix = trim((string) ($currency->suffix ?? ''));
+        // a currency sign written in Persian in WHMCS ("ریال") gets its English when there is one
+        $prefix = Lang::t(trim((string) ($currency->prefix ?? '')));
+        $suffix = Lang::t(trim((string) ($currency->suffix ?? '')));
         if ($prefix === '' && $suffix === '') {
-            $suffix = $code === 'IRR' ? 'ریال' : $code;
+            $suffix = $code === 'IRR' ? Lang::t('ریال') : $code;
         }
         return trim(($prefix !== '' ? $prefix . ' ' : '') . $s . ($suffix !== '' ? ' ' . $suffix : ''));
     }
@@ -89,9 +98,12 @@ final class Text
             return '—';
         }
         $d = (new \DateTimeImmutable('@' . $ts))->setTimezone(new \DateTimeZone('Asia/Tehran'));
+        if (!Lang::fa()) {
+            return $d->format($withTime ? 'j M Y, H:i' : 'j M Y');
+        }
         [$y, $m, $day] = self::jalali((int) $d->format('Y'), (int) $d->format('n'), (int) $d->format('j'));
         $s = self::fa($day) . ' ' . self::MONTHS[$m - 1] . ' ' . self::fa($y);
-        return $withTime ? $s . '، ' . self::fa($d->format('H:i')) : $s;
+        return $withTime ? $s . '، ' . self::fa($d->format('H:i')) : $s; // i18n-skip (the Persian date itself)
     }
 
     /** A WHMCS date ("2026-11-06") → "۱۵ آبان ۱۴۰۵"; empty and zero dates → "—". */
@@ -104,6 +116,9 @@ final class Text
         if (count($p) !== 3) {
             return '—';
         }
+        if (!Lang::fa()) {
+            return (string) date('j M Y', (int) gmmktime(12, 0, 0, (int) $p[1], (int) $p[2], (int) $p[0]));
+        }
         [$y, $m, $d] = self::jalali((int) $p[0], (int) $p[1], (int) $p[2]);
         return self::fa($d) . ' ' . self::MONTHS[$m - 1] . ' ' . self::fa($y);
     }
@@ -112,19 +127,19 @@ final class Text
     public static function ago(int $ts): string
     {
         if ($ts <= 0) {
-            return 'هرگز';
+            return Lang::t('هرگز');
         }
         $d = max(0, Clock::now() - $ts);
         if ($d < 60) {
-            return 'همین حالا';
+            return Lang::t('همین حالا');
         }
         if ($d < 3600) {
-            return self::fa(intdiv($d, 60)) . ' دقیقه پیش';
+            return Lang::t('{n} دقیقه پیش', ['n' => self::fa(intdiv($d, 60))]);
         }
         if ($d < 86400) {
-            return self::fa(intdiv($d, 3600)) . ' ساعت پیش';
+            return Lang::t('{n} ساعت پیش', ['n' => self::fa(intdiv($d, 3600))]);
         }
-        return self::fa(intdiv($d, 86400)) . ' روز پیش';
+        return Lang::t('{n} روز پیش', ['n' => self::fa(intdiv($d, 86400))]);
     }
 
     /** Trims and collapses spaces of a short name (workspace, organization); Persian-safe, Arabic ي and ك become ی and ک. */
@@ -139,10 +154,11 @@ final class Text
     /** Arabic Yeh, Alef Maksura and Kaf (typed on an Arabic keyboard) as the Persian letters, so the same name is the same text. */
     public static function letters(string $s): string
     {
-        return strtr($s, ['ي' => 'ی', 'ى' => 'ی', 'ك' => 'ک']);
+        return strtr($s, ['ي' => 'ی', 'ى' => 'ی', 'ك' => 'ک']); // i18n-skip
     }
 
     /** Persian alphabet: آ comes first; پ، چ، ژ and گ sit where a Persian reader expects them, not after ی as in Unicode. */
+    // i18n-skip-begin (sorting tables)
     private const ALPHABET = ['آ', 'ا', 'ب', 'پ', 'ت', 'ث', 'ج', 'چ', 'ح', 'خ', 'د', 'ذ', 'ر', 'ز', 'ژ', 'س', 'ش', 'ص', 'ض', 'ط', 'ظ', 'ع', 'غ', 'ف', 'ق', 'ک', 'گ', 'ل', 'م', 'ن', 'و', 'ه', 'ی'];
 
     /**

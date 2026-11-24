@@ -60,7 +60,8 @@ final class Credits
             if (Db::table('mod_mcsec_wallets')->where('client_id', $clientId)->where('period', (string) $w->period)->update(['period' => $now, 'updated_at' => Clock::now()]) === 1) {
                 $left = (int) Db::table('mod_mcsec_wallets')->where('client_id', $clientId)->value('monthly');
                 if ($left > 0) {
-                    self::debit($clientId, $left, 'monthly', 'expire', 'expire:' . $clientId . ':' . $w->period, 'پایان اعتبار ماهانه‌ی ' . Text::fa((string) $w->period));
+                    self::debit($clientId, $left, 'monthly', 'expire', 'expire:' . $clientId . ':' . $w->period,
+                        self::forAccount($clientId, fn () => Lang::t('پایان اعتبار ماهانه‌ی {period}', ['period' => Text::fa((string) $w->period)])));
                 }
             }
         }
@@ -71,9 +72,20 @@ final class Credits
         }
         foreach (Plans::active($clientId) as $plan) {
             if ((int) $plan->monthly_credits > 0) {
-                self::credit($clientId, (int) $plan->monthly_credits, 'monthly', 'plan', 'plan:' . $plan->service_id . ':' . $now, 'اعتبار ماهانه‌ی پلن ' . $plan->name);
+                self::credit($clientId, (int) $plan->monthly_credits, 'monthly', 'plan', 'plan:' . $plan->service_id . ':' . $now,
+                    self::forAccount($clientId, fn () => Lang::t('اعتبار ماهانه‌ی پلن {name}', ['name' => $plan->name])));
             }
         }
+    }
+
+    /**
+     * Runs $fn in the account's own language: for what is written about an account whoever is looking (ledger notes
+     * with a name or a number in them, invoice lines and notices made in the background). A note that is one fixed
+     * text stays as it is and is translated when the page shows it.
+     */
+    public static function forAccount(int $clientId, callable $fn)
+    {
+        return Lang::with(Lang::forClient($clientId), $fn);
     }
 
     /** Adds credits once per ref. Returns false when that ref was already applied. */
@@ -132,7 +144,7 @@ final class Credits
                 $fromM = min((int) $w->monthly, $amount);
                 $fromP = $amount - $fromM;
                 if ($fromP > (int) $w->paid) {
-                    return ['ok' => false, 'error' => 'اعتبار کافی نیست: ' . Text::fa($amount) . ' اعتبار لازم است و ' . Text::fa((int) $w->monthly + (int) $w->paid) . ' دارید.', 'monthly' => 0, 'paid' => 0];
+                    return ['ok' => false, 'error' => Lang::t('اعتبار کافی نیست: {need} اعتبار لازم است و {have} دارید.', ['need' => Text::fa($amount), 'have' => Text::fa((int) $w->monthly + (int) $w->paid)]), 'monthly' => 0, 'paid' => 0];
                 }
                 if ($fromM > 0) {
                     self::book($clientId, -$fromM, 'monthly', 'spend', $ref . ':m', $note, 0, $scanId);
@@ -152,7 +164,7 @@ final class Credits
             });
         } catch (\Throwable $e) {
             Trace::warn('credit', 'spend', $e->getMessage(), ['ref' => $ref], ['client_id' => $clientId]);
-            return ['ok' => false, 'error' => 'کسر اعتبار همزمان با کار دیگری بود؛ دوباره امتحان کنید.', 'monthly' => 0, 'paid' => 0];
+            return ['ok' => false, 'error' => Lang::t('کسر اعتبار همزمان با کار دیگری بود؛ دوباره امتحان کنید.'), 'monthly' => 0, 'paid' => 0];
         }
     }
 
@@ -218,7 +230,8 @@ final class Credits
             if ($key === '' || (int) ($p['credits'] ?? 0) <= 0 || (float) ($p['price'] ?? 0) <= 0) {
                 continue;
             }
-            $out[$key] = ['key' => $key, 'credits' => (int) $p['credits'], 'price' => (float) $p['price'], 'label' => Text::name((string) ($p['label'] ?? ''), 80) ?: Text::fa((int) $p['credits']) . ' اعتبار'];
+            $out[$key] = ['key' => $key, 'credits' => (int) $p['credits'], 'price' => (float) $p['price'], // a label is the admin's own text; the module's default labels have their English in the dictionary
+                'label' => Lang::whole(Text::name((string) ($p['label'] ?? ''), 80)) ?: Lang::t('{credits} اعتبار', ['credits' => Text::fa((int) $p['credits'])])];
         }
         return $out;
     }
@@ -239,13 +252,13 @@ final class Credits
         };
         $d = Rules::of($clientId)['discount'];
         if ($d > 0) {
-            $try(round($pack['price'] * (100 - $d) / 100, 2), (int) $pack['credits'], 0, Text::fa($d) . '٪ تخفیف ویژه‌ی حساب شما');
+            $try(round($pack['price'] * (100 - $d) / 100, 2), (int) $pack['credits'], 0, Lang::t('{n}٪ تخفیف ویژه‌ی حساب شما', ['n' => Text::fa($d)]));
         }
         $code = Codes::pending($clientId);
         if ($code && $code->kind === 'discount') {
-            $try(round($pack['price'] * (100 - (int) $code->value) / 100, 2), (int) $pack['credits'], (int) $code->id, Text::fa((int) $code->value) . '٪ تخفیف با کد ' . $code->code);
+            $try(round($pack['price'] * (100 - (int) $code->value) / 100, 2), (int) $pack['credits'], (int) $code->id, Lang::t('{n}٪ تخفیف با کد {code}', ['n' => Text::fa((int) $code->value), 'code' => $code->code]));
         } elseif ($code && $code->kind === 'bonus') {
-            $try((float) $pack['price'], (int) $pack['credits'] + intdiv((int) $pack['credits'] * (int) $code->value, 100), (int) $code->id, Text::fa((int) $code->value) . '٪ اعتبار بیشتر با کد ' . $code->code);
+            $try((float) $pack['price'], (int) $pack['credits'] + intdiv((int) $pack['credits'] * (int) $code->value, 100), (int) $code->id, Lang::t('{n}٪ اعتبار بیشتر با کد {code}', ['n' => Text::fa((int) $code->value), 'code' => $code->code]));
         }
         return $best;
     }
@@ -279,7 +292,9 @@ final class Credits
         }
         $id = Db::table('mod_mcsec_topups')->insertGetId(['client_id' => $clientId, 'pack' => $packKey, 'credits' => $offer['credits'], 'amount' => $offer['price'],
             'status' => 'pending', 'user_id' => (int) ($who['user_id'] ?? 0), 'code_id' => $offer['code_id'], 'gift' => $gift, 'auto' => !empty($opt['auto']) ? 1 : 0, 'created_at' => Clock::now()]);
-        $what = ($gift ? 'هدیه‌ی اعتبار اسکن امنیتی MC-Sec: ' : 'اعتبار اسکن امنیتی MC-Sec: ') . $pack['label'] . ' (' . $offer['credits'] . ' credits) #T' . $id;
+        // the invoice line is read by the customer: the visitor's language here, the account's when auto top-up made it (autoTopups)
+        $vars = ['pack' => $pack['label'], 'n' => $offer['credits'], 'id' => $id];
+        $what = $gift ? Lang::t('هدیه‌ی اعتبار اسکن امنیتی MC-Sec: {pack} ({n} credits) #T{id}', $vars) : Lang::t('اعتبار اسکن امنیتی MC-Sec: {pack} ({n} credits) #T{id}', $vars);
         $r = Whmcs::createInvoice($clientId, $what, $offer['price'], Settings::int('invoice_due_days'));
         if (!$r['ok'] || $r['invoice_id'] <= 0) {
             Db::table('mod_mcsec_topups')->where('id', $id)->update(['status' => 'cancelled']);
@@ -302,7 +317,7 @@ final class Credits
             if ((int) ($t->gift ?? 0) === 1) {
                 $done += Codes::makeGift($t) !== '' ? 1 : 0; // marks the top-up paid in the same transaction
             } else {
-                if (self::credit((int) $t->client_id, (int) $t->credits, 'paid', 'topup', 'topup:' . $t->id, 'خرید بسته (فاکتور ' . $invoiceId . ')')) {
+                if (self::credit((int) $t->client_id, (int) $t->credits, 'paid', 'topup', 'topup:' . $t->id, self::forAccount((int) $t->client_id, fn () => Lang::t('خرید بسته (فاکتور {id})', ['id' => $invoiceId])))) {
                     $done++;
                     Notify::event((int) $t->client_id, 'credits_added', ['credits' => (int) $t->credits, 'invoice' => $invoiceId], 'topup:' . $t->id);
                 }
@@ -348,13 +363,17 @@ final class Credits
                 if (($wallets[$cid] ?? 0) >= (int) $a->auto_below || isset($openAuto[$cid]) || ($recent[$cid] ?? 0) >= $cap) {
                     continue;
                 }
-                $r = self::buy(['client_id' => $cid, 'user_id' => 0], (string) $a->auto_pack, ['auto' => true]);
-                if ($r['ok'] && empty($r['again'])) {
-                    $n++;
-                    Notify::event($cid, 'billing', ['title' => 'فاکتور شارژ خودکار اعتبار اسکن ساخته شد',
-                        'lines' => ['اعتبار شما به کمتر از ' . Text::fa((int) $a->auto_below) . ' رسید. پس از پرداخت فاکتور، اعتبار همان لحظه افزوده می‌شود.', 'شارژ خودکار را هر وقت بخواهید در صفحه‌ی «اعتبار» خاموش کنید.'],
+                // the invoice line and the notice are written in the account's own language
+                $n += (int) self::forAccount($cid, function () use ($cid, $a): int {
+                    $r = self::buy(['client_id' => $cid, 'user_id' => 0], (string) $a->auto_pack, ['auto' => true]);
+                    if (!$r['ok'] || !empty($r['again'])) {
+                        return 0;
+                    }
+                    Notify::event($cid, 'billing', ['title' => Lang::t('فاکتور شارژ خودکار اعتبار اسکن ساخته شد'),
+                        'lines' => [Lang::t('اعتبار شما به کمتر از {n} رسید. پس از پرداخت فاکتور، اعتبار همان لحظه افزوده می‌شود.', ['n' => Text::fa((int) $a->auto_below)]), Lang::t('شارژ خودکار را هر وقت بخواهید در صفحه‌ی «اعتبار» خاموش کنید.')],
                         'link' => 'viewinvoice.php?id=' . (int) $r['invoice_id'], 'tone' => 'info'], 'auto:' . $r['invoice_id']);
-                }
+                    return 1;
+                });
             }
         }
         return $n;

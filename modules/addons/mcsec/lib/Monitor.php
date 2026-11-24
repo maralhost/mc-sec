@@ -168,8 +168,10 @@ final class Monitor
             return null;
         }
         if ($a->mon_status === 'down') {
-            return ['از دسترس خارج', 'err', 'از ' . Text::ago((int) $a->mon_since) . ($a->mon_note !== '' ? ' — ' . $a->mon_note : '')];
+            // the note was stored by the worker in Persian: it gets its English here, when it is read
+            return ['از دسترس خارج', 'err', $a->mon_note !== '' ? Lang::t('از {since} — {note}', ['since' => Text::ago((int) $a->mon_since), 'note' => Lang::t((string) $a->mon_note)])
+                : Lang::t('از {since}', ['since' => Text::ago((int) $a->mon_since)])];
         }
-        return ['در دسترس', 'ok', 'آخرین بررسی ' . Text::ago((int) $a->mon_at)];
+        return ['در دسترس', 'ok', Lang::t('آخرین بررسی {when}', ['when' => Text::ago((int) $a->mon_at)])];
     }
 }

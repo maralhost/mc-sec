@@ -49,6 +49,7 @@ final class Codes
     /** Admin: a campaign code. @return array{ok:bool,error?:string,code?:string} */
     public static function create(array $in, int $adminId = 0): array
     {
+        // i18n-skip-begin (codes are made in the admin panel only; its messages stay Persian)
         $kind = (string) ($in['kind'] ?? '');
         if (!in_array($kind, self::ADMIN_KINDS, true)) {
             return ['ok' => false, 'error' => 'نوع کد را انتخاب کنید.'];
@@ -69,6 +70,7 @@ final class Codes
         if ($client > 0 && !Whmcs::client($client)) {
             return ['ok' => false, 'error' => 'حسابی با این شماره پیدا نشد.'];
         }
+        // i18n-skip-end
         $days = max(0, (int) ($in['days'] ?? 0));
         Db::table('mod_mcsec_codes')->insert([
             'code' => $code, 'kind' => $kind, 'value' => $value, 'bucket' => ($in['bucket'] ?? '') === 'monthly' ? 'monthly' : 'paid',
@@ -162,7 +164,7 @@ final class Codes
         try {
             Db::tx(function () use ($c, $clientId, $userId, $gift) {
                 self::claim($c, $clientId, $userId, 'done');
-                $note = $gift ? 'کد هدیه ' . $c->code : 'کد ' . $c->code;
+                $note = Credits::forAccount($clientId, fn () => $gift ? Lang::t('کد هدیه {code}', ['code' => $c->code]) : Lang::t('کد {code}', ['code' => $c->code]));
                 if (!Credits::credit($clientId, (int) $c->value, $gift ? 'paid' : (string) $c->bucket, $gift ? 'gift' : 'code', 'code:' . $c->id . ':' . $clientId, $note)) {
                     throw new \DomainException('این کد را قبلاً استفاده کرده‌اید.');
                 }
@@ -171,10 +173,13 @@ final class Codes
             return ['ok' => false, 'error' => $e->getMessage()];
         }
         if ($gift && (int) $c->owner_client > 0 && (int) $c->owner_client !== $clientId) {
-            Notify::event((int) $c->owner_client, 'billing', ['title' => 'هدیه‌ی شما استفاده شد', 'lines' => ['کد هدیه‌ی ' . $c->code . ' (' . Text::fa((int) $c->value) . ' اعتبار) را دوستتان فعال کرد.'],
-                'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'], 'giftused:' . $c->id);
+            // the buyer of the gift reads this, in the buyer's language
+            Credits::forAccount((int) $c->owner_client, fn () => Notify::event((int) $c->owner_client, 'billing', ['title' => Lang::t('هدیه‌ی شما استفاده شد'),
+                'lines' => [Lang::t('کد هدیه‌ی {code} ({n} اعتبار) را دوستتان فعال کرد.', ['code' => $c->code, 'n' => Text::fa((int) $c->value)])],
+                'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'], 'giftused:' . $c->id));
         }
-        return ['ok' => true, 'message' => Text::fa((int) $c->value) . ' اعتبار به حساب شما افزوده شد' . (!$gift && $c->bucket === 'monthly' ? ' و تا پایان همین ماه شمسی معتبر است.' : '.')];
+        return ['ok' => true, 'message' => !$gift && $c->bucket === 'monthly' ? Lang::t('{n} اعتبار به حساب شما افزوده شد و تا پایان همین ماه شمسی معتبر است.', ['n' => Text::fa((int) $c->value)])
+            : Lang::t('{n} اعتبار به حساب شما افزوده شد.', ['n' => Text::fa((int) $c->value)])];
     }
 
     /** A discount or bonus code waits on the account for the next pack; a newer one takes its place. */
@@ -196,8 +201,8 @@ final class Codes
         } catch (\DomainException $e) {
             return ['ok' => false, 'error' => $e->getMessage()];
         }
-        return ['ok' => true, 'message' => $c->kind === 'discount' ? 'کد پذیرفته شد: ' . Text::fa((int) $c->value) . '٪ تخفیف روی خرید بعدی بسته‌ی اعتبار. قیمت‌های پایین همین صفحه به‌روز شد.'
-            : 'کد پذیرفته شد: با خرید بعدی، ' . Text::fa((int) $c->value) . '٪ اعتبار بیشتر می‌گیرید.'];
+        return ['ok' => true, 'message' => $c->kind === 'discount' ? Lang::t('کد پذیرفته شد: {n}٪ تخفیف روی خرید بعدی بسته‌ی اعتبار. قیمت‌های پایین همین صفحه به‌روز شد.', ['n' => Text::fa((int) $c->value)])
+            : Lang::t('کد پذیرفته شد: با خرید بعدی، {n}٪ اعتبار بیشتر می‌گیرید.', ['n' => Text::fa((int) $c->value)])];
     }
 
     /** The discount or bonus code waiting on an account, if it is still valid. */
@@ -229,8 +234,9 @@ final class Codes
             return $code;
         });
         if ($code !== '') {
-            Notify::event((int) $topup->client_id, 'billing', ['title' => 'کد هدیه‌ی شما آماده است', 'lines' => ['کد ' . $code . ' را به دوستتان بدهید: ' . Text::fa((int) $topup->credits) . ' اعتبار اسکن امنیتی.',
-                'او کد را در صفحه‌ی «اعتبار» بخش «کد دارید؟» وارد می‌کند. کدی که تا یک سال استفاده نشود، به اعتبار خودتان برمی‌گردد.'], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'], 'gift:' . $topup->id);
+            Credits::forAccount((int) $topup->client_id, fn () => Notify::event((int) $topup->client_id, 'billing', ['title' => Lang::t('کد هدیه‌ی شما آماده است'),
+                'lines' => [Lang::t('کد {code} را به دوستتان بدهید: {n} اعتبار اسکن امنیتی.', ['code' => $code, 'n' => Text::fa((int) $topup->credits)]),
+                    Lang::t('او کد را در صفحه‌ی «اعتبار» بخش «کد دارید؟» وارد می‌کند. کدی که تا یک سال استفاده نشود، به اعتبار خودتان برمی‌گردد.')], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'], 'gift:' . $topup->id));
         }
         return (string) $code;
     }
@@ -250,10 +256,13 @@ final class Codes
             if (Db::table('mod_mcsec_codes')->where('id', (int) $c->id)->where('used', 0)->update(['used' => 1, 'enabled' => 0]) !== 1) {
                 continue;
             }
-            if (Credits::credit((int) $c->owner_client, (int) $c->value, 'paid', 'gift', 'giftback:' . $c->id, 'برگشت هدیه‌ی استفاده‌نشده ' . $c->code)) {
-                $n++;
-                Notify::event((int) $c->owner_client, 'credits_added', ['credits' => (int) $c->value, 'note' => 'کد هدیه‌ی ' . $c->code . ' یک سال استفاده نشد و اعتبارش به حساب خودتان برگشت.'], 'giftback:' . $c->id);
-            }
+            $n += (int) Credits::forAccount((int) $c->owner_client, function () use ($c): int {
+                if (!Credits::credit((int) $c->owner_client, (int) $c->value, 'paid', 'gift', 'giftback:' . $c->id, Lang::t('برگشت هدیه‌ی استفاده‌نشده {code}', ['code' => $c->code]))) {
+                    return 0;
+                }
+                Notify::event((int) $c->owner_client, 'credits_added', ['credits' => (int) $c->value, 'note' => Lang::t('کد هدیه‌ی {code} یک سال استفاده نشد و اعتبارش به حساب خودتان برگشت.', ['code' => $c->code])], 'giftback:' . $c->id);
+                return 1;
+            });
         }
         return $n;
     }
@@ -316,7 +325,7 @@ final class Codes
         if ($n > 0) {
             Credits::credit($clientId, $n, 'paid', 'invite', 'invite:new:' . $clientId, 'هدیه‌ی دعوت');
         }
-        return ['ok' => true, 'message' => $n > 0 ? 'خوش آمدید! ' . Text::fa($n) . ' اعتبار هدیه‌ی دعوت به حساب شما افزوده شد.' : 'کد دعوت ثبت شد.'];
+        return ['ok' => true, 'message' => $n > 0 ? Lang::t('خوش آمدید! {n} اعتبار هدیه‌ی دعوت به حساب شما افزوده شد.', ['n' => Text::fa($n)]) : Lang::t('کد دعوت ثبت شد.')];
     }
 
     /** The invited account proved its first asset: the inviter's small reward, once. */
@@ -342,7 +351,8 @@ final class Codes
             return;
         }
         if (Credits::credit($inviter, $credits, 'paid', 'invite', 'invite:' . $step . ':' . $invitee, 'جایزه‌ی دعوت از دوستان')) {
-            Notify::event($inviter, 'credits_added', ['credits' => $credits, 'note' => $why . ' ممنون که مارال کلاد را معرفی می‌کنید.'], 'invite:' . $step . ':' . $invitee);
+            // two whole sentences, in the inviter's language ($why is one of the two fixed texts above)
+            Credits::forAccount($inviter, fn () => Notify::event($inviter, 'credits_added', ['credits' => $credits, 'note' => Lang::t($why) . ' ' . Lang::t('ممنون که مارال کلاد را معرفی می‌کنید.')], 'invite:' . $step . ':' . $invitee));
         }
     }
 }

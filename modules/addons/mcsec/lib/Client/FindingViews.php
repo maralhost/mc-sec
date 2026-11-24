@@ -10,6 +10,7 @@ use McSec\Catalog;
 use McSec\Db;
 use McSec\Findings;
 use McSec\Kb;
+use McSec\Lang;
 use McSec\Plans;
 use McSec\Reports;
 use McSec\Settings;
@@ -39,8 +40,8 @@ final class FindingViews
         ];
         $res = Findings::search($cid, $f);
         $any = Db::table('mod_mcsec_findings')->where('client_id', $cid)->exists();
-        $out = Ui::guide('<p>هر مشکلی که اسکن‌ها پیدا کرده‌اند یک بار این‌جا می‌آید (اگر دوباره دیده شود تکرار نمی‌شود) و از مهم‌ترین مرتب است. روی هر کدام بزنید تا ببینید <strong>چرا مهم است و چطور رفعش کنید</strong>.</p>'
-            . '<ul><li><strong>رفع‌شده</strong> را فقط خود سامانه می‌زند: وقتی اسکن بعدی آن را دیگر نبیند. پس از رفع، «رفع کردم، دوباره بسنج» را بزنید.</li><li>اگر موردی برایتان پذیرفتنی است یا اشتباه است، با نوشتن دلیل «ریسک پذیرفته» یا «مثبت کاذب» کنید؛ از امتیاز و اعلان‌ها بیرون می‌رود.</li></ul>', !$any);
+        $out = Ui::guide(Lang::t('<p>هر مشکلی که اسکن‌ها پیدا کرده‌اند یک بار این‌جا می‌آید (اگر دوباره دیده شود تکرار نمی‌شود) و از مهم‌ترین مرتب است. روی هر کدام بزنید تا ببینید <strong>چرا مهم است و چطور رفعش کنید</strong>.</p>')
+            . Lang::t('<ul><li><strong>رفع‌شده</strong> را فقط خود سامانه می‌زند: وقتی اسکن بعدی آن را دیگر نبیند. پس از رفع، «رفع کردم، دوباره بسنج» را بزنید.</li><li>اگر موردی برایتان پذیرفتنی است یا اشتباه است، با نوشتن دلیل «ریسک پذیرفته» یا «مثبت کاذب» کنید؛ از امتیاز و اعلان‌ها بیرون می‌رود.</li></ul>'), !$any);
         $base = 'index.php?m=mcsec&p=findings';
         $keep = fn (array $over) => $base . '&' . http_build_query(array_filter(array_merge(['status' => $f['status'], 'severity' => $f['severity'], 'asset' => $f['asset'] ?: '', 'new' => $f['new'] ?: '', 'q' => $f['q'], 'scan' => $f['scan'] ?: ''], $over), fn ($v) => $v !== '' && $v !== null));
         $seg = [];
@@ -56,19 +57,19 @@ final class FindingViews
             $sev[$k] = $s['label'];
         }
         $filters = '<form method="get" action="index.php" class="mcs-filters" role="search"><input type="hidden" name="m" value="mcsec"><input type="hidden" name="p" value="findings"><input type="hidden" name="status" value="' . self::e($f['status']) . '">'
-            . '<label class="mcs-sr" for="mcs-fq">جستجو</label><input class="form-control" id="mcs-fq" name="q" value="' . self::e($f['q']) . '" placeholder="جستجو در عنوان، نشانی یا CVE" dir="auto">'
-            . '<label class="mcs-sr" for="mcs-fs">شدت</label>' . Ui::select('severity', $sev, $f['severity'], 'mcs-fs')
-            . '<label class="mcs-sr" for="mcs-fa">دارایی</label>' . Ui::select('asset', $assets, (string) $f['asset'], 'mcs-fa')
+            . '<label class="mcs-sr" for="mcs-fq">' . Lang::t('جستجو') . '</label><input class="form-control" id="mcs-fq" name="q" value="' . self::e($f['q']) . '" placeholder="' . Lang::t('جستجو در عنوان، نشانی یا CVE') . '" dir="auto">'
+            . '<label class="mcs-sr" for="mcs-fs">' . Lang::t('شدت') . '</label>' . Ui::select('severity', $sev, $f['severity'], 'mcs-fs')
+            . '<label class="mcs-sr" for="mcs-fa">' . Lang::t('دارایی') . '</label>' . Ui::select('asset', $assets, (string) $f['asset'], 'mcs-fa')
             . ($f['new'] > 0 ? '<input type="hidden" name="new" value="' . (int) $f['new'] . '">' : '')
-            . '<button type="submit" class="btn btn-default">' . Ui::ico('search') . 'اعمال</button>'
-            . (($f['severity'] !== '' || $f['asset'] > 0 || $f['q'] !== '' || $f['new'] > 0 || $f['scan'] > 0) ? '<a class="btn btn-link" href="' . self::e($base . '&status=' . $f['status']) . '">پاک کردن فیلترها</a>' : '') . '</form>';
+            . '<button type="submit" class="btn btn-default">' . Ui::ico('search') . Lang::t('اعمال') . '</button>'
+            . (($f['severity'] !== '' || $f['asset'] > 0 || $f['q'] !== '' || $f['new'] > 0 || $f['scan'] > 0) ? '<a class="btn btn-link" href="' . self::e($base . '&status=' . $f['status']) . '">' . Lang::t('پاک کردن فیلترها') . '</a>' : '') . '</form>';
         $out .= Ui::seg($seg, $keep(['status' => $f['status'], 'page' => ''])) . $filters;
         if ($f['new'] > 0) {
-            $out .= Ui::alert('info', self::e('فقط یافته‌هایی که در ' . Text::fa($f['new']) . ' روز اخیر برای اولین بار دیده شدند.'), 'info');
+            $out .= Ui::alert('info', self::e(Lang::t('فقط یافته‌هایی که در {n} روز اخیر برای اولین بار دیده شدند.', ['n' => Text::fa($f['new'])])), 'info');
         }
         if (!$res['rows']) {
-            return $out . Ui::card($any ? Ui::emptyState('search', 'با این فیلترها یافته‌ای نیست', $f['status'] === 'open' ? 'یافته‌ی بازی با این شرایط ندارید.' : 'فیلترها را عوض کنید.')
-                : Ui::emptyState('shield-check', 'هنوز یافته‌ای نیست', 'پس از اولین اسکن، مشکل‌های پیدا شده این‌جا می‌آیند.', $ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=scans">اسکن بگیرید</a>' : ''));
+            return $out . Ui::card($any ? Ui::emptyState('search', 'با این فیلترها یافته‌ای نیست', $f['status'] === 'open' ? Lang::t('یافته‌ی بازی با این شرایط ندارید.') : Lang::t('فیلترها را عوض کنید.'))
+                : Ui::emptyState('shield-check', 'هنوز یافته‌ای نیست', Lang::t('پس از اولین اسکن، مشکل‌های پیدا شده این‌جا می‌آیند.'), $ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=scans">' . Lang::t('اسکن بگیرید') . '</a>' : ''));
         }
         $rows = '';
         foreach ($res['rows'] as $r) {
@@ -80,9 +81,9 @@ final class FindingViews
                 . Ui::td('وضعیت', self::statusChip($r))
                 . Ui::td('دیده‌شده', self::e(Views::when((int) $r->last_seen_at))) . '</tr>';
         }
-        $csv = Settings::bool('export_csv') ? ' · <a href="' . self::e($keep(['page' => '', 'csv' => '1'])) . '" download>' . Ui::ico('file') . 'خروجی CSV</a>' : '';
+        $csv = Settings::bool('export_csv') ? ' · <a href="' . self::e($keep(['page' => '', 'csv' => '1'])) . '" download>' . Ui::ico('file') . Lang::t('خروجی CSV') . '</a>' : '';
         return $out . Ui::card(Ui::table(['شدت', 'یافته', 'محل', 'وضعیت', 'آخرین بار'], $rows) . Ui::pager($keep(['page' => '']), $res['page'], $res['pages']),
-            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . self::e(Text::fa($res['total'])) . ' یافته' . $csv . '</p>';
+            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . Lang::t('{n} یافته', ['n' => self::e(Text::fa($res['total']))]) . $csv . '</p>';
     }
 
     public static function detail(array $ctx): string
@@ -94,14 +95,14 @@ final class FindingViews
         }
         $asset = Db::table('mod_mcsec_assets')->where('id', $f->asset_id)->first();
         Views::$pageTitle = self::e($f->title);
-        $out = '<div class="mcs-finding-head">' . Ui::sev((string) $f->severity) . self::statusChip($f) . '<span class="mcs-muted">روی ' . Ui::ltr($asset->value ?? '') . '</span></div>';
+        $out = '<div class="mcs-finding-head">' . Ui::sev((string) $f->severity) . self::statusChip($f) . '<span class="mcs-muted">' . Lang::t('روی {asset}', ['asset' => Ui::ltr($asset->value ?? '')]) . '</span></div>';
         if ($f->status === 'accepted' || $f->status === 'false_positive') {
-            $out .= Ui::alert('info', self::e((Findings::STATUS[$f->status] ?? '') . ': ' . $f->status_note) . ' <span class="mcs-muted">(' . self::e(Text::date((int) $f->status_at)) . ')</span>', 'info');
+            $out .= Ui::alert('info', self::e(Findings::STATUS[$f->status] ?? '') . ': ' . self::e($f->status_note) . ' <span class="mcs-muted">(' . self::e(Text::date((int) $f->status_at)) . ')</span>', 'info');
         } elseif ($f->status === 'fixed') {
-            $out .= Ui::alert('success', 'این مشکل در اسکن ' . self::e(Text::date((int) $f->fixed_at)) . ' دیگر دیده نشد و رفع‌شده است.', 'check');
+            $out .= Ui::alert('success', Lang::t('این مشکل در اسکن {date} دیگر دیده نشد و رفع‌شده است.', ['date' => self::e(Text::date((int) $f->fixed_at))]), 'check');
         }
         if ((int) ($f->kev ?? 0) === 1 && $f->status === 'open') {
-            $out .= Ui::alert('danger', '<strong>مهاجمان همین حالا از این آسیب‌پذیری استفاده می‌کنند.</strong> سازمان امنیت سایبری آمریکا (CISA) آن را در فهرست آسیب‌پذیری‌های در حال بهره‌برداری فعال (KEV) گذاشته است. رفعش را به هیچ کار دیگری عقب نیندازید.', 'alert');
+            $out .= Ui::alert('danger', Lang::t('<strong>مهاجمان همین حالا از این آسیب‌پذیری استفاده می‌کنند.</strong> سازمان امنیت سایبری آمریکا (CISA) آن را در فهرست آسیب‌پذیری‌های در حال بهره‌برداری فعال (KEV) گذاشته است. رفعش را به هیچ کار دیگری عقب نیندازید.'), 'alert');
         }
         // what & where
         $facts = Ui::facts([
@@ -109,14 +110,14 @@ final class FindingViews
             'دارایی' => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $f->asset_id . '">' . Ui::ltr($asset->value ?? '') . '</a>',
             'شناسه‌ها' => trim($f->cve . ' ' . $f->cwe) !== '' ? implode(' ', array_map(fn ($x) => Ui::ltr($x, 'mcs-tag'), array_filter(array_merge(explode(',', (string) $f->cve), explode(',', (string) $f->cwe))))) : '',
             'CVSS' => $f->cvss !== null ? Ui::ltr((string) $f->cvss) : '',
-            'احتمال سوءاستفاده (EPSS)' => $f->epss !== null ? self::e(Text::fa(round((float) $f->epss * 100, 1)) . '٪') . ' <small class="mcs-muted">احتمال بهره‌برداری در ۳۰ روز آینده</small>' : '',
-            'در حال بهره‌برداری (KEV)' => (int) ($f->kev ?? 0) === 1 ? Ui::chip('بله', 'err') : '',
-            'اولویت' => (int) ($f->priority ?? 0) > 0 && $f->status === 'open' ? self::e(Text::fa((int) $f->priority) . ' از ۱۰۰') . ' <small class="mcs-muted">از شدت، احتمال و بهره‌برداری فعال</small>' : '',
-            'پیدا شده با' => self::e((Catalog::label((string) ($f->profile))) . ' (' . Catalog::engineLabel((string) $f->engine) . ')'),
+            'احتمال سوءاستفاده (EPSS)' => $f->epss !== null ? self::e(Lang::t('{n}٪', ['n' => Text::fa(round((float) $f->epss * 100, 1))])) . ' <small class="mcs-muted">' . Lang::t('احتمال بهره‌برداری در ۳۰ روز آینده') . '</small>' : '',
+            'در حال بهره‌برداری (KEV)' => (int) ($f->kev ?? 0) === 1 ? Ui::chip(Lang::fa() ? 'بله' : 'Yes', 'err') : '', // i18n-skip («بله» is also the messenger Bale in the dictionary; the label of this row is in the dictionary)
+            'اولویت' => (int) ($f->priority ?? 0) > 0 && $f->status === 'open' ? self::e(Lang::t('{n} از ۱۰۰', ['n' => Text::fa((int) $f->priority)])) . ' <small class="mcs-muted">' . Lang::t('از شدت، احتمال و بهره‌برداری فعال') . '</small>' : '',
+            'پیدا شده با' => self::e(Catalog::label((string) ($f->profile))) . ' (' . self::e(Catalog::engineLabel((string) $f->engine)) . ')',
             'اولین بار' => self::e(Text::date((int) $f->first_seen_at)),
-            'آخرین بار' => self::e(Text::date((int) $f->last_seen_at)) . ((int) $f->reopened > 0 ? ' — ' . self::e(Text::fa((int) $f->reopened)) . ' بار پس از رفع دوباره دیده شد' : ''),
+            'آخرین بار' => self::e(Text::date((int) $f->last_seen_at)) . ((int) $f->reopened > 0 ? ' — ' . Lang::t('{n} بار پس از رفع دوباره دیده شد', ['n' => self::e(Text::fa((int) $f->reopened))]) : ''),
         ]);
-        $out .= Ui::card(Ui::para((string) $f->description) . $facts . (trim((string) $f->evidence) !== '' ? '<p class="mcs-small"><strong>شاهد (آنچه اسکنر دید):</strong></p>' . Ui::code((string) $f->evidence, 'evidence') : ''), 'این یافته چیست؟', 'info');
+        $out .= Ui::card(Ui::para((string) $f->description) . $facts . (trim((string) $f->evidence) !== '' ? '<p class="mcs-small"><strong>' . Lang::t('شاهد (آنچه اسکنر دید):') . '</strong></p>' . Ui::code((string) $f->evidence, 'evidence') : ''), 'این یافته چیست؟', 'info');
 
         // the fix: knowledge base, AI, scanner's text
         $kbKey = (string) $f->kb !== '' ? (string) $f->kb : Kb::match((string) $f->source_key, (string) $f->title);
@@ -131,10 +132,10 @@ final class FindingViews
             foreach ((array) ($kb['refs'] ?? []) as $u) {
                 $refs .= '<li><a href="' . self::e($u) . '" target="_blank" rel="noopener noreferrer" dir="ltr">' . self::e(preg_replace('~^https?://~', '', $u)) . '</a></li>';
             }
-            $out .= Ui::card('<p class="mcs-why"><strong>چرا مهم است؟</strong> ' . self::e($kb['why']) . '</p>' . $steps . $snips
-                . (!empty($kb['effort']) ? '<p class="mcs-small mcs-muted">' . Ui::ico('clock') . 'زمان تقریبی: ' . self::e($kb['effort']) . '</p>' : '')
+            $out .= Ui::card('<p class="mcs-why"><strong>' . Lang::t('چرا مهم است؟') . '</strong> ' . self::e($kb['why']) . '</p>' . $steps . $snips
+                . (!empty($kb['effort']) ? '<p class="mcs-small mcs-muted">' . Ui::ico('clock') . Lang::t('زمان تقریبی: {time}', ['time' => self::e($kb['effort'])]) . '</p>' : '')
                 . (!empty($kb['maral']) ? Ui::alert('info', self::e($kb['maral']), 'shield') : '')
-                . ($refs !== '' ? '<details class="mcs-how"><summary>منبع‌ها</summary><ul class="mcs-plain">' . $refs . '</ul></details>' : ''), 'راه رفع: ' . $kb['title'], 'check');
+                . ($refs !== '' ? '<details class="mcs-how"><summary>' . Lang::t('منبع‌ها') . '</summary><ul class="mcs-plain">' . $refs . '</ul></details>' : ''), Lang::t('راه رفع: {title}', ['title' => Lang::t((string) $kb['title'])]), 'check');
         }
         if ($f->status === 'open') {
             $out .= self::offer($kbKey) . self::supportCard($f, (string) ($asset->value ?? ''));
@@ -145,25 +146,25 @@ final class FindingViews
             $out .= self::aiCard($ai);
         } elseif ($aiOk && $ctx['manage'] && $f->status === 'open') {
             $cost = \McSec\Rules::cost($cid, Settings::int('ai_fix_cost'));
-            $out .= Ui::card('<p>راهنمای بالا عمومی است. هوش مصنوعی با توجه به نوع همین یافته و فناوری‌های سایتتان، گام‌ها و تنظیم دقیق‌تری پیشنهاد می‌دهد. نام دامنه و IP شما برای مدل فرستاده نمی‌شود.</p>'
-                . Ui::form($ctx, 'finding', 'finding_aifix', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . 'راهکار با هوش مصنوعی'
-                    . ($cost > 0 ? ' · ' . self::e(Text::fa($cost)) . ' اعتبار' : '') . '</button><span class="mcs-help">ممکن است تا یک دقیقه طول بکشد.</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'راهکار با هوش مصنوعی', 'sparkle');
+            $out .= Ui::card(Lang::t('<p>راهنمای بالا عمومی است. هوش مصنوعی با توجه به نوع همین یافته و فناوری‌های سایتتان، گام‌ها و تنظیم دقیق‌تری پیشنهاد می‌دهد. نام دامنه و IP شما برای مدل فرستاده نمی‌شود.</p>')
+                . Ui::form($ctx, 'finding', 'finding_aifix', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . Lang::t('راهکار با هوش مصنوعی')
+                    . ($cost > 0 ? ' · ' . Lang::t('{n} اعتبار', ['n' => self::e(Text::fa($cost))]) : '') . '</button><span class="mcs-help">' . Lang::t('ممکن است تا یک دقیقه طول بکشد.') . '</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'راهکار با هوش مصنوعی', 'sparkle');
         }
         // a second opinion on whether it is real (an opinion only), and a way to ask the assistant about it
         $op = Settings::bool('ai_opinion') ? Reports::cachedOpinion($f) : null;
         if ($op) {
             [$vl, $vt] = Reports::VERDICTS[(string) $op['verdict']];
             $out .= Ui::card('<p>' . Ui::chip($vl, $vt) . '</p><p dir="auto">' . self::e((string) ($op['why'] ?? '')) . '</p>'
-                . (!empty($op['check']) ? '<p class="mcs-small"><strong>چطور مطمئن شوم؟</strong></p><ol class="mcs-fix-steps">' . implode('', array_map(fn ($s) => '<li dir="auto">' . self::e($s) . '</li>', (array) $op['check'])) . '</ol>' : '')
-                . '<p class="mcs-ai-note">' . Ui::ico('sparkle') . 'این فقط نظر هوش مصنوعی از روی شواهد اسکن است؛ شدت، امتیاز و وضعیت یافته را عوض نمی‌کند.</p>', 'نظر دوم هوش مصنوعی', 'sparkle', '', 'mcs-aicard');
+                . (!empty($op['check']) ? '<p class="mcs-small"><strong>' . Lang::t('چطور مطمئن شوم؟') . '</strong></p><ol class="mcs-fix-steps">' . implode('', array_map(fn ($s) => '<li dir="auto">' . self::e($s) . '</li>', (array) $op['check'])) . '</ol>' : '')
+                . '<p class="mcs-ai-note">' . Ui::ico('sparkle') . Lang::t('این فقط نظر هوش مصنوعی از روی شواهد اسکن است؛ شدت، امتیاز و وضعیت یافته را عوض نمی‌کند.') . '</p>', 'نظر دوم هوش مصنوعی', 'sparkle', '', 'mcs-aicard');
         } elseif (Settings::bool('ai_opinion') && Ai::ready() && $ctx['manage'] && $f->status === 'open') {
             $oc = \McSec\Rules::cost($cid, Settings::int('ai_opinion_cost'));
-            $out .= Ui::card('<p>مطمئن نیستید این مورد واقعی است؟ هوش مصنوعی شواهد همین یافته را می‌خواند و می‌گوید به احتمال زیاد واقعی است، مثبت کاذب است، یا باید دستی بررسی شود. نام دامنه‌ی شما برای مدل فرستاده نمی‌شود.</p>'
-                . Ui::form($ctx, 'finding', 'finding_opinion', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . 'نظر دوم بگیر'
-                    . ($oc > 0 ? ' · ' . self::e(Text::fa($oc)) . ' اعتبار' : '') . '</button><span class="mcs-help">ممکن است تا یک دقیقه طول بکشد.</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'واقعی است یا مثبت کاذب؟', 'sparkle');
+            $out .= Ui::card(Lang::t('<p>مطمئن نیستید این مورد واقعی است؟ هوش مصنوعی شواهد همین یافته را می‌خواند و می‌گوید به احتمال زیاد واقعی است، مثبت کاذب است، یا باید دستی بررسی شود. نام دامنه‌ی شما برای مدل فرستاده نمی‌شود.</p>')
+                . Ui::form($ctx, 'finding', 'finding_opinion', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-default">' . Ui::ico('sparkle') . Lang::t('نظر دوم بگیر')
+                    . ($oc > 0 ? ' · ' . Lang::t('{n} اعتبار', ['n' => self::e(Text::fa($oc))]) : '') . '</button><span class="mcs-help">' . Lang::t('ممکن است تا یک دقیقه طول بکشد.') . '</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id), 'واقعی است یا مثبت کاذب؟', 'sparkle');
         }
         if (Settings::bool('assistant_suggest') && \McSec\Assistant::allowed($cid) && $f->status === 'open') {
-            $out .= '<p class="mcs-small"><a href="index.php?m=mcsec&amp;p=assistant&amp;ask=' . rawurlencode('مشکل «' . mb_substr((string) $f->title, 0, 120) . '» (یافته‌ی ' . (int) $f->id . ') را ساده توضیح بده و بگو چطور رفعش کنم') . '">' . Ui::ico('sparkle') . 'از دستیار امنیت درباره‌ی این یافته بپرسید</a></p>';
+            $out .= '<p class="mcs-small"><a href="index.php?m=mcsec&amp;p=assistant&amp;ask=' . rawurlencode(Lang::t('مشکل «{title}» (یافته‌ی {id}) را ساده توضیح بده و بگو چطور رفعش کنم', ['title' => mb_substr((string) $f->title, 0, 120), 'id' => (int) $f->id])) . '">' . Ui::ico('sparkle') . Lang::t('از دستیار امنیت درباره‌ی این یافته بپرسید') . '</a></p>';
         }
         if (trim((string) $f->solution) !== '') {
             $out .= Ui::drawer('راه‌حل پیشنهادی اسکنر (انگلیسی)', '<div dir="ltr" class="mcs-ltr-block">' . Ui::para((string) $f->solution) . '</div>', false, 'file');
@@ -177,14 +178,14 @@ final class FindingViews
         if ($ctx['manage']) {
             $acts = '';
             if ($f->status === 'open') {
-                $acts .= Ui::form($ctx, 'finding', 'finding_retest', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-primary">' . Ui::ico('refresh') . 'رفع کردم، دوباره بسنج</button>'
-                    . '<span class="mcs-help">همان اسکنی که این را پیدا کرد، رایگان دوباره روی همین دارایی اجرا می‌شود (روزی یک بار برای هر یافته).</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id);
+                $acts .= Ui::form($ctx, 'finding', 'finding_retest', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><button type="submit" class="btn btn-primary">' . Ui::ico('refresh') . Lang::t('رفع کردم، دوباره بسنج') . '</button>'
+                    . '<span class="mcs-help">' . Lang::t('همان اسکنی که این را پیدا کرد، رایگان دوباره روی همین دارایی اجرا می‌شود (روزی یک بار برای هر یافته).') . '</span>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id);
                 $acts .= Ui::drawer('پذیرفتن ریسک یا مثبت کاذب', Ui::form($ctx, 'finding', 'finding_status', '<input type="hidden" name="finding" value="' . (int) $f->id . '">'
-                    . '<div class="mcs-radios"><label><input type="radio" name="status" value="accepted" checked> ریسک را می‌پذیرم (فعلاً رفع نمی‌کنم)</label><label><input type="radio" name="status" value="false_positive"> مثبت کاذب است (مشکل واقعی نیست)</label></div>'
-                    . Ui::field('mcs-fn', 'دلیل', '<textarea class="form-control" id="mcs-fn" name="note" rows="2" maxlength="500" dir="auto" required></textarea>', 'برای خودتان و همکاران؛ در گزارش‌ها هم می‌آید.')
-                    . '<button type="submit" class="btn btn-default">ثبت</button>', '', '', false, '&amp;id=' . (int) $f->id), false, 'shield');
+                    . '<div class="mcs-radios"><label><input type="radio" name="status" value="accepted" checked> ' . Lang::t('ریسک را می‌پذیرم (فعلاً رفع نمی‌کنم)') . '</label><label><input type="radio" name="status" value="false_positive"> ' . Lang::t('مثبت کاذب است (مشکل واقعی نیست)') . '</label></div>'
+                    . Ui::field('mcs-fn', 'دلیل', '<textarea class="form-control" id="mcs-fn" name="note" rows="2" maxlength="500" dir="auto" required></textarea>', Lang::t('برای خودتان و همکاران؛ در گزارش‌ها هم می‌آید.'))
+                    . '<button type="submit" class="btn btn-default">' . Lang::t('ثبت') . '</button>', '', '', false, '&amp;id=' . (int) $f->id), false, 'shield');
             } elseif (in_array($f->status, ['accepted', 'false_positive'], true)) {
-                $acts .= Ui::form($ctx, 'finding', 'finding_status', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><input type="hidden" name="status" value="open"><button type="submit" class="btn btn-default">' . Ui::ico('refresh') . 'دوباره باز شود</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id);
+                $acts .= Ui::form($ctx, 'finding', 'finding_status', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><input type="hidden" name="status" value="open"><button type="submit" class="btn btn-default">' . Ui::ico('refresh') . Lang::t('دوباره باز شود') . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id);
             }
             if ($acts !== '') {
                 $out .= Ui::card($acts, 'کارها', 'list');
@@ -204,26 +205,19 @@ final class FindingViews
             if (count($p) < 3 || $p[0] === '' || strcasecmp($p[0], $kbKey) !== 0 || !preg_match('~^https?://[^\s"<>]+$~i', $p[2])) {
                 continue;
             }
-            return Ui::card('<p>' . self::e(Text::name($p[1], 200)) . '</p><a class="btn btn-default" href="' . self::e($p[2]) . '" target="_blank" rel="noopener">' . Ui::ico('link') . 'دیدن</a>', 'راه آسان‌تر', 'sparkle');
+            return Ui::card('<p>' . self::e(Text::name($p[1], 200)) . '</p><a class="btn btn-default" href="' . self::e($p[2]) . '" target="_blank" rel="noopener">' . Ui::ico('link') . Lang::t('دیدن') . '</a>', 'راه آسان‌تر', 'sparkle');
         }
         return '';
     }
 
-    /**
-     * "Ask support": opens WHMCS's ticket form of the chosen department with the finding's title and summary filled
-     * in (subject and message in the address). Nothing is sent until the customer submits the form.
-     */
+    /** «درخواست بررسی کارشناس» for this finding: the form of the support page, with the finding already chosen. */
     public static function supportCard(object $f, string $assetValue): string
     {
-        $dept = Settings::int('support_dept');
-        if ($dept <= 0) {
+        if (!\McSec\Support::enabled()) {
             return '';
         }
-        $sev = Findings::SEVERITIES[(string) $f->severity]['label'] ?? '';
-        $msg = "سلام، برای رفع این یافته‌ی امنیتی کمک می‌خواهم:\n\n" . 'عنوان: ' . $f->title . "\n" . 'شدت: ' . $sev . "\n" . 'دارایی: ' . $assetValue . "\n" . 'محل: ' . mb_substr((string) $f->location, 0, 200)
-            . ((string) $f->cve !== '' ? "\nCVE: " . $f->cve : '') . "\n" . 'پیوند: ' . \McSec\Whmcs::systemUrl() . 'index.php?m=mcsec&p=finding&id=' . (int) $f->id;
-        $url = 'submitticket.php?' . http_build_query(['step' => 2, 'deptid' => $dept, 'subject' => 'کمک برای رفع: ' . mb_substr((string) $f->title, 0, 150), 'message' => $msg]);
-        return Ui::card('<p>اگر رفع این مورد از توانتان بیرون است، تیکت آماده‌ای با خلاصه‌ی همین یافته باز می‌شود؛ پیش از فرستادن می‌توانید آن را ویرایش کنید.</p><a class="btn btn-default" href="' . self::e($url) . '">' . Ui::ico('send') . 'از پشتیبانی کمک بخواهید</a>', 'کمک از پشتیبانی', 'heart');
+        return Ui::card(Lang::t('<p>اگر رفع این مورد از توانتان بیرون است یا مطمئن نیستید، کارشناسان ما آن را بررسی می‌کنند. مشخصات همین یافته خودکار در درخواست نوشته می‌شود.</p>')
+            . '<a class="btn btn-default" href="index.php?m=mcsec&amp;p=support&amp;topic=finding&amp;finding=' . (int) $f->id . '">' . Ui::ico('lifebuoy') . Lang::t('درخواست بررسی کارشناس') . '</a>', 'کمک کارشناس', 'lifebuoy');
     }
 
     public static function aiCard(array $ai): string
@@ -238,8 +232,8 @@ final class FindingViews
             $refs .= '<li><a href="' . self::e($u) . '" target="_blank" rel="noopener noreferrer nofollow" dir="ltr">' . self::e(preg_replace('~^https?://~', '', $u)) . '</a></li>';
         }
         return Ui::card((!empty($ai['summary']) ? '<p dir="auto"><strong>' . self::e($ai['summary']) . '</strong></p>' : '') . (!empty($ai['why']) ? '<p class="mcs-why" dir="auto">' . self::e($ai['why']) . '</p>' : '')
-            . $steps . $snips . (!empty($ai['verify']) ? '<p dir="auto"><strong>چطور مطمئن شوم رفع شده؟</strong> ' . self::e($ai['verify']) . '</p>' : '')
-            . ($refs !== '' ? '<details class="mcs-how"><summary>منبع‌ها</summary><ul class="mcs-plain">' . $refs . '</ul></details>' : '')
-            . '<p class="mcs-ai-note">' . Ui::ico('sparkle') . 'این متن را هوش مصنوعی نوشته است؛ پیش از اجرای دستورها روی سرور اصلی، آن‌ها را بخوانید یا با پشتیبانی هماهنگ کنید.</p>', 'راهکار هوش مصنوعی', 'sparkle', '', 'mcs-aicard');
+            . $steps . $snips . (!empty($ai['verify']) ? '<p dir="auto"><strong>' . Lang::t('چطور مطمئن شوم رفع شده؟') . '</strong> ' . self::e($ai['verify']) . '</p>' : '')
+            . ($refs !== '' ? '<details class="mcs-how"><summary>' . Lang::t('منبع‌ها') . '</summary><ul class="mcs-plain">' . $refs . '</ul></details>' : '')
+            . '<p class="mcs-ai-note">' . Ui::ico('sparkle') . Lang::t('این متن را هوش مصنوعی نوشته است؛ پیش از اجرای دستورها روی سرور اصلی، آن‌ها را بخوانید یا با پشتیبانی هماهنگ کنید.') . '</p>', 'راهکار هوش مصنوعی', 'sparkle', '', 'mcs-aicard');
     }
 }

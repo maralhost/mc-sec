@@ -67,7 +67,7 @@ final class Assets
         // a single domain is looked up now (its IPs against the blocklist, the CDN in front); a bulk list later
         $sc = $kind === 'domain' && $screen ? Net::screen($kind, $value) : ['ips' => null, 'blocked' => Net::blocked($kind, $value), 'cdn' => $kind === 'domain' ? '' : Net::cdnOf($kind, $value)];
         if ($sc['blocked'] !== '') {
-            return ['ok' => false, 'error' => 'این دارایی در فهرست ممنوع است و اسکن نمی‌شود (' . $sc['blocked'] . ').', 'value' => $value];
+            return ['ok' => false, 'error' => Lang::t('این دارایی در فهرست ممنوع است و اسکن نمی‌شود ({why}).', ['why' => $sc['blocked']]), 'value' => $value];
         }
         if ($kind !== 'domain' && !Settings::bool('allow_private_ips')) {
             $ip = $kind === 'cidr' ? explode('/', $value)[0] : $value;
@@ -76,14 +76,14 @@ final class Assets
             }
         }
         if ($kind !== 'domain' && $sc['cdn'] !== '') {
-            return ['ok' => false, 'error' => 'این IP از سرورهای CDN (' . Net::cdnLabel($sc['cdn']) . ') است، نه سرور شما، و اسکن نمی‌شود. خود دامنه را بیفزایید؛ برای اسکن سرور، IP اصلی سرورتان را وارد کنید.', 'value' => $value];
+            return ['ok' => false, 'error' => Lang::t('این IP از سرورهای CDN ({cdn}) است، نه سرور شما، و اسکن نمی‌شود. خود دامنه را بیفزایید؛ برای اسکن سرور، IP اصلی سرورتان را وارد کنید.', ['cdn' => Net::cdnLabel($sc['cdn'])]), 'value' => $value];
         }
         if (Db::table('mod_mcsec_assets')->where('client_id', $clientId)->where('value', $value)->where('status', '!=', 'removed')->exists()) {
             return ['ok' => false, 'error' => 'این دارایی از قبل در فهرست شماست.', 'value' => $value];
         }
         $lim = Plans::limits($clientId);
         if (self::count($clientId) >= $lim['max_assets']) {
-            return ['ok' => false, 'error' => 'به سقف ' . Text::fa($lim['max_assets']) . ' دارایی رسیده‌اید. دارایی بی‌استفاده را حذف کنید یا پلن بالاتری بگیرید.', 'value' => $value];
+            return ['ok' => false, 'error' => Lang::t('به سقف {n} دارایی رسیده‌اید. دارایی بی‌استفاده را حذف کنید یا پلن بالاتری بگیرید.', ['n' => Text::fa($lim['max_assets'])]), 'value' => $value];
         }
         $id = Db::table('mod_mcsec_assets')->insertGetId([
             'client_id' => $clientId, 'kind' => $kind, 'value' => $value, 'label' => Text::name($label, 120), 'status' => 'pending',
@@ -103,7 +103,7 @@ final class Assets
      */
     public static function bulk(array $who, string $text, string $autoscan = ''): array
     {
-        $items = preg_split('~[\s,;،]+~u', Text::toAscii($text)) ?: [];
+        $items = preg_split('~[\s,;،]+~u', Text::toAscii($text)) ?: []; // i18n-skip
         $items = array_values(array_unique(array_filter(array_map('trim', $items), 'strlen')));
         $out = ['added' => [], 'failed' => [], 'verified' => 0];
         foreach (array_slice($items, 0, self::BULK_MAX) as $item) {
@@ -112,11 +112,11 @@ final class Assets
                 $out['added'][] = $r['value'];
                 $out['verified'] += $r['verified'] ? 1 : 0;
             } else {
-                $out['failed'][] = ($r['value'] ?? $item) . ': ' . $r['error'];
+                $out['failed'][] = ($r['value'] ?? $item) . ': ' . Lang::t((string) $r['error']);
             }
         }
         if (count($items) > self::BULK_MAX) {
-            $out['failed'][] = 'فقط ' . Text::fa(self::BULK_MAX) . ' مورد اول افزوده شد؛ بقیه را در نوبت بعد بفرستید.';
+            $out['failed'][] = Lang::t('فقط {n} مورد اول افزوده شد؛ بقیه را در نوبت بعد بفرستید.', ['n' => Text::fa(self::BULK_MAX)]);
         }
         return $out;
     }
@@ -182,7 +182,7 @@ final class Assets
             }
             [$ipId, $verified] = [(int) $ip->id, $ip->status === 'verified'];
         } else {
-            $r = self::add($who, $t['value'], 'سرور اصلی ' . $a->value);
+            $r = self::add($who, $t['value'], Lang::t('سرور اصلی {domain}', ['domain' => (string) $a->value]));
             if (!$r['ok']) {
                 return $r;
             }
@@ -220,7 +220,7 @@ final class Assets
         if (!$a) {
             return ['ok' => false, 'error' => 'این دارایی پیدا نشد.'];
         }
-        $tagList = array_slice(array_values(array_unique(array_filter(array_map(fn ($t) => Text::name($t, 24), preg_split('~[,،]~u', $tags) ?: [])))), 0, 8);
+        $tagList = array_slice(array_values(array_unique(array_filter(array_map(fn ($t) => Text::name($t, 24), preg_split('~[,،]~u', $tags) ?: [])))), 0, 8); // i18n-skip
         Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['label' => Text::name($label, 120), 'tags' => implode(',', $tagList)]);
         return ['ok' => true];
     }

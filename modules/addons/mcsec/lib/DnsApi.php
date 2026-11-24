@@ -47,21 +47,21 @@ final class DnsApi
         }
         $domain = strtolower($domain);
         $apex = Net::apex($domain);
-        $name = self::PROVIDERS[$provider][0];
+        $name = Lang::t(self::PROVIDERS[$provider][0]);
         try {
             $r = $provider === 'cloudflare' ? self::cloudflare($token, $domain, $apex, $proof) : self::arvan($token, $domain, $apex, $proof);
         } catch (\Throwable $e) {
             Trace::warn('verify', 'dnsapi.' . $provider, $e->getMessage(), ['domain' => $domain]);
-            return $no('به ' . $name . ' وصل نشدیم. کمی بعد دوباره امتحان کنید یا رکورد را دستی بسازید.');
+            return $no(Lang::t('به {name} وصل نشدیم. کمی بعد دوباره امتحان کنید یا رکورد را دستی بسازید.', ['name' => $name]));
         }
         if ($r === 'ok') {
             return ['ok' => true, 'error' => ''];
         }
         return $no(match ($r) {
-            'auth' => $name . ' این توکن را نپذیرفت یا توکن به DNS این دامنه دسترسی ندارد. توکن را با دسترسی «ویرایش DNS» همین دامنه بسازید.',
-            'zone' => 'دامنه‌ی ' . $apex . ' در این حساب ' . $name . ' پیدا نشد. اگر DNS دامنه جای دیگری است، رکورد را دستی بسازید.',
-            'net' => 'به ' . $name . ' وصل نشدیم. کمی بعد دوباره امتحان کنید یا رکورد را دستی بسازید.',
-            default => $name . ' رکورد را نساخت. می‌توانید رکورد را دستی بسازید.',
+            'auth' => Lang::t('{name} این توکن را نپذیرفت یا توکن به DNS این دامنه دسترسی ندارد. توکن را با دسترسی «ویرایش DNS» همین دامنه بسازید.', ['name' => $name]),
+            'zone' => Lang::t('دامنه‌ی {domain} در این حساب {name} پیدا نشد. اگر DNS دامنه جای دیگری است، رکورد را دستی بسازید.', ['domain' => $apex, 'name' => $name]),
+            'net' => Lang::t('به {name} وصل نشدیم. کمی بعد دوباره امتحان کنید یا رکورد را دستی بسازید.', ['name' => $name]),
+            default => Lang::t('{name} رکورد را نساخت. می‌توانید رکورد را دستی بسازید.', ['name' => $name]),
         });
     }
 
@@ -117,6 +117,6 @@ final class DnsApi
             return 'zone';
         }
         // 422 with "already exists": the record from an earlier try
-        return $r['status'] === 422 && preg_match('~exist|تکرار|موجود~iu', (string) $r['body']) ? 'ok' : 'fail';
+        return $r['status'] === 422 && preg_match('~exist|تکرار|موجود~iu', (string) $r['body']) ? 'ok' : 'fail'; // i18n-skip
     }
 }

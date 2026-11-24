@@ -49,12 +49,18 @@ final class Pdf
     public static function ltr($s): string
     {
         $s = trim((string) $s);
+        if (!Lang::fa()) {
+            return self::e(mb_substr($s, 0, 300)); // a left-to-right page needs no embedding marks
+        }
         return $s === '' ? '' : "\u{202A}" . self::e(str_replace('-', "\u{2011}", mb_substr($s, 0, 300))) . "\u{202C}";
     }
 
     /** Escaped Persian text in which Latin runs with digits or dots (versions, CVE ids, "HTTP 502") keep their order. */
     public static function text($s): string
     {
+        if (!Lang::fa()) {
+            return self::e($s); // English page: plain escaped text (a dictionary text is given in English)
+        }
         // a Latin run may be several words ("Let's Encrypt", "Zone Editor", "HTTP 502"): embedded as one, so the words
         // keep their order; the run is found in the raw text and each piece is escaped on its own
         $parts = preg_split('~([A-Za-z][A-Za-z0-9._:/@+\'\x{2011}=-]*(?: [A-Za-z0-9][A-Za-z0-9._:/@+\'\x{2011}=-]*)*)~u', str_replace('-', "\u{2011}", (string) $s), -1, PREG_SPLIT_DELIM_CAPTURE) ?: [];
@@ -77,13 +83,13 @@ final class Pdf
     {
         $ai = is_array($d['ai'] ?? null) ? $d['ai'] : null;
         $score = (int) ($d['score'] ?? -1);
-        $h = '<table cellpadding="2"><tr><td width="72%"><span style="font-size:8pt;color:#64748b">' . self::e(Reports::KINDS[$d['kind'] ?? ''] ?? 'گزارش') . ' — ' . self::text($d['client'] ?? '') . '</span><br>'
+        $h = '<table cellpadding="2"><tr><td width="72%"><span style="font-size:8pt;color:#64748b">' . self::e(Lang::t(Reports::KINDS[$d['kind'] ?? ''] ?? 'گزارش')) . ' — ' . self::text($d['client'] ?? '') . '</span><br>'
             . '<span style="font-size:16pt;font-weight:bold;color:#0f172a">' . self::text($d['title'] ?? '') . '</span><br>'
-            . '<span style="font-size:8pt;color:#64748b">ساخته‌شده: ' . self::e(Text::date((int) ($d['generated_at'] ?? 0)))
-            . ((int) ($d['period']['from'] ?? 0) > 0 ? ' — دوره: ' . self::e(Text::date((int) $d['period']['from'], false) . ' تا ' . Text::date((int) $d['period']['to'], false)) : '') . '</span></td>'
-            . '<td width="28%" align="center" style="border:1px solid #e2e8f0"><span style="font-size:8pt;color:#64748b">امتیاز امنیت</span><br><span style="font-size:22pt;font-weight:bold;color:' . ($score < 0 ? '#64748b' : ($score < 50 ? '#b91c1c' : ($score < 75 ? '#b45309' : '#15803d'))) . '">'
-            . ($score < 0 ? '—' : self::e(Text::fa($score))) . '</span><br><span style="font-size:8pt">' . self::e($score < 0 ? 'بی‌اسکن' : Score::label($score) . ' (از ۱۰۰)') . '</span></td></tr></table>';
-        $sec = fn (string $title) => '<br><table cellpadding="4"><tr><td style="background-color:#eef2ff;font-size:11pt;font-weight:bold;color:#1e3a8a">' . self::e($title) . '</td></tr></table>';
+            . '<span style="font-size:8pt;color:#64748b">' . Lang::t('ساخته‌شده: {date}', ['date' => self::e(Text::date((int) ($d['generated_at'] ?? 0)))])
+            . ((int) ($d['period']['from'] ?? 0) > 0 ? ' — ' . Lang::t('دوره: {from} تا {to}', ['from' => self::e(Text::date((int) $d['period']['from'], false)), 'to' => self::e(Text::date((int) $d['period']['to'], false))]) : '') . '</span></td>'
+            . '<td width="28%" align="center" style="border:1px solid #e2e8f0"><span style="font-size:8pt;color:#64748b">' . Lang::t('امتیاز امنیت') . '</span><br><span style="font-size:22pt;font-weight:bold;color:' . ($score < 0 ? '#64748b' : ($score < 50 ? '#b91c1c' : ($score < 75 ? '#b45309' : '#15803d'))) . '">'
+            . ($score < 0 ? '—' : self::e(Text::fa($score))) . '</span><br><span style="font-size:8pt">' . self::e($score < 0 ? Lang::t('بی‌اسکن') : Lang::t('{label} (از ۱۰۰)', ['label' => Lang::t(Score::label($score))])) . '</span></td></tr></table>';
+        $sec = fn (string $title) => '<br><table cellpadding="4"><tr><td style="background-color:#eef2ff;font-size:11pt;font-weight:bold;color:#1e3a8a">' . self::e(Lang::t($title)) . '</td></tr></table>';
 
         $h .= $sec('خلاصه');
         if ($ai && (string) ($ai['executive_summary'] ?? '') !== '') {
@@ -94,7 +100,7 @@ final class Pdf
         $c = (array) ($d['counts'] ?? []);
         $h .= '<table border="0" cellpadding="4"><tr>';
         foreach (Findings::SEVERITIES as $k => $s) {
-            $h .= '<td align="center" style="border:1px solid #e2e8f0"><span style="font-size:13pt;font-weight:bold;color:' . self::SEV_COLOR[$k] . '">' . self::e(Text::fa((int) ($c[$k] ?? 0))) . '</span><br><span style="font-size:8pt">' . self::e($s['label']) . '</span></td>';
+            $h .= '<td align="center" style="border:1px solid #e2e8f0"><span style="font-size:13pt;font-weight:bold;color:' . self::SEV_COLOR[$k] . '">' . self::e(Text::fa((int) ($c[$k] ?? 0))) . '</span><br><span style="font-size:8pt">' . self::e(Lang::t($s['label'])) . '</span></td>';
         }
         $h .= '</tr></table>';
 
@@ -113,7 +119,7 @@ final class Pdf
         $fs = (array) ($d['findings'] ?? []);
         $h .= $sec('یافته‌ها و راه رفع');
         if (!$fs) {
-            $h .= '<p>یافته‌ی بازی نیست.</p>';
+            $h .= '<p>' . Lang::t('یافته‌ی بازی نیست.') . '</p>';
         }
         foreach ($fs as $i => $f) {
             $sev = (string) ($f['severity'] ?? 'info');
@@ -123,16 +129,16 @@ final class Pdf
             $steps = $af ? (array) ($af['steps'] ?? []) : (array) ($kb['steps'] ?? []);
             $snip = $af ? ($af['snippet'] ?? null) : ($kb['snippets'][0] ?? null);
             $effort = $af && (string) ($af['effort'] ?? '') !== '' ? (string) $af['effort'] : (string) ($kb['effort'] ?? '');
-            $h .= '<br><table cellpadding="3"><tr><td width="14%" align="center" style="background-color:' . (self::SEV_COLOR[$sev] ?? '#475569') . ';color:#ffffff;font-size:9pt;font-weight:bold">' . self::e(Findings::SEVERITIES[$sev]['label'] ?? $sev) . '</td>'
-                . '<td width="86%" style="font-weight:bold;color:#0f172a">' . self::e(Text::fa($i + 1)) . '. ' . self::text($f['title'] ?? '') . (!empty($f['new']) ? ' <span style="color:#b45309;font-size:8pt">(تازه)</span>' : '') . '</td></tr></table>'
-                . '<p style="font-size:8pt;color:#475569">محل: ' . self::ltr($f['location'] ?? '') . ((string) ($f['cve'] ?? '') !== '' ? ' — ' . self::ltr($f['cve']) : '') . ($effort !== '' ? ' — زمان تقریبی: ' . self::text($effort) : '') . '</p>'
+            $h .= '<br><table cellpadding="3"><tr><td width="14%" align="center" style="background-color:' . (self::SEV_COLOR[$sev] ?? '#475569') . ';color:#ffffff;font-size:9pt;font-weight:bold">' . self::e(Lang::t((string) (Findings::SEVERITIES[$sev]['label'] ?? $sev))) . '</td>'
+                . '<td width="86%" style="font-weight:bold;color:#0f172a">' . self::e(Text::fa($i + 1)) . '. ' . self::text(Lang::whole((string) ($f['title'] ?? ''))) . (!empty($f['new']) ? ' <span style="color:#b45309;font-size:8pt">(' . Lang::t('تازه') . ')</span>' : '') . '</td></tr></table>'
+                . '<p style="font-size:8pt;color:#475569">' . Lang::t('محل: {where}', ['where' => self::ltr($f['location'] ?? '')]) . ((string) ($f['cve'] ?? '') !== '' ? ' — ' . self::ltr($f['cve']) : '') . ($effort !== '' ? ' — ' . Lang::t('زمان تقریبی: {time}', ['time' => self::text($effort)]) : '') . '</p>'
                 . ($why !== '' ? '<p>' . self::text($why) . '</p>' : '')
                 . ($steps ? '<ol>' . implode('', array_map(fn ($s) => '<li>' . self::text($s) . '</li>', array_slice($steps, 0, 10))) . '</ol>' : '')
                 . (is_array($snip) && (string) ($snip['code'] ?? '') !== '' ? '<p style="font-size:8pt;color:#475569">' . self::text($snip['label'] ?? '') . '</p>' . self::code((string) $snip['code']) : '')
-                . ($af && (string) ($af['verify'] ?? '') !== '' ? '<p style="font-size:8pt"><b>سنجش رفع:</b> ' . self::text($af['verify']) . '</p>' : '');
+                . ($af && (string) ($af['verify'] ?? '') !== '' ? '<p style="font-size:8pt"><b>' . Lang::t('سنجش رفع:') . '</b> ' . self::text($af['verify']) . '</p>' : '');
         }
         if ((int) ($d['more'] ?? 0) > 0) {
-            $h .= '<p style="color:#64748b">و ' . self::e(Text::fa((int) $d['more'])) . ' یافته‌ی کم‌اهمیت‌تر در صفحه‌ی «یافته‌ها».</p>';
+            $h .= '<p style="color:#64748b">' . Lang::t('و {n} یافته‌ی کم‌اهمیت‌تر در صفحه‌ی «یافته‌ها».', ['n' => self::e(Text::fa((int) $d['more']))]) . '</p>';
         }
         if (!empty($d['fixed'])) {
             $h .= $sec('رفع‌شده‌ها') . '<ul>' . implode('', array_map(fn ($f) => '<li>' . self::text($f['title'] ?? '') . ' — ' . self::ltr($f['location'] ?? '') . '</li>', array_slice((array) $d['fixed'], 0, 30))) . '</ul>';
@@ -142,18 +148,18 @@ final class Pdf
             $parts = [];
             foreach (Surface::KINDS as $k => $l) {
                 if (!empty($sf['counts'][$k])) {
-                    $parts[] = self::e($l . ': ' . Text::fa((int) $sf['counts'][$k]));
+                    $parts[] = self::e(Lang::t($l) . ': ' . Text::fa((int) $sf['counts'][$k]));
                 }
             }
             $h .= $sec('سطح حمله') . '<p>' . implode(' · ', $parts) . '</p>'
-                . (!empty($sf['ports']) ? '<p style="font-size:8pt"><b>درگاه‌های باز:</b></p><p dir="ltr" align="left" style="font-size:8pt">' . self::e(implode('   ', array_slice((array) $sf['ports'], 0, 30))) . '</p>' : '')
-                . (!empty($sf['tech']) ? '<p style="font-size:8pt"><b>فناوری‌ها:</b></p><p dir="ltr" align="left" style="font-size:8pt">' . self::e(implode('   ', array_slice((array) $sf['tech'], 0, 30))) . '</p>' : '');
+                . (!empty($sf['ports']) ? '<p style="font-size:8pt"><b>' . Lang::t('درگاه‌های باز:') . '</b></p><p dir="ltr" align="left" style="font-size:8pt">' . self::e(implode('   ', array_slice((array) $sf['ports'], 0, 30))) . '</p>' : '')
+                . (!empty($sf['tech']) ? '<p style="font-size:8pt"><b>' . Lang::t('فناوری‌ها:') . '</b></p><p dir="ltr" align="left" style="font-size:8pt">' . self::e(implode('   ', array_slice((array) $sf['tech'], 0, 30))) . '</p>' : '');
         }
         if (!empty($d['scans'])) {
-            $h .= $sec('اسکن‌های این دوره') . '<ul>' . implode('', array_map(fn ($s) => '<li>' . self::text($s['profile'] ?? '') . ' — ' . self::ltr($s['asset'] ?? '') . ' — ' . self::e(Scans::STATUS[$s['status'] ?? ''] ?? '') . ' — ' . self::e(Text::date((int) ($s['finished_at'] ?? 0))) . '</li>', array_slice((array) $d['scans'], 0, 50))) . '</ul>';
+            $h .= $sec('اسکن‌های این دوره') . '<ul>' . implode('', array_map(fn ($s) => '<li>' . self::text($s['profile'] ?? '') . ' — ' . self::ltr($s['asset'] ?? '') . ' — ' . self::e(Lang::t((string) (Scans::STATUS[$s['status'] ?? ''] ?? ''))) . ' — ' . self::e(Text::date((int) ($s['finished_at'] ?? 0))) . '</li>', array_slice((array) $d['scans'], 0, 50))) . '</ul>';
         }
-        return $h . '<br><p style="font-size:8pt;color:#64748b">این گزارش از داده‌ی اسکن‌های خودکار ساخته شده و جای تست نفوذ دستی را نمی‌گیرد.'
-            . ($ai ? ' بخش‌های هوش مصنوعی با مدل ' . self::ltr($ai['model'] ?? '') . ' نوشته شده‌اند؛ پیش از اجرای دستورها آن‌ها را بخوانید.' : '') . '</p>';
+        return $h . '<br><p style="font-size:8pt;color:#64748b">' . Lang::t('این گزارش از داده‌ی اسکن‌های خودکار ساخته شده و جای تست نفوذ دستی را نمی‌گیرد.')
+            . ($ai ? ' ' . Lang::t('بخش‌های هوش مصنوعی با مدل {model} نوشته شده‌اند؛ پیش از اجرای دستورها آن‌ها را بخوانید.', ['model' => self::ltr($ai['model'] ?? '')]) : '') . '</p>';
     }
 
     /** The PDF bytes of a report, or '' when it cannot be made here. */
@@ -182,14 +188,14 @@ final class Pdf
             }
         };
         $pdf->mcsFont = $font;
-        $pdf->mcsFoot = 'بخش امنیت سایبری مارال کلاد';
+        $pdf->mcsFoot = Lang::t('بخش امنیت سایبری مارال کلاد');
         $pdf->SetCreator('MC-Sec ' . MCSEC_VERSION);
         $pdf->SetAuthor('Maral Cloud');
         $pdf->SetTitle(mb_substr((string) ($d['title'] ?? 'MC-Sec report'), 0, 120));
         $pdf->setPrintHeader(false);
         $pdf->SetMargins(14, 14, 14);
         $pdf->SetAutoPageBreak(true, 16);
-        $pdf->setRTL(true);
+        $pdf->setRTL(Lang::rtl()); // Persian: right-to-left as always; English: a left-to-right page
         $pdf->SetFont($font, '', 10);
         $pdf->AddPage();
         $pdf->writeHTML(self::html($d), true, false, true, false, '');

@@ -135,7 +135,7 @@ final class Findings
             foreach (Db::rows($gone->select(['id', 'asset_id'])) as $g) {
                 $touched[(int) $g->asset_id] = true;
                 Db::table('mod_mcsec_findings')->where('id', $g->id)->where('status', 'open')
-                    ->update(['status' => 'fixed', 'fixed_at' => $now, 'fixed_scan_id' => (int) $scan->id, 'status_note' => 'در اسکن ' . $scan->id . ' دیگر دیده نشد']);
+                    ->update(['status' => 'fixed', 'fixed_at' => $now, 'fixed_scan_id' => (int) $scan->id, 'status_note' => Lang::t('در اسکن {id} دیگر دیده نشد', ['id' => $scan->id])]);
                 $out['fixed'][] = (int) $g->id;
             }
         }
@@ -242,11 +242,11 @@ final class Findings
             $s = preg_match('~^[=+\-@]~', ltrim($s)) ? "'" . $s : $s;
             return '"' . str_replace('"', '""', $s) . '"';
         };
-        $out = "\xEF\xBB\xBF" . implode(',', array_map($cell, ['شدت', 'عنوان', 'دارایی', 'محل', 'وضعیت', 'CVE', 'اولویت', 'در حال بهره‌برداری', 'اولین بار', 'آخرین بار'])) . "\r\n";
+        $out = "\xEF\xBB\xBF" . implode(',', array_map(fn ($h) => $cell(Lang::t($h)), ['شدت', 'عنوان', 'دارایی', 'محل', 'وضعیت', 'CVE', 'اولویت', 'در حال بهره‌برداری', 'اولین بار', 'آخرین بار'])) . "\r\n";
         $f['page'] = 1;
         foreach (self::search($clientId, $f, 5000)['rows'] as $r) {
-            $out .= implode(',', array_map($cell, [self::SEVERITIES[(string) $r->severity]['label'] ?? $r->severity, $r->title, $r->asset_value, $r->location, self::STATUS[(string) $r->status] ?? $r->status,
-                $r->cve, (int) $r->priority, (int) $r->kev === 1 ? 'بله' : '', date('Y-m-d', (int) $r->first_seen_at), date('Y-m-d', (int) $r->last_seen_at)])) . "\r\n";
+            $out .= implode(',', array_map($cell, [Lang::t((string) (self::SEVERITIES[(string) $r->severity]['label'] ?? $r->severity)), Lang::whole((string) $r->title), $r->asset_value, $r->location, Lang::t((string) (self::STATUS[(string) $r->status] ?? $r->status)),
+                $r->cve, (int) $r->priority, (int) $r->kev === 1 ? (Lang::fa() ? 'بله' : 'Yes') : '', date('Y-m-d', (int) $r->first_seen_at), date('Y-m-d', (int) $r->last_seen_at)])) . "\r\n"; // i18n-skip («بله» is also the messenger Bale in the dictionary, so "yes" is written here)
         }
         return $out;
     }

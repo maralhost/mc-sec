@@ -6,6 +6,7 @@ namespace McSec\Engines;
 
 use McSec\Db;
 use McSec\Http;
+use McSec\Lang;
 use McSec\Net;
 use McSec\Settings;
 
@@ -44,12 +45,12 @@ final class Builtin implements Engine
     public function start(object $scan, object $asset, array $profile): array
     {
         $res = $this->run((string) $asset->kind, (string) $asset->value, self::portScopeFor($asset), self::subdomainsOf($asset));
-        return ['ok' => true, 'ref' => 'builtin-' . $scan->id, 'meta' => ['result' => $res], 'progress' => 100, 'stage' => 'تمام شد'];
+        return ['ok' => true, 'ref' => 'builtin-' . $scan->id, 'meta' => ['result' => $res], 'progress' => 100, 'stage' => Lang::t('تمام شد')];
     }
 
     public function poll(object $scan, object $asset, array $profile): array
     {
-        return ['status' => 'completed', 'progress' => 100, 'stage' => 'تمام شد'];
+        return ['status' => 'completed', 'progress' => 100, 'stage' => Lang::t('تمام شد')];
     }
 
     public function collect(object $scan, object $asset, array $profile): array
@@ -67,7 +68,7 @@ final class Builtin implements Engine
 
     public function health(): array
     {
-        return ['ok' => function_exists('curl_init') && function_exists('stream_socket_client'), 'message' => 'بررسی‌های داخلی روی همین سرور WHMCS اجرا می‌شوند.'];
+        return ['ok' => function_exists('curl_init') && function_exists('stream_socket_client'), 'message' => 'بررسی‌های داخلی روی همین سرور WHMCS اجرا می‌شوند.']; // i18n-skip (admin setup page)
     }
 
     /**
@@ -129,7 +130,7 @@ final class Builtin implements Engine
             if (!$ips) {
                 $tk = $this->takeover($value, $chain, null);
                 if (!$tk) {
-                    $f[] = $this->finding('dns.no_address', 'دامنه به هیچ IPی اشاره نمی‌کند', 'info', $host, 'رکورد A یا AAAA برای این نام پیدا نشد؛ بقیه‌ی بررسی‌های وب انجام نشد.', '', 'dns-no-address');
+                    $f[] = $this->finding('dns.no_address', Lang::t('دامنه به هیچ IPی اشاره نمی‌کند'), 'info', $host, Lang::t('رکورد A یا AAAA برای این نام پیدا نشد؛ بقیه‌ی بررسی‌های وب انجام نشد.'), '', 'dns-no-address');
                 }
                 return ['findings' => array_merge($f, $tk, $this->email($value), $this->reputation($value, [])), 'surface' => $s, 'partial' => ''];
             }
@@ -148,33 +149,33 @@ final class Builtin implements Engine
             $f = array_merge($f, $this->takeover($value, $chain, $https ?? $http));
         }
         if ($https === null && $http === null && $publicIps) {
-            $partial = 'سایت به درخواست‌های بررسی (HTTP و HTTPS) پاسخ نداد؛ بررسی‌های وب انجام نشد.';
+            $partial = Lang::t('سایت به درخواست‌های بررسی (HTTP و HTTPS) پاسخ نداد؛ بررسی‌های وب انجام نشد.');
         }
         if ($https !== null || $http !== null) {
             $cert = $this->cert($host, $publicIps[0] ?? $host);
             if ($cert !== null) {
                 $s[] = ['kind' => 'cert', 'value' => $host . ':443', 'meta' => $cert];
                 if ($cert['days'] < 0) {
-                    $f[] = $this->finding('tls.expired', 'گواهی SSL منقضی شده است', 'high', $host . ':443', 'گواهی از ' . abs($cert['days']) . ' روز پیش منقضی شده و مرورگرها هشدار امنیتی نشان می‌دهند.', 'expires in ' . $cert['days'] . ' days; issuer: ' . $cert['issuer'], 'tls-expired');
+                    $f[] = $this->finding('tls.expired', Lang::t('گواهی SSL منقضی شده است'), 'high', $host . ':443', Lang::t('گواهی از {n} روز پیش منقضی شده و مرورگرها هشدار امنیتی نشان می‌دهند.', ['n' => abs($cert['days'])]), 'expires in ' . $cert['days'] . ' days; issuer: ' . $cert['issuer'], 'tls-expired');
                 } elseif ($cert['days'] < 14) {
-                    $f[] = $this->finding('tls.expiring', 'گواهی SSL به‌زودی منقضی می‌شود', 'medium', $host . ':443', 'فقط ' . $cert['days'] . ' روز تا انقضای گواهی مانده است.', 'expires in ' . $cert['days'] . ' days', 'tls-expiring');
+                    $f[] = $this->finding('tls.expiring', Lang::t('گواهی SSL به‌زودی منقضی می‌شود'), 'medium', $host . ':443', Lang::t('فقط {n} روز تا انقضای گواهی مانده است.', ['n' => $cert['days']]), 'expires in ' . $cert['days'] . ' days', 'tls-expiring');
                 } elseif ($cert['days'] < 30) {
-                    $f[] = $this->finding('tls.expiring', 'گواهی SSL کمتر از یک ماه اعتبار دارد', 'low', $host . ':443', $cert['days'] . ' روز تا انقضای گواهی مانده است. اگر تمدید خودکار ندارید، برنامه‌ریزی کنید.', 'expires in ' . $cert['days'] . ' days', 'tls-expiring');
+                    $f[] = $this->finding('tls.expiring', Lang::t('گواهی SSL کمتر از یک ماه اعتبار دارد'), 'low', $host . ':443', Lang::t('{n} روز تا انقضای گواهی مانده است. اگر تمدید خودکار ندارید، برنامه‌ریزی کنید.', ['n' => $cert['days']]), 'expires in ' . $cert['days'] . ' days', 'tls-expiring');
                 }
                 if ($kind === 'domain' && !$cert['valid_host']) {
-                    $f[] = $this->finding('tls.hostname', 'گواهی SSL برای این نام صادر نشده است', 'high', $host . ':443', 'نام‌های گواهی (' . implode(', ', array_slice($cert['san'], 0, 5)) . ') با این دامنه یکی نیست.', 'CN=' . $cert['cn'], 'tls-hostname');
+                    $f[] = $this->finding('tls.hostname', Lang::t('گواهی SSL برای این نام صادر نشده است'), 'high', $host . ':443', Lang::t('نام‌های گواهی ({names}) با این دامنه یکی نیست.', ['names' => implode(', ', array_slice($cert['san'], 0, 5))]), 'CN=' . $cert['cn'], 'tls-hostname');
                 }
                 if ($cert['self_signed'] ?? false) {
-                    $f[] = $this->finding('tls.self_signed', 'گواهی SSL خودامضا است', 'medium', $host . ':443', 'مرورگرها به گواهی خودامضا اعتماد نمی‌کنند.', 'issuer=' . $cert['issuer'], 'tls-self-signed');
+                    $f[] = $this->finding('tls.self_signed', Lang::t('گواهی SSL خودامضا است'), 'medium', $host . ':443', Lang::t('مرورگرها به گواهی خودامضا اعتماد نمی‌کنند.'), 'issuer=' . $cert['issuer'], 'tls-self-signed');
                 }
                 if (in_array($cert['proto'] ?? '', ['TLSv1', 'TLSv1.0', 'TLSv1.1', 'SSLv3'], true)) {
-                    $f[] = $this->finding('tls.old_protocol', 'نسخه‌ی قدیمی TLS پذیرفته می‌شود', 'medium', $host . ':443', 'سرور با ' . $cert['proto'] . ' وصل می‌شود که دیگر امن شمرده نمی‌شود.', 'negotiated ' . $cert['proto'], 'tls-old-protocol');
+                    $f[] = $this->finding('tls.old_protocol', Lang::t('نسخه‌ی قدیمی TLS پذیرفته می‌شود'), 'medium', $host . ':443', Lang::t('سرور با {proto} وصل می‌شود که دیگر امن شمرده نمی‌شود.', ['proto' => $cert['proto']]), 'negotiated ' . $cert['proto'], 'tls-old-protocol');
                 }
             } elseif ($https === null && $http !== null) {
-                $f[] = $this->finding('web.no_https', 'سایت HTTPS ندارد', 'high', 'http://' . $host, 'سایت فقط با HTTP بی‌رمز باز می‌شود؛ رمز ورود و اطلاعات کاربران در مسیر خوانده می‌شود.', '', 'web-no-https');
+                $f[] = $this->finding('web.no_https', Lang::t('سایت HTTPS ندارد'), 'high', 'http://' . $host, Lang::t('سایت فقط با HTTP بی‌رمز باز می‌شود؛ رمز ورود و اطلاعات کاربران در مسیر خوانده می‌شود.'), '', 'web-no-https');
             }
             if ($http !== null && $https !== null && !$this->redirectsToHttps($http)) {
-                $f[] = $this->finding('web.no_redirect', 'نسخه‌ی HTTP به HTTPS هدایت نمی‌شود', 'low', 'http://' . $host, 'بازدیدکننده‌ای که http:// را باز کند، روی اتصال بی‌رمز می‌ماند.', 'HTTP ' . $http['status'], 'web-no-redirect');
+                $f[] = $this->finding('web.no_redirect', Lang::t('نسخه‌ی HTTP به HTTPS هدایت نمی‌شود'), 'low', 'http://' . $host, Lang::t('بازدیدکننده‌ای که http:// را باز کند، روی اتصال بی‌رمز می‌ماند.'), 'HTTP ' . $http['status'], 'web-no-redirect');
             }
             $main = $https ?? $http;
             $st = (int) $main['status'];
@@ -185,9 +186,9 @@ final class Builtin implements Engine
             }
             if ($st === 403 || $st === 429) {
                 // a WAF, a rate limit or an IP block answered instead of the site: its headers say nothing about the site
-                $partial = 'فایروال یا محدودیت نرخ جلوی بررسی را گرفت (HTTP ' . $st . ')؛ هدرها و فایل‌های لورفته سنجیده نشدند. IP اسکنر را در فایروال یا WAF خود مجاز کنید و دوباره بسنجید.';
+                $partial = Lang::t('فایروال یا محدودیت نرخ جلوی بررسی را گرفت (HTTP {code})؛ هدرها و فایل‌های لورفته سنجیده نشدند. IP اسکنر را در فایروال یا WAF خود مجاز کنید و دوباره بسنجید.', ['code' => $st]);
             } elseif ($st >= 500) {
-                $partial = 'سایت هنگام بررسی خطای سرور داد (HTTP ' . $st . ')؛ هدرها و فایل‌های لورفته سنجیده نشدند.';
+                $partial = Lang::t('سایت هنگام بررسی خطای سرور داد (HTTP {code})؛ هدرها و فایل‌های لورفته سنجیده نشدند.', ['code' => $st]);
             } else {
                 $f = array_merge($f, $this->headers($main, $host, $https !== null));
                 $f = array_merge($f, $this->exposedFiles(($https !== null ? 'https://' : 'http://') . $this->urlHost($host), $publicIps[0] ?? '', $host, $https !== null));
@@ -205,15 +206,15 @@ final class Builtin implements Engine
                 $s[] = ['kind' => 'port', 'value' => $publicIps[0] . ':' . $p, 'meta' => ['service' => self::PORT_RISK[$p][1] ?? '']];
                 [$sev, $name] = self::PORT_RISK[$p] ?? ['low', 'port ' . $p];
                 if ($sev !== 'info') {
-                    $f[] = $this->finding('port.' . $p, 'درگاه ' . $name . ' روی اینترنت باز است', $sev, $publicIps[0] . ':' . $p,
-                        'سرویس ' . $name . ' (درگاه ' . $p . ') از همه‌جای اینترنت در دسترس است و هدف حمله‌ی حدس رمز یا آسیب‌پذیری‌های شناخته‌شده قرار می‌گیرد.', 'tcp/' . $p . ' open', 'port-exposed');
+                    $f[] = $this->finding('port.' . $p, Lang::t('درگاه {name} روی اینترنت باز است', ['name' => $name]), $sev, $publicIps[0] . ':' . $p,
+                        Lang::t('سرویس {name} (درگاه {port}) از همه‌جای اینترنت در دسترس است و هدف حمله‌ی حدس رمز یا آسیب‌پذیری‌های شناخته‌شده قرار می‌گیرد.', ['name' => $name, 'port' => $p]), 'tcp/' . $p . ' open', 'port-exposed');
                 }
             }
         }
         if ($kind === 'domain' && Net::apex($value) === $value) {
             $f = array_merge($f, $this->email($value));
             if (!Net::dns($value, 'CAA')) {
-                $f[] = $this->finding('dns.no_caa', 'رکورد CAA تعریف نشده است', 'info', $value, 'بدون CAA هر مرجع صدور گواهی می‌تواند برای این دامنه گواهی صادر کند.', '', 'dns-caa');
+                $f[] = $this->finding('dns.no_caa', Lang::t('رکورد CAA تعریف نشده است'), 'info', $value, Lang::t('بدون CAA هر مرجع صدور گواهی می‌تواند برای این دامنه گواهی صادر کند.'), '', 'dns-caa');
             }
         }
         $f = array_merge($f, $this->reputation($kind === 'domain' ? $value : '', $owned));
@@ -290,17 +291,17 @@ final class Builtin implements Engine
         $path = $name . ' → ' . implode(' → ', $chain);
         if (!Net::ips($last)) {
             if ($service !== null) {
-                return [$this->finding('dns.takeover', 'خطر تصاحب زیردامنه (' . $service[0] . ')', 'high', $name,
-                    'این نام با CNAME به ' . $service[0] . ' اشاره می‌کند ولی آن منبع دیگر وجود ندارد. هر کسی می‌تواند همین نام را در ' . $service[0] . ' برای خودش بسازد و زیر نام دامنه‌ی شما محتوا نشان دهد.',
+                return [$this->finding('dns.takeover', Lang::t('خطر تصاحب زیردامنه ({service})', ['service' => $service[0]]), 'high', $name,
+                    Lang::t('این نام با CNAME به {service} اشاره می‌کند ولی آن منبع دیگر وجود ندارد. هر کسی می‌تواند همین نام را در {service} برای خودش بسازد و زیر نام دامنه‌ی شما محتوا نشان دهد.', ['service' => $service[0]]),
                     $path . ' (no A/AAAA)', 'subdomain-takeover')];
             }
-            return [$this->finding('dns.dangling', 'رکورد CNAME به نامی اشاره می‌کند که وجود ندارد', 'medium', $name,
-                'مقصد این رکورد پاسخی ندارد. اگر مقصد سرویسی است که دیگری بتواند همان نام را در آن بگیرد، زیردامنه‌ی شما تصاحب می‌شود؛ رکوردی را که استفاده نمی‌شود پاک کنید.',
+            return [$this->finding('dns.dangling', Lang::t('رکورد CNAME به نامی اشاره می‌کند که وجود ندارد'), 'medium', $name,
+                Lang::t('مقصد این رکورد پاسخی ندارد. اگر مقصد سرویسی است که دیگری بتواند همان نام را در آن بگیرد، زیردامنه‌ی شما تصاحب می‌شود؛ رکوردی را که استفاده نمی‌شود پاک کنید.'),
                 $path . ' (no A/AAAA)', 'subdomain-takeover')];
         }
         if ($service !== null && $service[1] !== '' && $page !== null && str_contains(substr((string) $page['body'], 0, 50000), $service[1])) {
-            return [$this->finding('dns.takeover', 'خطر تصاحب زیردامنه (' . $service[0] . ')', 'high', $name,
-                'این نام به ' . $service[0] . ' اشاره می‌کند ولی آن‌جا صفحه‌ی «چیزی این‌جا نیست» نشان داده می‌شود؛ یعنی منبع شما در آن سرویس حذف شده و دیگری می‌تواند آن را بگیرد.',
+            return [$this->finding('dns.takeover', Lang::t('خطر تصاحب زیردامنه ({service})', ['service' => $service[0]]), 'high', $name,
+                Lang::t('این نام به {service} اشاره می‌کند ولی آن‌جا صفحه‌ی «چیزی این‌جا نیست» نشان داده می‌شود؛ یعنی منبع شما در آن سرویس حذف شده و دیگری می‌تواند آن را بگیرد.', ['service' => $service[0]]),
                 $path . '; page: "' . $service[1] . '"', 'subdomain-takeover')];
         }
         return [];
@@ -326,11 +327,11 @@ final class Builtin implements Engine
                     continue;
                 }
                 $f[] = $type === 'domain'
-                    ? $this->finding('rep.domain.' . $zone, 'دامنه در فهرست سیاه ' . $name . ' است', $sev, $t,
-                        $sev === 'critical' ? 'این دامنه در فهرست دامنه‌های بدافزار یا فیشینگ است: احتمالاً سایت آلوده شده یا برای فریب کاربران به کار رفته است. مرورگرها، ایمیل‌ها و سامانه‌های امنیتی آن را مسدود می‌کنند.'
-                            : 'این دامنه در فهرست سیاه است و ایمیل‌ها و پیوندهایش ممکن است مسدود شوند.', implode(', ', $answers) . ' @ ' . $zone, 'blocklisted')
-                    : $this->finding('rep.ip.' . $zone, 'IP سرور در فهرست سیاه ' . $name . ' است', $sev, $t,
-                        'این IP به‌عنوان فرستنده‌ی هرزنامه یا دستگاه آلوده ثبت شده است؛ ایمیل‌های این سرور احتمالاً رد می‌شوند و ممکن است سرور آلوده باشد.', implode(', ', $answers) . ' @ ' . $zone, 'blocklisted');
+                    ? $this->finding('rep.domain.' . $zone, Lang::t('دامنه در فهرست سیاه {list} است', ['list' => $name]), $sev, $t,
+                        $sev === 'critical' ? Lang::t('این دامنه در فهرست دامنه‌های بدافزار یا فیشینگ است: احتمالاً سایت آلوده شده یا برای فریب کاربران به کار رفته است. مرورگرها، ایمیل‌ها و سامانه‌های امنیتی آن را مسدود می‌کنند.')
+                            : Lang::t('این دامنه در فهرست سیاه است و ایمیل‌ها و پیوندهایش ممکن است مسدود شوند.'), implode(', ', $answers) . ' @ ' . $zone, 'blocklisted')
+                    : $this->finding('rep.ip.' . $zone, Lang::t('IP سرور در فهرست سیاه {list} است', ['list' => $name]), $sev, $t,
+                        Lang::t('این IP به‌عنوان فرستنده‌ی هرزنامه یا دستگاه آلوده ثبت شده است؛ ایمیل‌های این سرور احتمالاً رد می‌شوند و ممکن است سرور آلوده باشد.'), implode(', ', $answers) . ' @ ' . $zone, 'blocklisted');
             }
         }
         return $f;
@@ -412,33 +413,33 @@ final class Builtin implements Engine
             return $f; // a redirect page: headers belong to the final page, judged on the next scan of that host
         }
         if ($tls && empty($h['strict-transport-security'])) {
-            $f[] = $this->finding('hdr.hsts', 'هدر HSTS تنظیم نشده است', 'low', $loc, 'بدون HSTS مرورگر ممکن است اولین اتصال را بی‌رمز برقرار کند (حمله‌ی SSL stripping).', '', 'hdr-hsts');
+            $f[] = $this->finding('hdr.hsts', Lang::t('هدر HSTS تنظیم نشده است'), 'low', $loc, Lang::t('بدون HSTS مرورگر ممکن است اولین اتصال را بی‌رمز برقرار کند (حمله‌ی SSL stripping).'), '', 'hdr-hsts');
         }
         $csp = strtolower(implode(';', $h['content-security-policy'] ?? []));
         if ($csp === '') {
-            $f[] = $this->finding('hdr.csp', 'سیاست امنیت محتوا (CSP) تنظیم نشده است', 'low', $loc, 'CSP اثر حمله‌های XSS و تزریق اسکریپت را محدود می‌کند.', '', 'hdr-csp');
+            $f[] = $this->finding('hdr.csp', Lang::t('سیاست امنیت محتوا (CSP) تنظیم نشده است'), 'low', $loc, Lang::t('CSP اثر حمله‌های XSS و تزریق اسکریپت را محدود می‌کند.'), '', 'hdr-csp');
         }
         if (empty($h['x-frame-options']) && !str_contains($csp, 'frame-ancestors')) {
-            $f[] = $this->finding('hdr.frame', 'محافظت در برابر Clickjacking نیست', 'low', $loc, 'سایت را می‌توان در iframe سایت دیگری نشاند و کاربر را به کلیک ناخواسته کشاند.', '', 'hdr-frame');
+            $f[] = $this->finding('hdr.frame', Lang::t('محافظت در برابر Clickjacking نیست'), 'low', $loc, Lang::t('سایت را می‌توان در iframe سایت دیگری نشاند و کاربر را به کلیک ناخواسته کشاند.'), '', 'hdr-frame');
         }
         if (strtolower((string) ($h['x-content-type-options'][0] ?? '')) !== 'nosniff') {
-            $f[] = $this->finding('hdr.nosniff', 'هدر X-Content-Type-Options تنظیم نشده است', 'info', $loc, 'مرورگر ممکن است نوع فایل را حدس بزند و فایل بارگذاری‌شده را اجرا کند.', '', 'hdr-nosniff');
+            $f[] = $this->finding('hdr.nosniff', Lang::t('هدر X-Content-Type-Options تنظیم نشده است'), 'info', $loc, Lang::t('مرورگر ممکن است نوع فایل را حدس بزند و فایل بارگذاری‌شده را اجرا کند.'), '', 'hdr-nosniff');
         }
         foreach (['server' => 'web server', 'x-powered-by' => 'framework'] as $name => $what) {
             $v = (string) ($h[$name][0] ?? '');
             if ($v !== '' && preg_match('~\d+\.\d+~', $v)) {
-                $f[] = $this->finding('hdr.version.' . $name, 'نسخه‌ی نرم‌افزار در هدر ' . $name . ' دیده می‌شود', 'low', $loc, 'نسخه‌ی دقیق به مهاجم کمک می‌کند آسیب‌پذیری‌های همان نسخه را پیدا کند.', $name . ': ' . mb_substr($v, 0, 120), 'hdr-version');
+                $f[] = $this->finding('hdr.version.' . $name, Lang::t('نسخه‌ی نرم‌افزار در هدر {header} دیده می‌شود', ['header' => $name]), 'low', $loc, Lang::t('نسخه‌ی دقیق به مهاجم کمک می‌کند آسیب‌پذیری‌های همان نسخه را پیدا کند.'), $name . ': ' . mb_substr($v, 0, 120), 'hdr-version');
             }
         }
         foreach ($h['set-cookie'] ?? [] as $c) {
             $lc = strtolower($c);
             $name = trim(explode('=', $c, 2)[0]);
             if (preg_match('~sess|auth|token|login|sid~i', $name) && ((!str_contains($lc, 'secure') && $tls) || !str_contains($lc, 'httponly'))) {
-                $f[] = $this->finding('cookie.flags.' . strtolower($name), 'کوکی نشست بدون Secure یا HttpOnly', 'medium', $loc, 'کوکی «' . $name . '» بدون پرچم‌های Secure و HttpOnly فرستاده می‌شود و در خطر سرقت است.', mb_substr($c, 0, 160), 'cookie-flags');
+                $f[] = $this->finding('cookie.flags.' . strtolower($name), Lang::t('کوکی نشست بدون Secure یا HttpOnly'), 'medium', $loc, Lang::t('کوکی «{name}» بدون پرچم‌های Secure و HttpOnly فرستاده می‌شود و در خطر سرقت است.', ['name' => $name]), mb_substr($c, 0, 160), 'cookie-flags');
             }
         }
         if (preg_match('~<title>\s*Index of /~i', (string) $r['body'])) {
-            $f[] = $this->finding('web.listing', 'فهرست فایل‌های پوشه نمایش داده می‌شود', 'medium', $loc, 'Directory listing روشن است و فایل‌های پوشه را به همه نشان می‌دهد.', 'Index of /', 'web-listing');
+            $f[] = $this->finding('web.listing', Lang::t('فهرست فایل‌های پوشه نمایش داده می‌شود'), 'medium', $loc, Lang::t('Directory listing روشن است و فایل‌های پوشه را به همه نشان می‌دهد.'), 'Index of /', 'web-listing');
         }
         return $f;
     }
@@ -447,9 +448,9 @@ final class Builtin implements Engine
     {
         $f = [];
         $checks = [
-            ['/.git/HEAD', '~^ref:\s*refs/~m', 'web.git', 'پوشه‌ی .git روی سایت در دسترس است', 'high', 'کل کد منبع، تاریخچه و گاهی رمزها از روی پوشه‌ی .git قابل بازسازی است.', 'web-git'],
-            ['/.env', '~^(APP_KEY|DB_PASSWORD|DB_HOST|SECRET_KEY|AWS_SECRET|MAIL_PASSWORD)\s*=~m', 'web.env', 'فایل .env روی سایت در دسترس است', 'critical', 'این فایل معمولاً رمز پایگاه داده و کلیدهای سرویس‌ها را دارد.', 'web-env'],
-            ['/server-status', '~Apache Server Status~i', 'web.server_status', 'صفحه‌ی server-status آپاچی عمومی است', 'medium', 'این صفحه درخواست‌های جاری، IP بازدیدکننده‌ها و مسیرهای داخلی را نشان می‌دهد.', 'web-server-status'],
+            ['/.git/HEAD', '~^ref:\s*refs/~m', 'web.git', Lang::t('پوشه‌ی .git روی سایت در دسترس است'), 'high', Lang::t('کل کد منبع، تاریخچه و گاهی رمزها از روی پوشه‌ی .git قابل بازسازی است.'), 'web-git'],
+            ['/.env', '~^(APP_KEY|DB_PASSWORD|DB_HOST|SECRET_KEY|AWS_SECRET|MAIL_PASSWORD)\s*=~m', 'web.env', Lang::t('فایل .env روی سایت در دسترس است'), 'critical', Lang::t('این فایل معمولاً رمز پایگاه داده و کلیدهای سرویس‌ها را دارد.'), 'web-env'],
+            ['/server-status', '~Apache Server Status~i', 'web.server_status', Lang::t('صفحه‌ی server-status آپاچی عمومی است'), 'medium', Lang::t('این صفحه درخواست‌های جاری، IP بازدیدکننده‌ها و مسیرهای داخلی را نشان می‌دهد.'), 'web-server-status'],
         ];
         foreach ($checks as [$path, $re, $key, $title, $sev, $desc, $kb]) {
             $r = $this->get($base . $path, $ip, $host, $tls);
@@ -465,15 +466,15 @@ final class Builtin implements Engine
         $f = [];
         $spf = array_values(array_filter(Net::txt($domain), fn ($t) => stripos(trim($t, '"'), 'v=spf1') === 0));
         if (!$spf) {
-            $f[] = $this->finding('mail.spf_missing', 'رکورد SPF تعریف نشده است', 'medium', $domain, 'هر کسی می‌تواند ایمیلی به نام این دامنه بفرستد و گیرنده نمی‌تواند جعلی بودنش را بفهمد.', '', 'mail-spf');
+            $f[] = $this->finding('mail.spf_missing', Lang::t('رکورد SPF تعریف نشده است'), 'medium', $domain, Lang::t('هر کسی می‌تواند ایمیلی به نام این دامنه بفرستد و گیرنده نمی‌تواند جعلی بودنش را بفهمد.'), '', 'mail-spf');
         } elseif (preg_match('/[+?]all\b/i', $spf[0]) || !preg_match('/[-~]all\b|redirect=/i', $spf[0])) {
-            $f[] = $this->finding('mail.spf_weak', 'رکورد SPF جلوی جعل را نمی‌گیرد', 'medium', $domain, 'SPF با ‎+all یا ‎?all یا بی پایان all، فرستنده‌های دیگر را رد نمی‌کند.', mb_substr($spf[0], 0, 200), 'mail-spf');
+            $f[] = $this->finding('mail.spf_weak', Lang::t('رکورد SPF جلوی جعل را نمی‌گیرد'), 'medium', $domain, Lang::t('SPF با ‎+all یا ‎?all یا بی پایان all، فرستنده‌های دیگر را رد نمی‌کند.'), mb_substr($spf[0], 0, 200), 'mail-spf');
         }
         $dmarc = array_values(array_filter(Net::txt('_dmarc.' . $domain), fn ($t) => stripos(trim($t, '"'), 'v=DMARC1') === 0));
         if (!$dmarc) {
-            $f[] = $this->finding('mail.dmarc_missing', 'رکورد DMARC تعریف نشده است', 'medium', $domain, 'بدون DMARC، سرویس‌های ایمیل سیاستی برای رد ایمیل‌های جعلی به نام شما ندارند و گزارشی هم نمی‌گیرید.', '', 'mail-dmarc');
+            $f[] = $this->finding('mail.dmarc_missing', Lang::t('رکورد DMARC تعریف نشده است'), 'medium', $domain, Lang::t('بدون DMARC، سرویس‌های ایمیل سیاستی برای رد ایمیل‌های جعلی به نام شما ندارند و گزارشی هم نمی‌گیرید.'), '', 'mail-dmarc');
         } elseif (preg_match('~\bp\s*=\s*none~i', $dmarc[0])) {
-            $f[] = $this->finding('mail.dmarc_none', 'سیاست DMARC فقط نظارتی است (p=none)', 'low', $domain, 'ایمیل‌های جعلی گزارش می‌شوند ولی رد نمی‌شوند.', mb_substr($dmarc[0], 0, 200), 'mail-dmarc');
+            $f[] = $this->finding('mail.dmarc_none', Lang::t('سیاست DMARC فقط نظارتی است (p=none)'), 'low', $domain, Lang::t('ایمیل‌های جعلی گزارش می‌شوند ولی رد نمی‌شوند.'), mb_substr($dmarc[0], 0, 200), 'mail-dmarc');
         }
         return $f;
     }

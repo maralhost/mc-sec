@@ -39,6 +39,7 @@ final class Controller
 
     public static function handle(string $link): string
     {
+        \McSec\Lang::set('fa'); // the panel is Persian
         $page = (string) ($_GET['mcsa'] ?? 'overview');
         if (!isset(self::PAGES[$page])) {
             $page = 'overview';

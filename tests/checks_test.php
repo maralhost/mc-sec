@@ -353,11 +353,11 @@ ok(!str_contains($h, 'submitticket.php') && !str_contains($h, 'راه آسان�
 setting('support_dept', '3');
 setting('offers', "subdomain-takeover | <b>DNS</b> | javascript:alert(9)\nsubdomain-takeover | DNS مدیریت‌شده‌ی مارال <img src=x onerror=alert(9)> | https://maral.test/dns");
 $h = html(client_get(['p' => 'finding', 'id' => (string) $tkf->id]));
-ok(str_contains($h, 'submitticket.php?step=2&amp;deptid=3&amp;subject=' . urlencode('کمک برای رفع:')), 'support link opens the ticket form of the department, subject filled');
+ok(str_contains($h, 'p=support&amp;topic=finding&amp;finding=' . $tkf->id), 'the finding page links to the expert request with this finding');
 ok(str_contains($h, 'https://maral.test/dns') && !str_contains($h, 'javascript:alert') && !str_contains($h, '<img src=x'), 'offer: safe URL only, text escaped');
 $xid = Db::table('mod_mcsec_findings')->insertGetId(['client_id' => 1, 'asset_id' => $tk->id, 'fp' => sha1('xss'), 'engine' => 'builtin', 'title' => '<script>alert(9)</script>', 'severity' => 'high', 'status' => 'open', 'kb' => 'generic', 'location' => '"><script>alert(9)</script>']);
 $h = html(client_get(['p' => 'finding', 'id' => (string) $xid]));
-ok(!str_contains($h, '<script>alert(9)') && str_contains($h, 'deptid=3'), 'finding text inside the ticket link is escaped');
+ok(!str_contains($h, '<script>alert(9)') && str_contains($h, 'p=support&amp;topic=finding&amp;finding=' . $xid), 'finding text is escaped; the request link carries only the id');
 login(2, 2);
 ok(!str_contains(html(client_get(['p' => 'finding', 'id' => (string) $tkf->id])), 'submitticket.php'), 'another account cannot open it (IDOR)');
 $who = login(1, 1);

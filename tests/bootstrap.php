@@ -76,7 +76,7 @@ as_whmcs(function () {
     $s->create('tblclientgroups', function ($t) { $t->increments('id'); $t->string('groupname'); });
     $s->create('tblclients', function ($t) {
         $t->increments('id'); $t->string('firstname')->default(''); $t->string('lastname')->default(''); $t->string('companyname')->default(''); $t->string('email')->default('');
-        $t->integer('currency')->default(1); $t->integer('groupid')->default(0); $t->string('status')->default('Active');
+        $t->integer('currency')->default(1); $t->integer('groupid')->default(0); $t->string('status')->default('Active'); $t->string('language')->default('');
     });
     $s->create('tblusers', function ($t) { $t->increments('id'); $t->string('first_name')->default(''); $t->string('last_name')->default(''); $t->string('email')->default(''); });
     $s->create('tblusers_clients', function ($t) { $t->increments('id'); $t->integer('auth_user_id'); $t->integer('client_id'); $t->integer('owner')->default(0); $t->text('permissions')->nullable(); });
@@ -84,10 +84,12 @@ as_whmcs(function () {
     $s->create('tblhosting', function ($t) { $t->increments('id'); $t->integer('userid'); $t->integer('packageid')->default(1); $t->string('domain')->default(''); $t->string('domainstatus')->default('Active'); $t->string('dedicatedip')->default(''); $t->text('assignedips')->nullable(); });
     $s->create('tbldomains', function ($t) { $t->increments('id'); $t->integer('userid'); $t->string('domain')->default(''); $t->string('status')->default('Active'); });
     $s->create('tblinvoices', function ($t) { $t->increments('id'); $t->integer('userid'); $t->string('status')->default('Unpaid'); $t->decimal('total', 16, 2)->default(0); });
+    $s->create('tblticketdepartments', function ($t) { $t->increments('id'); $t->string('name'); $t->string('hidden')->default(''); $t->integer('order')->default(0); });
+    $s->create('tbltickets', function ($t) { $t->increments('id'); $t->string('tid'); $t->integer('did'); $t->integer('userid'); $t->string('title'); $t->text('message'); $t->integer('service')->default(0); });
     $s->create('tblproducts', function ($t) { $t->increments('id'); $t->string('name'); $t->string('servertype')->default(''); });
 
     $db = '\WHMCS\Database\Capsule';
-    $db::table('tblconfiguration')->insert([['setting' => 'SystemURL', 'value' => 'https://my.maralcloud.test/']]);
+    $db::table('tblconfiguration')->insert([['setting' => 'SystemURL', 'value' => 'https://my.maralcloud.test/'], ['setting' => 'Language', 'value' => 'farsi']]);
     $db::table('tblcurrencies')->insert([['id' => 1, 'code' => 'IRR', 'suffix' => ' ریال', 'format' => 4]]);
     $db::table('tblclientgroups')->insert([['id' => 1, 'groupname' => 'VIP'], ['id' => 2, 'groupname' => 'همکاران']]);
     $db::table('tbladmins')->insert([['id' => 1, 'roleid' => 1, 'username' => 'root'], ['id' => 2, 'roleid' => 2, 'username' => 'support']]);
@@ -102,6 +104,7 @@ as_whmcs(function () {
     // Maral services of client 1: a registered domain, a hosting service and a server IP
     $db::table('tbldomains')->insert(['userid' => 1, 'domain' => 'shop-maral.ir', 'status' => 'Active']);
     $db::table('tblhosting')->insert(['userid' => 1, 'domain' => 'blog.example.org', 'domainstatus' => 'Active', 'dedicatedip' => '203.0.113.5', 'assignedips' => "198.51.100.7\n198.51.100.8"]);
+    $db::table('tblticketdepartments')->insert([['id' => 1, 'name' => 'داخلی', 'hidden' => 'on', 'order' => 1], ['id' => 2, 'name' => 'پشتیبانی', 'hidden' => '', 'order' => 2], ['id' => 3, 'name' => 'امنیت', 'hidden' => '', 'order' => 3]]);
     $db::table('tblproducts')->insert(['id' => 1, 'name' => 'MC-Sec Pro', 'servertype' => 'mcsecplan']);
 });
 
@@ -127,6 +130,13 @@ function localAPI($cmd, $params = [], $admin = null)
                 }
                 $GLOBALS['__emails'][] = $params;
                 return ['result' => 'success'];
+            case 'OpenTicket':
+                if (!$db::table('tblclients')->where('id', $params['clientid'] ?? 0)->exists() || !$db::table('tblticketdepartments')->where('id', $params['deptid'] ?? 0)->exists()) {
+                    return ['result' => 'error', 'message' => 'Department ID Not Found'];
+                }
+                $tid = (string) (100000 + $db::table('tbltickets')->count());
+                $id = $db::table('tbltickets')->insertGetId(['tid' => $tid, 'did' => (int) $params['deptid'], 'userid' => (int) $params['clientid'], 'title' => (string) $params['subject'], 'message' => (string) $params['message'], 'service' => (int) ($params['serviceid'] ?? 0)]);
+                return ['result' => 'success', 'id' => $id, 'tid' => $tid, 'c' => 'Ab12Cd34'];
             case 'CreateInvoice':
                 if (!$db::table('tblclients')->where('id', $params['userid'] ?? 0)->exists()) {
                     return ['result' => 'error', 'message' => 'Client ID Not Found'];

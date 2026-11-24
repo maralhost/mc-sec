@@ -29,7 +29,8 @@ final class Plans
         Accounts::ensure($clientId);
         // this month's credits now (the ref makes it once per service per month, also across renewals)
         if ($row['monthly_credits'] > 0) {
-            Credits::credit($clientId, $row['monthly_credits'], 'monthly', 'plan', 'plan:' . $serviceId . ':' . Credits::period(), 'اعتبار ماهانه‌ی پلن ' . $row['name']);
+            Credits::credit($clientId, $row['monthly_credits'], 'monthly', 'plan', 'plan:' . $serviceId . ':' . Credits::period(),
+                Credits::forAccount($clientId, fn () => Lang::t('اعتبار ماهانه‌ی پلن {name}', ['name' => $row['name']])));
         }
         self::resumeSchedules($clientId);
     }

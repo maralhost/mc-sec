@@ -121,7 +121,7 @@ final class Recipes
                 $c = (string) ($chosen[$t][$opt] ?? '');
                 if (isset($choices[$c]) && $choices[$c][1] !== []) {
                     $options[$t] = ($options[$t] ?? []) + $choices[$c][1];
-                    $said[] = Catalog::TOOLS[$t]['label'] . ': ' . $choices[$c][0];
+                    $said[] = Catalog::TOOLS[$t]['label'] . ': ' . Lang::t($choices[$c][0]);
                 }
             }
         }
@@ -129,7 +129,8 @@ final class Recipes
             'key' => self::key((int) $row->id), 'label' => (string) $row->name, 'engine' => 'oasm', 'tools' => $tools, 'options' => $options, 'credits' => $cost, 'kinds' => $kinds,
             'free' => false, 'enabled' => $ok && $kinds !== [] && $row->status === 'active' && self::allowed((int) $row->client_id), 'eta' => 'بسته به ابزارها', 'icon' => 'layers',
             'recipe' => (int) $row->id, 'owner' => (int) $row->client_id,
-            'desc' => 'اسکن سفارشی شما: ' . implode(' ← ', array_map(fn ($t) => Catalog::TOOLS[$t]['label'], $tools)) . ($said ? ' (' . implode('، ', $said) . ')' : ''),
+            // the arrow points the way the page reads
+            'desc' => Lang::t('اسکن سفارشی شما: {tools}', ['tools' => implode(Lang::fa() ? ' ← ' : ' → ', array_map(fn ($t) => Catalog::TOOLS[$t]['label'], $tools))]) . ($said ? ' (' . Lang::join($said) . ')' : ''),
         ];
         $p['depth'] = Catalog::risk($p) === 'heavy' ? 4 : 3;
         return $p;
@@ -164,7 +165,7 @@ final class Recipes
             return ['ok' => false, 'error' => 'دست‌کم یک ابزار را انتخاب کنید.'];
         }
         if (count($tools) > self::MAX_TOOLS) {
-            return ['ok' => false, 'error' => 'هر اسکن سفارشی حداکثر ' . Text::fa(self::MAX_TOOLS) . ' ابزار دارد. اسکن بزرگ‌تر را به دو اسکن بشکنید.'];
+            return ['ok' => false, 'error' => Lang::t('هر اسکن سفارشی حداکثر {n} ابزار دارد. اسکن بزرگ‌تر را به دو اسکن بشکنید.', ['n' => Text::fa(self::MAX_TOOLS)])];
         }
         $kinds = ['domain', 'ip', 'cidr'];
         foreach ($tools as $t) {
@@ -193,7 +194,7 @@ final class Recipes
         } else {
             $max = max(1, Settings::int('advanced_max'));
             if (Db::table('mod_mcsec_recipes')->where('client_id', $cid)->where('status', 'active')->count() >= $max) {
-                return ['ok' => false, 'error' => 'هر حساب تا ' . Text::fa($max) . ' اسکن سفارشی دارد. یکی را حذف کنید.'];
+                return ['ok' => false, 'error' => Lang::t('هر حساب تا {n} اسکن سفارشی دارد. یکی را حذف کنید.', ['n' => Text::fa($max)])];
             }
             $id = (int) Db::table('mod_mcsec_recipes')->insertGetId($row + ['client_id' => $cid, 'status' => 'active', 'created_by' => (int) $who['user_id'], 'created_at' => Clock::now()]);
         }
@@ -209,7 +210,7 @@ final class Recipes
             return ['ok' => false, 'error' => 'این اسکن سفارشی پیدا نشد.'];
         }
         Db::table('mod_mcsec_recipes')->where('id', $id)->where('client_id', (int) $who['client_id'])->update(['status' => 'removed', 'updated_at' => Clock::now()]);
-        Audit::log((int) $who['client_id'], 'recipe', 'حذف ' . $r->name, ['id' => $id], (int) $who['user_id']);
+        Audit::log((int) $who['client_id'], 'recipe', Lang::t('حذف {name}', ['name' => $r->name]), ['id' => $id], (int) $who['user_id']);
         return ['ok' => true];
     }
 

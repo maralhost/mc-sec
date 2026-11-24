@@ -10,6 +10,7 @@ use McSec\Catalog;
 use McSec\Credits;
 use McSec\Db;
 use McSec\Findings;
+use McSec\Lang;
 use McSec\Plans;
 use McSec\Scans;
 use McSec\Schedules;
@@ -22,6 +23,12 @@ final class ScanViews
     private static function e($s): string
     {
         return Ui::e($s);
+    }
+
+    /** "دامنه، IP" / "Domain, IP": the asset kinds a scan or a tool accepts. */
+    private static function kinds(array $kinds): string
+    {
+        return Lang::join(array_map(fn ($x) => Lang::t((string) (Assets::KINDS[$x] ?? $x)), $kinds));
     }
 
     public static function statusChip(object $s): string
@@ -37,8 +44,8 @@ final class ScanViews
         foreach ($scans as $s) {
             $sum = Scans::summary($s);
             $result = match ($s->status) {
-                'completed' => self::e(Text::fa((int) ($sum['new'] ?? 0)) . ' تازه، ' . Text::fa((int) ($sum['fixed'] ?? 0)) . ' رفع‌شده'),
-                'running' => Ui::meter((int) $s->progress, 100, self::e(Text::fa((int) $s->progress) . '٪')),
+                'completed' => self::e(Lang::t('{new} تازه، {fixed} رفع‌شده', ['new' => Text::fa((int) ($sum['new'] ?? 0)), 'fixed' => Text::fa((int) ($sum['fixed'] ?? 0))])),
+                'running' => Ui::meter((int) $s->progress, 100, Lang::t('{n}٪', ['n' => self::e(Text::fa((int) $s->progress))])),
                 'failed' => '<span class="mcs-small">' . self::e($s->error) . '</span>',
                 default => '',
             };
@@ -58,8 +65,8 @@ final class ScanViews
     {
         $cid = $ctx['who']['client_id'];
         $scans = Scans::recent($cid, 50);
-        $out = Ui::guide('<p>هر اسکن روی یک دارایی تأییدشده اجرا می‌شود و به اندازه‌ی عمقش اعتبار مصرف می‌کند؛ هزینه را پیش از شروع می‌بینید. اسکن‌ها در پس‌زمینه اجرا می‌شوند: لازم نیست صفحه را باز نگه دارید، پس از پایان خبرتان می‌کنیم.</p>'
-            . '<p>اگر اسکن به‌خاطر خطای سامانه تمام نشود، اعتبارش خودکار برمی‌گردد.</p>', !$scans);
+        $out = Ui::guide('<p>' . Lang::t('هر اسکن روی یک دارایی تأییدشده اجرا می‌شود و به اندازه‌ی عمقش اعتبار مصرف می‌کند؛ هزینه را پیش از شروع می‌بینید. اسکن‌ها در پس‌زمینه اجرا می‌شوند: لازم نیست صفحه را باز نگه دارید، پس از پایان خبرتان می‌کنیم.') . '</p>'
+            . '<p>' . Lang::t('اگر اسکن به‌خاطر خطای سامانه تمام نشود، اعتبارش خودکار برمی‌گردد.') . '</p>', !$scans);
         if ($ctx['manage']) {
             $out .= self::launcher($ctx);
         }
@@ -74,18 +81,18 @@ final class ScanViews
         $cid = $ctx['who']['client_id'];
         $verified = Assets::forClient($cid, 'verified');
         if (!$verified) {
-            return Ui::card(Ui::emptyState('globe', 'دارایی تأییدشده‌ای ندارید', 'اسکن فقط روی دارایی تأییدشده انجام می‌شود. اول دارایی بیفزایید و مالکیتش را تأیید کنید.',
-                '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=assets#add">افزودن دارایی</a>'), 'اسکن تازه', 'play', '', '" id="new');
+            return Ui::card(Ui::emptyState('globe', 'دارایی تأییدشده‌ای ندارید', Lang::t('اسکن فقط روی دارایی تأییدشده انجام می‌شود. اول دارایی بیفزایید و مالکیتش را تأیید کنید.'),
+                '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=assets#add">' . Lang::t('افزودن دارایی') . '</a>'), 'اسکن تازه', 'play', '', '" id="new');
         }
         $pre = (int) Text::toAscii((string) ($_GET['asset'] ?? '0'));
         $bal = Credits::balance($cid);
-        $assets = '<fieldset class="mcs-checks"><legend>' . Ui::ico('globe') . 'روی کدام دارایی‌ها؟</legend>';
+        $assets = '<fieldset class="mcs-checks"><legend>' . Ui::ico('globe') . Lang::t('روی کدام دارایی‌ها؟') . '</legend>';
         foreach ($verified as $a) {
             $assets .= '<label class="mcs-check"><input type="checkbox" name="assets[]" value="' . (int) $a->id . '" data-mcs-kind="' . self::e($a->kind) . '"' . ($pre === (int) $a->id || count($verified) === 1 ? ' checked' : '') . '>'
                 . '<span>' . Ui::ltr($a->value) . (trim((string) $a->label) !== '' ? '<small>' . self::e($a->label) . '</small>' : '') . '</span></label>';
         }
         $assets .= '</fieldset>';
-        $cards = '<fieldset class="mcs-profiles"><legend>' . Ui::ico('radar') . 'چه اسکنی؟</legend>';
+        $cards = '<fieldset class="mcs-profiles"><legend>' . Ui::ico('radar') . Lang::t('چه اسکنی؟') . '</legend>';
         $first = true;
         foreach (Catalog::forClient($cid) as $k => $p) {
             $engineOk = Scans::engine($p['engine'])->configured();
@@ -94,18 +101,18 @@ final class ScanViews
             $cards .= '<label class="mcs-profile' . ($disabled ? ' is-locked' : '') . '"><input type="radio" name="profile" value="' . self::e($k) . '" data-mcs-cost="' . (int) $p['credits'] . '" data-mcs-kinds="' . self::e(implode(',', $p['kinds'])) . '"'
                 . ($disabled ? ' disabled' : '') . ($first && !$disabled ? ' checked' : '') . '>'
                 . '<span class="mcs-profile-head"><span class="mcs-profile-ico">' . Ui::ico($p['icon'] ?? 'radar') . '</span><strong>' . self::e($p['label']) . '</strong>'
-                . '<span class="mcs-profile-cost">' . ((int) $p['credits'] > 0 ? self::e(Text::fa((int) $p['credits'])) . ' اعتبار' : 'رایگان') . '</span></span>'
+                . '<span class="mcs-profile-cost">' . ((int) $p['credits'] > 0 ? Lang::t('{n} اعتبار', ['n' => self::e(Text::fa((int) $p['credits']))]) : Lang::t('رایگان')) . '</span></span>'
                 . '<span class="mcs-profile-desc">' . self::e($p['desc']) . (Catalog::risk($p) === 'heavy' ? ' ' . Ui::chip('درخواست زیاد به هدف', 'warn') : '') . '</span>'
-                . '<span class="mcs-profile-meta">' . Ui::ico('clock') . self::e($p['eta']) . ' · ' . self::e(implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $p['kinds'])))
+                . '<span class="mcs-profile-meta">' . Ui::ico('clock') . self::e($p['eta']) . ' · ' . self::e(self::kinds($p['kinds']))
                     . ($why !== '' ? ' · ' . Ui::ico('lock') . self::e($why) : '') . '</span></label>';
             $first = $first && $disabled;
         }
-        $cards .= '</fieldset>' . (\McSec\Recipes::allowed($cid) ? '<p class="mcs-help">' . Ui::ico('layers') . 'ترکیب دیگری می‌خواهید؟ <a href="index.php?m=mcsec&amp;p=recipes">اسکن سفارشی خودتان را بسازید</a>.</p>' : '');
+        $cards .= '</fieldset>' . (\McSec\Recipes::allowed($cid) ? '<p class="mcs-help">' . Ui::ico('layers') . Lang::t('ترکیب دیگری می‌خواهید؟ <a href="index.php?m=mcsec&amp;p=recipes">اسکن سفارشی خودتان را بسازید</a>.') . '</p>' : '');
         $acc = Accounts::get($cid);
         $terms = (int) $acc->terms_at === 0 ? '<label class="mcs-check mcs-terms"><input type="checkbox" name="terms" value="1" required><span>' . self::e(Settings::get('terms_text')) . '</span></label>' : '';
-        $submit = '<div class="mcs-launch-foot"><button type="submit" class="btn btn-primary btn-lg" data-mcs-launch>' . Ui::ico('play') . '<span data-mcs-launch-text>شروع اسکن</span></button>'
-            . '<span class="mcs-muted mcs-small" data-mcs-balance="' . (int) $bal['total'] . '">مانده‌ی اعتبار: ' . self::e(Text::fa($bal['total'])) . '</span></div>'
-            . '<noscript><p class="mcs-help">هزینه‌ی کل = هزینه‌ی نوع اسکن × تعداد دارایی‌ها (بازه‌ی IP به ازای هر ۱۶ آدرس).</p></noscript>';
+        $submit = '<div class="mcs-launch-foot"><button type="submit" class="btn btn-primary btn-lg" data-mcs-launch>' . Ui::ico('play') . '<span data-mcs-launch-text>' . Lang::t('شروع اسکن') . '</span></button>'
+            . '<span class="mcs-muted mcs-small" data-mcs-balance="' . (int) $bal['total'] . '">' . Lang::t('مانده‌ی اعتبار: {n}', ['n' => self::e(Text::fa($bal['total']))]) . '</span></div>'
+            . '<noscript><p class="mcs-help">' . Lang::t('هزینه‌ی کل = هزینه‌ی نوع اسکن × تعداد دارایی‌ها (بازه‌ی IP به ازای هر ۱۶ آدرس).') . '</p></noscript>';
         return Ui::card(Ui::form($ctx, 'scans', 'scan_start', $assets . $cards . $terms . $submit, '', 'mcs-launcher'), 'اسکن تازه', 'play', '', '" id="new');
     }
 
@@ -113,30 +120,30 @@ final class ScanViews
     public static function recipes(array $ctx): string
     {
         $cid = $ctx['who']['client_id'];
-        $guide = '<p>در حالت پیشرفته خودتان انتخاب می‌کنید کدام ابزارها روی دارایی‌تان اجرا شوند. اسکنی که می‌سازید ذخیره می‌شود و مثل اسکن‌های آماده در «اسکن‌ها» و «زمان‌بندی‌ها» دیده می‌شود.</p>'
-            . '<p>ترتیب اجرا را خودمان می‌چینیم (اول پیدا کردن صفحه‌ها، بعد سنجیدن آن‌ها). هزینه = جمع هزینه‌ی ابزارها برای هر دارایی. اسکن فقط روی دارایی تأییدشده‌ی خودتان اجرا می‌شود و سرعت ابزارها از حد ایمن بالاتر نمی‌رود.</p>';
+        $guide = '<p>' . Lang::t('در حالت پیشرفته خودتان انتخاب می‌کنید کدام ابزارها روی دارایی‌تان اجرا شوند. اسکنی که می‌سازید ذخیره می‌شود و مثل اسکن‌های آماده در «اسکن‌ها» و «زمان‌بندی‌ها» دیده می‌شود.') . '</p>'
+            . '<p>' . Lang::t('ترتیب اجرا را خودمان می‌چینیم (اول پیدا کردن صفحه‌ها، بعد سنجیدن آن‌ها). هزینه = جمع هزینه‌ی ابزارها برای هر دارایی. اسکن فقط روی دارایی تأییدشده‌ی خودتان اجرا می‌شود و سرعت ابزارها از حد ایمن بالاتر نمی‌رود.') . '</p>';
         if (!\McSec\Recipes::allowed($cid)) {
-            return Ui::guide($guide, true) . Ui::card(Ui::emptyState('layers', 'اسکن سفارشی برای حساب‌های دارای پلن است', 'با پلن امنیت سایبری می‌توانید از ابزارهای اسکن، ترکیب دلخواه خودتان را بسازید.',
-                '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=credits">دیدن پلن و اعتبار</a>'));
+            return Ui::guide($guide, true) . Ui::card(Ui::emptyState('layers', 'اسکن سفارشی برای حساب‌های دارای پلن است', Lang::t('با پلن امنیت سایبری می‌توانید از ابزارهای اسکن، ترکیب دلخواه خودتان را بسازید.'),
+                '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=credits">' . Lang::t('دیدن پلن و اعتبار') . '</a>'));
         }
         $mine = \McSec\Recipes::forClient($cid);
         $out = Ui::guide($guide, !$mine);
         if (isset($_GET['saved'])) {
-            $out .= Ui::alert('success', 'اسکن سفارشی ذخیره شد. برای اجرا به <a href="index.php?m=mcsec&amp;p=scans#new">اسکن تازه</a> بروید و آن را انتخاب کنید.', 'check');
+            $out .= Ui::alert('success', Lang::t('اسکن سفارشی ذخیره شد. برای اجرا به <a href="index.php?m=mcsec&amp;p=scans#new">اسکن تازه</a> بروید و آن را انتخاب کنید.'), 'check');
         }
         if ($mine) {
             $rows = '';
             foreach ($mine as $r) {
                 $p = \McSec\Recipes::profile($r);
-                $act = $ctx['manage'] ? '<div class="mcs-actions"><a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=recipes&amp;edit=' . (int) $r->id . '#build">ویرایش</a>'
-                    . Ui::form($ctx, 'recipes', 'recipe_remove', '<input type="hidden" name="id" value="' . (int) $r->id . '"><button type="submit" class="btn btn-default btn-sm">حذف</button>', 'اسکن سفارشی «' . $r->name . '» حذف شود؟', 'mcs-inline') . '</div>' : '';
+                $act = $ctx['manage'] ? '<div class="mcs-actions"><a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=recipes&amp;edit=' . (int) $r->id . '#build">' . Lang::t('ویرایش') . '</a>'
+                    . Ui::form($ctx, 'recipes', 'recipe_remove', '<input type="hidden" name="id" value="' . (int) $r->id . '"><button type="submit" class="btn btn-default btn-sm">' . Lang::t('حذف') . '</button>', Lang::t('اسکن سفارشی «{name}» حذف شود؟', ['name' => $r->name]), 'mcs-inline') . '</div>' : '';
                 $rows .= '<tr>' . Ui::td('نام', '<strong dir="auto">' . self::e($r->name) . '</strong>' . (!$p['enabled'] ? ' ' . Ui::chip('یکی از ابزارها در دسترس نیست', 'warn') : ''))
                     . Ui::td('ابزارها', Ui::ltr(implode(' → ', array_map(fn ($t) => Catalog::TOOLS[$t]['label'], $p['tools']))) . (Catalog::risk($p) === 'heavy' ? ' ' . Ui::chip('درخواست زیاد به هدف', 'warn') : ''))
-                    . Ui::td('برای', self::e(implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $p['kinds']))))
-                    . Ui::td('هزینه', self::e(Text::fa(\McSec\Rules::cost($cid, (int) $p['credits'])) . ' اعتبار برای هر دارایی')) . Ui::td('', $act) . '</tr>';
+                    . Ui::td('برای', self::e(self::kinds($p['kinds'])))
+                    . Ui::td('هزینه', self::e(Lang::t('{n} اعتبار برای هر دارایی', ['n' => Text::fa(\McSec\Rules::cost($cid, (int) $p['credits']))]))) . Ui::td('', $act) . '</tr>';
             }
             $out .= Ui::card(Ui::table(['نام', 'ابزارها', 'برای', 'هزینه', ''], $rows), 'اسکن‌های سفارشی شما', 'layers',
-                '<a class="btn btn-primary btn-sm" href="index.php?m=mcsec&amp;p=scans#new">' . Ui::ico('play') . 'اجرا</a>');
+                '<a class="btn btn-primary btn-sm" href="index.php?m=mcsec&amp;p=scans#new">' . Ui::ico('play') . Lang::t('اجرا') . '</a>');
         }
         if (!$ctx['manage']) {
             return $out;
@@ -146,9 +153,9 @@ final class ScanViews
         $chosen = $edit ? \McSec\Db::decode((string) $edit->options, []) : [];
         $tools = \McSec\Recipes::tools();
         if (!$tools) {
-            return $out . Ui::card('<p class="mcs-muted">فعلاً ابزاری برای اسکن سفارشی در دسترس نیست. کمی بعد دوباره سر بزنید.</p>', 'ساختن اسکن سفارشی', 'layers');
+            return $out . Ui::card('<p class="mcs-muted">' . Lang::t('فعلاً ابزاری برای اسکن سفارشی در دسترس نیست. کمی بعد دوباره سر بزنید.') . '</p>','ساختن اسکن سفارشی', 'layers');
         }
-        $list = '<fieldset class="mcs-tools"><legend>' . Ui::ico('layers') . 'کدام ابزارها؟ (تا ' . self::e(Text::fa(\McSec\Recipes::MAX_TOOLS)) . ' ابزار)</legend>';
+        $list = '<fieldset class="mcs-tools"><legend>' . Ui::ico('layers') . Lang::t('کدام ابزارها؟ (تا {n} ابزار)', ['n' => self::e(Text::fa(\McSec\Recipes::MAX_TOOLS))]) . '</legend>';
         foreach ($tools as $name => $t) {
             $opts = '';
             foreach (\McSec\Recipes::OPTIONS[$name] ?? [] as $o => [$label, $choices]) {
@@ -157,17 +164,41 @@ final class ScanViews
                     . Ui::select('opt[' . $name . '][' . $o . ']', array_map(fn ($c) => $c[0], $choices), (string) ($chosen[$name][$o] ?? array_key_first($choices)), $id) . '</label>';
             }
             $list .= '<div class="mcs-tool"><label class="mcs-check"><input type="checkbox" name="tools[]" value="' . self::e($name) . '"' . (in_array($name, $has, true) ? ' checked' : '') . '>'
-                . '<span><strong>' . Ui::ltr($t['label']) . '</strong> ' . self::e($t['what']) . '<small>' . self::e(Text::fa((int) $t['credits']) . ' اعتبار · ' . Catalog::RISK[$t['risk']] . ' · برای ' . implode('، ', array_map(fn ($x) => Assets::KINDS[$x] ?? $x, $t['kinds']))) . '</small></span></label>'
+                . '<span><strong>' . Ui::ltr($t['label']) . '</strong> ' . self::e($t['what']) . '<small>' . self::e(Lang::t('{n} اعتبار · {risk} · برای {kinds}', ['n' => Text::fa((int) $t['credits']), 'risk' => Lang::t(Catalog::RISK[$t['risk']]), 'kinds' => self::kinds($t['kinds'])])) . '</small></span></label>'
                 . ($opts !== '' ? '<div class="mcs-tool-opts">' . $opts . '</div>' : '') . '</div>';
         }
         $list .= '</fieldset>';
         $form = Ui::form($ctx, 'recipes', 'recipe_save', ($edit ? '<input type="hidden" name="id" value="' . (int) $edit->id . '">' : '')
-            . Ui::field('mcs-rname', 'نام این اسکن', '<input class="form-control" id="mcs-rname" name="name" maxlength="80" dir="auto" value="' . self::e($edit->name ?? '') . '" placeholder="مثلاً بررسی هفتگی فروشگاه">')
-            . $list . '<p class="mcs-help">ابزارهایی که نوع دارایی مشترک ندارند (مثلاً یکی فقط دامنه و دیگری فقط IP) با هم ذخیره نمی‌شوند.</p>'
-            . '<div class="mcs-actions"><button type="submit" class="btn btn-primary">' . ($edit ? 'ذخیره‌ی تغییرها' : 'ذخیره‌ی اسکن سفارشی') . '</button>'
-            . ($edit ? '<a class="btn btn-default" href="index.php?m=mcsec&amp;p=recipes">انصراف</a>' : '') . '</div>');
-        return $out . Ui::card($form, $edit ? 'ویرایش «' . $edit->name . '»' : 'ساختن اسکن سفارشی', 'layers', '', '" id="build');
+            . Ui::field('mcs-rname', 'نام این اسکن', '<input class="form-control" id="mcs-rname" name="name" maxlength="80" dir="auto" value="' . self::e($edit->name ?? '') . '" placeholder="' . self::e(Lang::t('مثلاً بررسی هفتگی فروشگاه')) . '">')
+            . $list . '<p class="mcs-help">' . Lang::t('ابزارهایی که نوع دارایی مشترک ندارند (مثلاً یکی فقط دامنه و دیگری فقط IP) با هم ذخیره نمی‌شوند.') . '</p>'
+            . '<div class="mcs-actions"><button type="submit" class="btn btn-primary">' . ($edit ? Lang::t('ذخیره‌ی تغییرها') : Lang::t('ذخیره‌ی اسکن سفارشی')) . '</button>'
+            . ($edit ? '<a class="btn btn-default" href="index.php?m=mcsec&amp;p=recipes">' . Lang::t('انصراف') . '</a>' : '') . '</div>');
+        return $out . Ui::card($form, $edit ? Lang::t('ویرایش «{name}»', ['name' => $edit->name]) : 'ساختن اسکن سفارشی', 'layers', '', '" id="build');
     }
+    /**
+     * The path of a scan as steps for Charts::pipeline: queue, getting to know the asset (engines that discover first),
+     * the tools as one step (their names shown, their state not guessed one by one), reading the result.
+     * @return array{0:array<int,array{label:string,sub?:string}>,1:int,2:string} steps, active index, state
+     */
+    public static function path(object $s, array $profile): array
+    {
+        $tools = array_values(array_filter(array_map(fn ($t) => Catalog::TOOLS[$t]['label'] ?? '', (array) ($profile['tools'] ?? []))));
+        $builtin = (string) $s->engine === 'builtin';
+        $steps = [['label' => 'در صف']];
+        if (!$builtin) {
+            $steps[] = ['label' => 'شناخت دارایی'];
+        }
+        $steps[] = ['label' => $builtin ? 'بررسی‌های پایه' : 'اجرای ابزارها', 'sub' => $tools ? implode(' ', array_map(fn ($t) => '<bdi dir="ltr" class="mcs-tag">' . self::e($t) . '</bdi>', $tools)) : ''];
+        $steps[] = ['label' => 'خواندن و تحلیل نتیجه'];
+        $toolStep = $builtin ? 1 : 2;
+        $p = (int) $s->progress;
+        $active = (string) $s->status === 'queued' || (int) $s->started_at === 0 ? 0 : ($p <= 2 && !$builtin ? 1 : ($p < 96 ? $toolStep : $toolStep + 1));
+        $state = match ((string) $s->status) {
+            'completed' => 'done', 'failed' => 'fail', 'cancelled' => 'stop', default => 'run',
+        };
+        return [$steps, $active, $state];
+    }
+
     public static function detail(array $ctx): string
     {
         $cid = $ctx['who']['client_id'];
@@ -182,54 +213,63 @@ final class ScanViews
         // a scan of the real server behind a CDN domain says which domain it is for
         $for = $asset && $asset->kind === 'ip' ? Db::rows(Db::table('mod_mcsec_assets')->where('client_id', $cid)->where('origin_id', $asset->id)->where('status', '!=', 'removed')->limit(5)) : [];
         if ($for) {
-            $out .= '<p class="mcs-small mcs-muted">سرور اصلی ' . implode('، ', array_map(fn ($d) => Ui::ltr($d->value), $for)) . ' (پشت CDN): اسکن‌هایی که درگاه‌ها را می‌سنجند روی این IP اجرا می‌شوند، نه سرورهای CDN.</p>';
+            $out .= '<p class="mcs-small mcs-muted">' . Lang::t('سرور اصلی {domains} (پشت CDN): اسکن‌هایی که درگاه‌ها را می‌سنجند روی این IP اجرا می‌شوند، نه سرورهای CDN.', ['domains' => Lang::join(array_map(fn ($d) => Ui::ltr($d->value), $for))]) . '</p>';
         }
         if (isset($_GET['started']) && in_array($s->status, ['queued', 'running'], true)) {
-            $out .= Ui::alert('success', 'اسکن ثبت شد' . ((int) $s->credits > 0 ? ' و ' . self::e(Text::fa((int) $s->credits)) . ' اعتبار کم شد' : '') . '. می‌توانید این صفحه را ببندید؛ پس از پایان خبرتان می‌کنیم.', 'check');
+            $out .= Ui::alert('success', (int) $s->credits > 0
+                ? Lang::t('اسکن ثبت شد و {n} اعتبار کم شد. می‌توانید این صفحه را ببندید؛ پس از پایان خبرتان می‌کنیم.', ['n' => self::e(Text::fa((int) $s->credits))])
+                : Lang::t('اسکن ثبت شد. می‌توانید این صفحه را ببندید؛ پس از پایان خبرتان می‌کنیم.'), 'check');
         }
         $live = in_array($s->status, ['queued', 'running'], true);
         if ($live) {
             $body = '<div data-mcs-progress="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '&amp;progress=1">'
                 . Ui::progress((int) $s->progress, $s->status === 'queued' ? 'در صف؛ به‌زودی شروع می‌شود' : (string) $s->stage, $s->status === 'running')
-                . '<p class="mcs-small mcs-muted">زمان معمول این اسکن: ' . self::e($profile['eta']) . '. ' . ($s->status === 'running' ? 'شروع: ' . self::e(Views::when((int) $s->started_at)) : 'در صف از ' . self::e(Views::when((int) $s->queued_at))) . '</p>'
-                . '<noscript><p class="mcs-help">برای دیدن پیشرفت تازه، صفحه را دوباره باز کنید.</p></noscript></div>';
+                . Charts::pipeline(...self::path($s, $profile))
+                . '<p class="mcs-small mcs-muted">' . Lang::t('زمان معمول این اسکن: {eta}.', ['eta' => self::e($profile['eta'])]) . ' '
+                    . ($s->status === 'running' ? Lang::t('شروع: {when}', ['when' => self::e(Views::when((int) $s->started_at))]) : Lang::t('در صف از {when}', ['when' => self::e(Views::when((int) $s->queued_at))])) . '</p>'
+                . '<noscript><p class="mcs-help">' . Lang::t('برای دیدن پیشرفت تازه، صفحه را دوباره باز کنید.') . '</p></noscript></div>';
             if ($ctx['manage']) {
-                $body .= Ui::form($ctx, 'scan', 'scan_cancel', '<input type="hidden" name="scan" value="' . (int) $s->id . '"><button type="submit" class="btn btn-default btn-sm">' . Ui::ico('x') . 'لغو اسکن</button>',
+                $body .= Ui::form($ctx, 'scan', 'scan_cancel', '<input type="hidden" name="scan" value="' . (int) $s->id . '"><button type="submit" class="btn btn-default btn-sm">' . Ui::ico('x') . Lang::t('لغو اسکن') . '</button>',
                     $s->status === 'queued' ? 'این اسکن لغو شود؟ اعتبارش برمی‌گردد.' : 'این اسکن در حال اجراست؛ با لغو، اعتبار مصرف‌شده برنمی‌گردد. لغو شود؟', 'mcs-inline', false, '&amp;id=' . (int) $s->id);
             }
             $out .= Ui::card($body, 'پیشرفت', 'radar');
         } elseif ($s->status === 'failed') {
-            $out .= Ui::alert('danger', self::e($s->error) . ($s->error_ref !== '' ? ' کد پیگیری: ' . Ui::ltr($s->error_ref) : '')
-                . ((int) $s->credits > 0 && Settings::bool('refund_on_fail') ? ' اعتبار این اسکن برگشت داده شد.' : ''), 'alert');
+            $out .= Ui::alert('danger', self::e($s->error) . ($s->error_ref !== '' ? ' ' . Lang::t('کد پیگیری: {ref}', ['ref' => Ui::ltr($s->error_ref)]) : '')
+                . ((int) $s->credits > 0 && Settings::bool('refund_on_fail') ? ' ' . Lang::t('اعتبار این اسکن برگشت داده شد.') : '') . ' ' . SupportViews::link('&topic=scan&scan=' . (int) $s->id), 'alert');
+        }
+        if (!$live && (int) $s->started_at > 0) {
+            $out .= Ui::card(Charts::pipeline(...self::path($s, $profile)), 'مسیر این اسکن', 'radar');
         }
         if ($s->status === 'completed') {
             $sum = Scans::summary($s);
             $partial = trim((string) ($sum['partial'] ?? ''));
             if ($partial !== '') {
-                $out .= Ui::alert('warning', '<strong>ارزیابی ناقص.</strong> ' . Ui::plain($partial) . ' این اسکن «سالم» به حساب نمی‌آید و یافته‌هایی که این بار سنجیده نشدند باز می‌مانند تا اسکن کامل بعدی.'
-                    . ((int) ($sum['refunded'] ?? 0) > 0 ? ' ' . self::e(Text::fa((int) $sum['refunded'])) . ' اعتبار این اسکن به حسابتان برگشت.' : '')
-                    . (trim(Settings::get('scanner_ips')) !== '' ? ' <a href="index.php?m=mcsec&amp;p=scanner" target="_blank" rel="noopener">IPهای اسکنر برای مجاز کردن</a>' : ''), 'alert');
+                $out .= Ui::alert('warning', Lang::t('<strong>ارزیابی ناقص.</strong> {why} این اسکن «سالم» به حساب نمی‌آید و یافته‌هایی که این بار سنجیده نشدند باز می‌مانند تا اسکن کامل بعدی.', ['why' => Ui::plain($partial)])
+                    . ((int) ($sum['refunded'] ?? 0) > 0 ? ' ' . Lang::t('{n} اعتبار این اسکن به حسابتان برگشت.', ['n' => self::e(Text::fa((int) $sum['refunded']))]) : '')
+                    . (trim(Settings::get('scanner_ips')) !== '' ? ' <a href="index.php?m=mcsec&amp;p=scanner" target="_blank" rel="noopener">' . Lang::t('IPهای اسکنر برای مجاز کردن') . '</a>' : '') . ' ' . SupportViews::link('&topic=scan&scan=' . (int) $s->id), 'alert');
             }
-            $out .= '<div class="mcs-grid3">' . Ui::card('<ul class="mcs-diff"><li><strong>' . self::e(Text::fa((int) ($sum['new'] ?? 0))) . '</strong><span>تازه</span></li><li class="is-ok"><strong>' . self::e(Text::fa((int) ($sum['fixed'] ?? 0)))
-                . '</strong><span>رفع‌شده</span></li><li class="is-warn"><strong>' . self::e(Text::fa((int) ($sum['reopened'] ?? 0))) . '</strong><span>دوباره دیده‌شده</span></li></ul>', 'نسبت به قبل', 'activity')
+            $out .= '<div class="mcs-grid3">' . Ui::card('<ul class="mcs-diff"><li><strong>' . self::e(Text::fa((int) ($sum['new'] ?? 0))) . '</strong><span>' . Lang::t('تازه') . '</span></li><li class="is-ok"><strong>' . self::e(Text::fa((int) ($sum['fixed'] ?? 0)))
+                . '</strong><span>' . Lang::t('رفع‌شده') . '</span></li><li class="is-warn"><strong>' . self::e(Text::fa((int) ($sum['reopened'] ?? 0))) . '</strong><span>' . Lang::t('دوباره دیده‌شده') . '</span></li></ul>', 'نسبت به قبل', 'activity')
                 . Ui::card(Ui::sevCounts((array) ($sum['open'] ?? []), 'index.php?m=mcsec&p=findings&asset=' . (int) $s->asset_id), 'یافته‌های باز این دارایی', 'bug')
                 . Ui::card(Ui::facts(['شروع' => self::e(Text::date((int) $s->started_at)), 'پایان' => self::e(Text::date((int) $s->finished_at)), 'مدت' => self::e(self::duration((int) $s->finished_at - (int) $s->started_at)),
-                    'موتور' => self::e(Catalog::engineLabel((string) $s->engine)), 'سطح دیده‌شده' => self::e(Text::fa((int) ($sum['surface_seen'] ?? 0)) . ' مورد' . ((int) ($sum['surface_new'] ?? 0) > 0 ? '، ' . Text::fa((int) $sum['surface_new']) . ' تازه' : ''))]), 'جزئیات', 'info') . '</div>';
+                    'موتور' => self::e(Catalog::engineLabel((string) $s->engine)), 'سطح دیده‌شده' => self::e((int) ($sum['surface_new'] ?? 0) > 0
+                        ? Lang::t('{n} مورد، {new} تازه', ['n' => Text::fa((int) ($sum['surface_seen'] ?? 0)), 'new' => Text::fa((int) $sum['surface_new'])])
+                        : Lang::t('{n} مورد', ['n' => Text::fa((int) ($sum['surface_seen'] ?? 0))]))]), 'جزئیات', 'info') . '</div>';
             $new = Db::rows(Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('first_scan_id', $s->id)->orderByRaw("CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END DESC")->limit(30));
             if ($new) {
                 $list = '';
                 foreach ($new as $f) {
                     $list .= '<li><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '">' . Ui::sev((string) $f->severity) . '<span class="mcs-todo-title">' . self::e($f->title) . '</span></a><span class="mcs-todo-meta">' . Ui::ltr($f->location) . '</span></li>';
                 }
-                $out .= Ui::card('<ol class="mcs-todo">' . $list . '</ol>', 'یافته‌هایی که این اسکن برای اولین بار دید', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings&amp;scan=' . (int) $s->id . '&amp;status=all">همه</a>');
+                $out .= Ui::card('<ol class="mcs-todo">' . $list . '</ol>', 'یافته‌هایی که این اسکن برای اولین بار دید', 'bug', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=findings&amp;scan=' . (int) $s->id . '&amp;status=all">' . Lang::t('همه') . '</a>');
             } elseif ((int) ($sum['seen'] ?? 0) === 0 && $s->profile === 'surface') {
                 // discovery does not look for vulnerabilities: "no problem found" would be a false reassurance
-                $out .= Ui::card(Ui::emptyState('radar', 'نقشه‌ی سطح حمله آماده است', 'درگاه پرخطری باز نبود. این اسکن دنبال آسیب‌پذیری نمی‌گردد؛ برای آن، «اسکن آسیب‌پذیری» بگیرید.'));
+                $out .= Ui::card(Ui::emptyState('radar', 'نقشه‌ی سطح حمله آماده است', Lang::t('درگاه پرخطری باز نبود. این اسکن دنبال آسیب‌پذیری نمی‌گردد؛ برای آن، «اسکن آسیب‌پذیری» بگیرید.')));
             } elseif ((int) ($sum['seen'] ?? 0) === 0 && $partial !== '') {
                 // an incomplete assessment is never "healthy"
-                $out .= Ui::card(Ui::emptyState('alert', 'در بخشی که سنجیده شد مشکلی دیده نشد', 'ولی همه‌چیز سنجیده نشد (بالا را ببینید). پس از رفع مانع، «اسکن تازه» بگیرید.'));
+                $out .= Ui::card(Ui::emptyState('alert', 'در بخشی که سنجیده شد مشکلی دیده نشد', Lang::t('ولی همه‌چیز سنجیده نشد (بالا را ببینید). پس از رفع مانع، «اسکن تازه» بگیرید.')));
             } elseif ((int) ($sum['seen'] ?? 0) === 0) {
-                $out .= Ui::card(Ui::emptyState('shield-check', 'این اسکن مشکلی پیدا نکرد', 'آفرین. با زمان‌بندی، اسکن‌های بعدی را خودکار بگیرید.'));
+                $out .= Ui::card(Ui::emptyState('shield-check', 'این اسکن مشکلی پیدا نکرد', Lang::t('آفرین. با زمان‌بندی، اسکن‌های بعدی را خودکار بگیرید.')));
             }
             $reports = Db::rows(Db::table('mod_mcsec_reports')->where('client_id', $cid)->where('scan_id', $s->id)->orderByDesc('id'));
             $rep = '';
@@ -238,12 +278,12 @@ final class ScanViews
             }
             $aiOk = \McSec\Ai::configured() && Plans::limits($cid)['ai'];
             $form = $ctx['manage'] && $aiOk ? Ui::form($ctx, 'scan', 'report_create', '<input type="hidden" name="scan" value="' . (int) $s->id . '"><input type="hidden" name="ai" value="1"><button type="submit" class="btn btn-primary">'
-                . Ui::ico('sparkle') . 'گزارش هوش مصنوعی' . (\McSec\Rules::cost($cid, Settings::int('ai_report_cost')) > 0 ? ' · ' . self::e(Text::fa(\McSec\Rules::cost($cid, Settings::int('ai_report_cost')))) . ' اعتبار' : '') . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $s->id) : '';
-            $out .= Ui::card(($rep !== '' ? '<ul class="mcs-plain">' . $rep . '</ul>' : '<p class="mcs-muted">گزارش پایه پس از پایان اسکن خودکار ساخته می‌شود.</p>') . $form, 'گزارش', 'file');
+                . Ui::ico('sparkle') . (\McSec\Rules::cost($cid, Settings::int('ai_report_cost')) > 0 ? Lang::t('گزارش هوش مصنوعی · {n} اعتبار', ['n' => self::e(Text::fa(\McSec\Rules::cost($cid, Settings::int('ai_report_cost'))))]) : Lang::t('گزارش هوش مصنوعی')) . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $s->id) : '';
+            $out .= Ui::card(($rep !== '' ? '<ul class="mcs-plain">' . $rep . '</ul>' : '<p class="mcs-muted">' . Lang::t('گزارش پایه پس از پایان اسکن خودکار ساخته می‌شود.') . '</p>') . $form, 'گزارش', 'file');
         }
         if ($ctx['manage'] && in_array($s->status, ['completed', 'failed', 'cancelled'], true) && $asset && $asset->status === 'verified') {
             Views::$pageActions = Ui::form($ctx, 'scans', 'scan_start', '<input type="hidden" name="asset" value="' . (int) $s->asset_id . '"><input type="hidden" name="profile" value="' . self::e($s->profile) . '">'
-                . '<button type="submit" class="btn btn-default">' . Ui::ico('refresh') . 'دوباره' . ((int) (Catalog::get((string) $s->profile)['credits'] ?? 0) > 0 ? ' · ' . self::e(Text::fa((int) Catalog::get((string) $s->profile)['credits'])) . ' اعتبار' : '') . '</button>', '', 'mcs-inline');
+                . '<button type="submit" class="btn btn-default">' . Ui::ico('refresh') . ((int) (Catalog::get((string) $s->profile)['credits'] ?? 0) > 0 ? Lang::t('دوباره · {n} اعتبار', ['n' => self::e(Text::fa((int) Catalog::get((string) $s->profile)['credits']))]) : Lang::t('دوباره')) . '</button>', '', 'mcs-inline');
         }
         return $out;
     }
@@ -254,12 +294,12 @@ final class ScanViews
             return '—';
         }
         if ($sec < 120) {
-            return Text::fa($sec) . ' ثانیه';
+            return Lang::t('{n} ثانیه', ['n' => Text::fa($sec)]);
         }
         if ($sec < 7200) {
-            return Text::fa((int) round($sec / 60)) . ' دقیقه';
+            return Lang::t('{n} دقیقه', ['n' => Text::fa((int) round($sec / 60))]);
         }
-        return Text::fa(round($sec / 3600, 1)) . ' ساعت';
+        return Lang::t('{n} ساعت', ['n' => Text::fa(round($sec / 3600, 1))]);
     }
 
     public static function schedules(array $ctx): string
@@ -267,17 +307,17 @@ final class ScanViews
         $cid = $ctx['who']['client_id'];
         $list = Schedules::forClient($cid);
         $lim = Plans::limits($cid);
-        $out = Ui::guide('<p>اسکن‌های تکراری را این‌جا تنظیم کنید تا هر تغییر (یافته‌ی تازه، درگاه تازه، گواهی رو به انقضا) خودکار پیدا و خبرش به شما داده شود. هر اجرا به اندازه‌ی همان اسکن اعتبار مصرف می‌کند؛ اگر اعتبار کافی نباشد، زمان‌بندی متوقف و خبرتان می‌شود.</p>'
-            . '<p>اگر «همه‌ی دارایی‌های تأییدشده» را انتخاب کنید، دارایی‌هایی که بعداً بیفزایید هم خودکار در زمان‌بندی می‌آیند.</p>', !$list);
+        $out = Ui::guide('<p>' . Lang::t('اسکن‌های تکراری را این‌جا تنظیم کنید تا هر تغییر (یافته‌ی تازه، درگاه تازه، گواهی رو به انقضا) خودکار پیدا و خبرش به شما داده شود. هر اجرا به اندازه‌ی همان اسکن اعتبار مصرف می‌کند؛ اگر اعتبار کافی نباشد، زمان‌بندی متوقف و خبرتان می‌شود.') . '</p>'
+            . '<p>' . Lang::t('اگر «همه‌ی دارایی‌های تأییدشده» را انتخاب کنید، دارایی‌هایی که بعداً بیفزایید هم خودکار در زمان‌بندی می‌آیند.') . '</p>', !$list);
         $rows = '';
         foreach ($list as $s) {
             $asset = (int) $s->asset_id > 0 ? Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->value('value') : null;
-            $status = $s->status === 'active' ? Ui::chip('فعال', 'ok') : Ui::chip('متوقف: ' . (Schedules::PAUSE[$s->pause_reason] ?? 'متوقف'), 'warn');
+            $status = $s->status === 'active' ? Ui::chip('فعال', 'ok') : Ui::chip(Lang::t('متوقف: {why}', ['why' => Lang::t(Schedules::PAUSE[$s->pause_reason] ?? 'متوقف')]), 'warn');
             $actions = '';
             if ($ctx['manage']) {
                 $actions = Ui::form($ctx, 'schedules', 'schedule_toggle', '<input type="hidden" name="id" value="' . (int) $s->id . '"><input type="hidden" name="active" value="' . ($s->status === 'active' ? '0' : '1') . '">'
-                        . '<button type="submit" class="btn btn-default btn-sm">' . Ui::ico($s->status === 'active' ? 'pause' : 'play') . ($s->status === 'active' ? 'توقف' : 'ادامه') . '</button>', '', 'mcs-inline')
-                    . Ui::form($ctx, 'schedules', 'schedule_delete', '<input type="hidden" name="id" value="' . (int) $s->id . '"><button type="submit" class="btn btn-default btn-sm btn-danger-text">' . Ui::ico('trash') . '<span class="mcs-sr">حذف</span></button>',
+                        . '<button type="submit" class="btn btn-default btn-sm">' . Ui::ico($s->status === 'active' ? 'pause' : 'play') . ($s->status === 'active' ? Lang::t('توقف') : Lang::t('ادامه')) . '</button>', '', 'mcs-inline')
+                    . Ui::form($ctx, 'schedules', 'schedule_delete', '<input type="hidden" name="id" value="' . (int) $s->id . '"><button type="submit" class="btn btn-default btn-sm btn-danger-text">' . Ui::ico('trash') . '<span class="mcs-sr">' . Lang::t('حذف') . '</span></button>',
                         'این زمان‌بندی حذف شود؟', 'mcs-inline');
             }
             $rows .= '<tr>' . Ui::td('اسکن', self::e(Catalog::label((string) ($s->profile))))
@@ -299,7 +339,9 @@ final class ScanViews
         $profiles = [];
         foreach (Catalog::forClient($cid) as $k => $p) {
             if ($p['allowed']) {
-                $profiles[$k] = $p['label'] . ((int) $p['credits'] > 0 ? ' — ' . Text::fa((int) $p['credits']) . ' اعتبار هر اجرا' : ' — رایگان');
+                $profiles[$k] = (int) $p['credits'] > 0
+                    ? Lang::t('{scan} — {n} اعتبار هر اجرا', ['scan' => Lang::t((string) $p['label']), 'n' => Text::fa((int) $p['credits'])])
+                    : Lang::t('{scan} — رایگان', ['scan' => Lang::t((string) $p['label'])]);
             }
         }
         $freqs = [];
@@ -314,18 +356,18 @@ final class ScanViews
         }
         $dom = [];
         for ($d = 1; $d <= 28; $d++) {
-            $dom[(string) $d] = 'روز ' . Text::fa($d);
+            $dom[(string) $d] = Lang::t('روز {n}', ['n' => Text::fa($d)]);
         }
         $body = '<div class="mcs-form-row">' . Ui::field('mcs-sa', 'دارایی', Ui::select('asset', $assets, '0', 'mcs-sa'))
             . Ui::field('mcs-sp', 'نوع اسکن', Ui::select('profile', $profiles, isset($profiles['surface']) ? 'surface' : (string) array_key_first($profiles), 'mcs-sp')) . '</div>'
             . '<div class="mcs-form-row">' . Ui::field('mcs-sf', 'تکرار', Ui::select('freq', $freqs, isset($freqs['weekly']) ? 'weekly' : (string) array_key_first($freqs), 'mcs-sf'),
-                count($freqs) < 3 ? 'اسکن روزانه در پلن‌های بالاتر است.' : '')
+                count($freqs) < 3 ? Lang::t('اسکن روزانه در پلن‌های بالاتر است.') : '')
             . Ui::field('mcs-sw', 'روز هفته (برای هفتگی)', Ui::select('dow', array_map('strval', Schedules::DOW), '6', 'mcs-sw'))
             . Ui::field('mcs-sd', 'روز ماه (برای ماهانه)', Ui::select('dom', $dom, '1', 'mcs-sd'))
-            . Ui::field('mcs-sh', 'ساعت (به وقت تهران)', Ui::select('hour', $hours, '3', 'mcs-sh'), 'ساعت‌های کم‌بازدید شب برای سایت بهترند.') . '</div>'
-            . '<button type="submit" class="btn btn-primary">' . Ui::ico('calendar') . 'ساختن زمان‌بندی</button>';
+            . Ui::field('mcs-sh', 'ساعت (به وقت تهران)', Ui::select('hour', $hours, '3', 'mcs-sh'), Lang::t('ساعت‌های کم‌بازدید شب برای سایت بهترند.')) . '</div>'
+            . '<button type="submit" class="btn btn-primary">' . Ui::ico('calendar') . Lang::t('ساختن زمان‌بندی') . '</button>';
         $out .= count($assets) > 1 ? Ui::card(Ui::form($ctx, 'schedules', 'schedule_save', $body), 'زمان‌بندی تازه', 'plus')
-            : Ui::card(Ui::emptyState('globe', 'دارایی تأییدشده‌ای ندارید', 'زمان‌بندی پس از تأیید اولین دارایی ممکن است.', '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=assets#add">افزودن دارایی</a>'));
+            : Ui::card(Ui::emptyState('globe', 'دارایی تأییدشده‌ای ندارید', Lang::t('زمان‌بندی پس از تأیید اولین دارایی ممکن است.'), '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=assets#add">' . Lang::t('افزودن دارایی') . '</a>'));
         return $out;
     }
 }

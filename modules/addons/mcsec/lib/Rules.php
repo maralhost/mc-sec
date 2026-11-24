@@ -62,7 +62,7 @@ final class Rules
         $scope = ($in['scope'] ?? '') === 'client' ? 'client' : 'group';
         $target = (int) ($in['target'] ?? 0);
         if ($target <= 0 || ($scope === 'client' ? !Whmcs::client($target) : !isset(Whmcs::groups()[$target]))) {
-            return ['ok' => false, 'error' => $scope === 'client' ? 'حسابی با این شماره پیدا نشد.' : 'گروه مشتری را انتخاب کنید.'];
+            return ['ok' => false, 'error' => $scope === 'client' ? 'حسابی با این شماره پیدا نشد.' : 'گروه مشتری را انتخاب کنید.']; // i18n-skip (rules are made in the admin panel only)
         }
         $known = array_keys(Catalog::all(true));
         $profiles = array_values(array_intersect(array_filter(array_map('trim', explode(',', strtolower(Text::toAscii((string) ($in['profiles'] ?? ''))))), 'strlen'), $known));

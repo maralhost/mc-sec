@@ -8,6 +8,7 @@ use McSec\Clock;
 use McSec\Crypto;
 use McSec\Http;
 use McSec\Kv;
+use McSec\Lang;
 use McSec\Settings;
 use McSec\Trace;
 
@@ -103,12 +104,12 @@ final class Osmedeus implements Engine
     public function start(object $scan, object $asset, array $profile): array
     {
         if (Http::circuitOpen('osmedeus')) {
-            return ['ok' => false, 'error' => 'Osmedeus موقتاً در دسترس نیست', 'retry' => true];
+            return ['ok' => false, 'error' => Lang::t('Osmedeus موقتاً در دسترس نیست'), 'retry' => true];
         }
         $space = 'mcsec-c' . (int) $asset->client_id . '-a' . (int) $asset->id;
         $flow = self::flowFor($profile, $asset);
         if (!self::safe((string) $asset->value) || !self::safe($flow)) {
-            return ['ok' => false, 'error' => 'هدف یا workflow نویسه‌ی غیرمجاز دارد', 'retry' => false];
+            return ['ok' => false, 'error' => Lang::t('هدف یا workflow نویسه‌ی غیرمجاز دارد'), 'retry' => false];
         }
         $params = ['space_name' => $space, 'tactic' => 'default'];
         if ($asset->kind === 'domain') {
@@ -121,27 +122,27 @@ final class Osmedeus implements Engine
             $msg = (string) ($r['json']['message'] ?? $r['error'] ?? '');
             return ['ok' => false, 'error' => 'Osmedeus: HTTP ' . $r['status'] . ' ' . mb_substr($msg, 0, 160), 'retry' => $r['status'] === 0 || $r['status'] >= 500];
         }
-        return ['ok' => true, 'ref' => $uuid, 'meta' => ['space' => $space, 'flow' => $flow, 'job' => (string) ($r['json']['job_id'] ?? ''), 'since' => Clock::now()], 'progress' => 1, 'stage' => 'شروع ' . $flow];
+        return ['ok' => true, 'ref' => $uuid, 'meta' => ['space' => $space, 'flow' => $flow, 'job' => (string) ($r['json']['job_id'] ?? ''), 'since' => Clock::now()], 'progress' => 1, 'stage' => Lang::t('شروع {flow}', ['flow' => $flow])];
     }
 
     public function poll(object $scan, object $asset, array $profile): array
     {
         $r = $this->call('GET', '/runs/' . rawurlencode((string) $scan->backend_ref), null, 8);
         if (!$r['ok']) {
-            return $r['status'] === 404 ? ['status' => 'failed', 'error' => 'Osmedeus این اجرا را نمی‌شناسد'] : ['status' => 'running', 'stage' => 'در انتظار پاسخ Osmedeus'];
+            return $r['status'] === 404 ? ['status' => 'failed', 'error' => Lang::t('Osmedeus این اجرا را نمی‌شناسد')] : ['status' => 'running', 'stage' => Lang::t('در انتظار پاسخ Osmedeus')];
         }
         $run = (array) ($r['json']['data'] ?? []);
         $status = (string) ($run['status'] ?? 'running');
         $total = max(1, (int) ($run['total_steps'] ?? 0));
         $done = (int) ($run['completed_steps'] ?? 0);
         if ($status === 'completed') {
-            return ['status' => 'completed', 'progress' => 100, 'stage' => 'تمام شد'];
+            return ['status' => 'completed', 'progress' => 100, 'stage' => Lang::t('تمام شد')];
         }
         if ($status === 'failed' || $status === 'cancelled') {
             $err = (string) ($run['error_message'] ?? $status);
-            return ['status' => 'failed', 'error' => str_contains($err, 'context canceled') ? 'لغو شد' : 'Osmedeus: ' . mb_substr($err, 0, 160)];
+            return ['status' => 'failed', 'error' => str_contains($err, 'context canceled') ? Lang::t('لغو شد') : 'Osmedeus: ' . mb_substr($err, 0, 160)];
         }
-        $stage = 'گام ' . $done . ' از ' . $total;
+        $stage = Lang::t('گام {n} از {total}', ['n' => $done, 'total' => $total]);
         return ['status' => 'running', 'progress' => (int) max(2, min(97, floor(100 * $done / $total))), 'stage' => $stage];
     }
 
@@ -246,6 +247,7 @@ final class Osmedeus implements Engine
 
     public function health(): array
     {
+        // i18n-skip-begin (the admin's setup page only)
         if (!$this->configured()) {
             return ['ok' => false, 'message' => 'آدرس و کلید API (یا رمز) Osmedeus تنظیم نشده است.'];
         }
@@ -259,6 +261,7 @@ final class Osmedeus implements Engine
             return ['ok' => false, 'message' => 'Osmedeus در دسترس است ولی احراز هویت پذیرفته نشد (HTTP ' . $w['status'] . ').', 'version' => $ver, 'ms' => $h['ms']];
         }
         return ['ok' => true, 'message' => 'Osmedeus ' . $ver . ' در دسترس است.', 'version' => $ver, 'ms' => $h['ms']];
+        // i18n-skip-end
     }
 
     /** Installed flows (for the admin's workflow pick list). @return string[] */

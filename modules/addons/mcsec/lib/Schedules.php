@@ -47,7 +47,8 @@ final class Schedules
         $lim = Plans::limits($clientId);
         if (self::FREQ[$freq]['hours'] < $lim['min_interval_h']) {
             $allowed = array_keys(array_filter(self::FREQ, fn ($f) => $f['hours'] >= $lim['min_interval_h']));
-            return ['ok' => false, 'error' => 'در پلن فعلی کوتاه‌ترین فاصله‌ی اسکن ' . implode(' یا ', array_map(fn ($k) => self::FREQ[$k]['label'], $allowed)) . ' است.'];
+            $list = array_reduce($allowed, fn ($c, $k) => $c === null ? Lang::t(self::FREQ[$k]['label']) : Lang::t('{a} یا {b}', ['a' => $c, 'b' => Lang::t(self::FREQ[$k]['label'])]));
+            return ['ok' => false, 'error' => Lang::t('در پلن فعلی کوتاه‌ترین فاصله‌ی اسکن {list} است.', ['list' => (string) $list])];
         }
         $assetId = (int) ($d['asset'] ?? 0);
         if ($assetId > 0) {
@@ -56,7 +57,7 @@ final class Schedules
                 return ['ok' => false, 'error' => 'این دارایی پیدا نشد.'];
             }
             if (!in_array($a->kind, $p['kinds'], true)) {
-                return ['ok' => false, 'error' => '«' . $p['label'] . '» برای این نوع دارایی اجرا نمی‌شود.'];
+                return ['ok' => false, 'error' => Lang::t('«{scan}» برای این نوع دارایی اجرا نمی‌شود.', ['scan' => Lang::t((string) $p['label'])])];
             }
         }
         $row = [
@@ -73,7 +74,7 @@ final class Schedules
             Db::table('mod_mcsec_schedules')->where('id', $id)->update($row);
         } else {
             if (Db::table('mod_mcsec_schedules')->where('client_id', $clientId)->count() >= self::MAX_PER_CLIENT) {
-                return ['ok' => false, 'error' => 'حداکثر ' . Text::fa(self::MAX_PER_CLIENT) . ' زمان‌بندی دارید.'];
+                return ['ok' => false, 'error' => Lang::t('حداکثر {n} زمان‌بندی دارید.', ['n' => Text::fa(self::MAX_PER_CLIENT)])];
             }
             $dup = Db::table('mod_mcsec_schedules')->where('client_id', $clientId)->where('asset_id', $assetId)->where('profile', $profileKey)->exists();
             if ($dup) {
@@ -224,14 +225,15 @@ final class Schedules
                     }
                     continue;
                 }
-                $r = Scans::queue((int) $s->client_id, $a, (string) $s->profile, (int) $s->id, 0);
+                // no visitor here: the reason the customer is told later is written in the account's own language
+                $r = Lang::with(Lang::forClient((int) $s->client_id), fn () => Scans::queue((int) $s->client_id, $a, (string) $s->profile, (int) $s->id, 0));
                 if ($r['ok']) {
                     $out['queued'] += empty($r['again']) ? 1 : 0;
                 } elseif (isset($r['need'])) {
                     self::pause($s, 'credits', $r['error']);
                     $out['paused']++;
                     break;
-                } elseif (str_contains((string) $r['error'], 'پلن')) {
+                } elseif (!empty($r['plan'])) {
                     self::pause($s, 'plan', $r['error']);
                     $out['paused']++;
                     break;
@@ -244,17 +246,17 @@ final class Schedules
     private static function pause(object $s, string $reason, string $detail = ''): void
     {
         Db::table('mod_mcsec_schedules')->where('id', $s->id)->update(['status' => 'paused', 'pause_reason' => $reason]);
-        Notify::event((int) $s->client_id, 'schedule_paused', ['schedule_id' => (int) $s->id, 'profile' => (string) (Catalog::label((string) ($s->profile))),
-            'reason' => self::PAUSE[$reason] ?? $reason, 'detail' => $detail], 'sp:' . $s->id . ':' . Clock::today());
+        Lang::with(Lang::forClient((int) $s->client_id), fn () => Notify::event((int) $s->client_id, 'schedule_paused', ['schedule_id' => (int) $s->id, 'profile' => Lang::t(Catalog::label((string) ($s->profile))),
+            'reason' => Lang::t((string) (self::PAUSE[$reason] ?? $reason)), 'detail' => $detail], 'sp:' . $s->id . ':' . Clock::today()));
     }
 
     public static function describe(object $s): string
     {
         $h = Text::fa(sprintf('%02d:%02d', (int) $s->hour, ((int) $s->id * 7) % 50));
         return match ((string) $s->freq) {
-            'daily' => 'هر روز ساعت ' . $h,
-            'monthly' => 'روز ' . Text::fa((int) $s->dom) . ' هر ماه، ساعت ' . $h,
-            default => 'هر ' . (self::DOW[(int) $s->dow] ?? '') . ' ساعت ' . $h,
+            'daily' => Lang::t('هر روز ساعت {h}', ['h' => $h]),
+            'monthly' => Lang::t('روز {d} هر ماه، ساعت {h}', ['d' => Text::fa((int) $s->dom), 'h' => $h]),
+            default => Lang::t('هر {day} ساعت {h}', ['day' => Lang::t(self::DOW[(int) $s->dow] ?? ''), 'h' => $h]),
         };
     }
 }

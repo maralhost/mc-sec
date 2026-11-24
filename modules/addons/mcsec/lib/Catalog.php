@@ -120,7 +120,7 @@ final class Catalog
             ];
             $p['depth'] = self::risk($p) === 'heavy' ? 4 : 3;
             if ($p['desc'] === '') {
-                $p['desc'] = 'ابزارها: ' . implode('، ', array_map(fn ($t) => self::TOOLS[$t]['label'], $tools));
+                $p['desc'] = Lang::t('ابزارها: {tools}', ['tools' => Lang::join(array_map(fn ($t) => self::TOOLS[$t]['label'], $tools))]);
             }
             $out[$key] = $p;
         }
@@ -178,14 +178,15 @@ final class Catalog
         return Recipes::idOf($key) > 0 ? Recipes::find($key) : (self::all(true)[$key] ?? null);
     }
 
+    /** The name of a scan type in the current language (a name the admin or the customer wrote stays as written). */
     public static function label(string $key, string $default = ''): string
     {
-        return (string) (self::find($key)['label'] ?? ($default !== '' ? $default : $key));
+        return Lang::t((string) (self::find($key)['label'] ?? ($default !== '' ? $default : $key)));
     }
 
     public static function engineLabel(string $engine): string
     {
-        return ['builtin' => 'بررسی داخلی', 'oasm' => 'OASM', 'osmedeus' => 'Osmedeus'][$engine] ?? $engine;
+        return ['builtin' => Lang::t('بررسی داخلی'), 'oasm' => 'OASM', 'osmedeus' => 'Osmedeus'][$engine] ?? $engine;
     }
 
     /** Profiles this account may run now (plan or free), for an asset kind ('' = any). */

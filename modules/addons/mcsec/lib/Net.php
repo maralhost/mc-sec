@@ -16,7 +16,7 @@ final class Net
 
     /** Second-level public suffixes we meet often (Iran first). Not the full PSL: enough to find an apex. */
     private const MULTI_SUFFIX = [
-        'co.ir', 'ac.ir', 'org.ir', 'net.ir', 'gov.ir', 'id.ir', 'sch.ir', 'mil.ir', 'ایران.ir',
+        'co.ir', 'ac.ir', 'org.ir', 'net.ir', 'gov.ir', 'id.ir', 'sch.ir', 'mil.ir', 'ایران.ir', // i18n-skip
         'co.uk', 'org.uk', 'ac.uk', 'gov.uk', 'com.au', 'net.au', 'org.au', 'co.nz', 'com.tr', 'gen.tr', 'org.tr',
         'com.br', 'com.cn', 'com.hk', 'co.jp', 'co.in', 'co.za', 'com.sa', 'com.ae', 'co.ae', 'com.iq', 'com.af',
     ];
@@ -62,7 +62,7 @@ final class Net
         }
         $s = rtrim(mb_strtolower($s), '.');
         if (str_starts_with($s, '*.')) {
-            return ['error' => 'الگوی ستاره‌دار لازم نیست: دامنه‌ی اصلی (' . substr($s, 2) . ') را بیفزایید؛ زیردامنه‌هایش خودکار در محدوده‌اند.'];
+            return ['error' => Lang::t('الگوی ستاره‌دار لازم نیست: دامنه‌ی اصلی ({apex}) را بیفزایید؛ زیردامنه‌هایش خودکار در محدوده‌اند.', ['apex' => substr($s, 2)])];
         }
         if (preg_match('~[^\x00-\x7F]~', $s)) {
             if (!function_exists('idn_to_ascii')) {
@@ -256,7 +256,7 @@ final class Net
 
     public static function cdnLabel(string $key): string
     {
-        return self::CDN_LABELS[strtolower($key)] ?? $key;
+        return Lang::t(self::CDN_LABELS[strtolower($key)] ?? $key);
     }
 
     /** @var array{0:string,1:array}|null parsed cdn_list, cached per request by its text */

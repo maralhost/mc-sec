@@ -6,6 +6,7 @@ namespace McSec\Client;
 
 use McSec\Auth;
 use McSec\Findings;
+use McSec\Lang;
 use McSec\Nonce;
 use McSec\Score;
 use McSec\Text;
@@ -57,6 +58,7 @@ final class Ui
         'mail' => '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/>',
         'send' => '<path d="M22 2 11 13M22 2l-7 20-4-9-9-4z"/>',
         'webhook' => '<circle cx="6" cy="17" r="3"/><circle cx="18" cy="17" r="3"/><circle cx="12" cy="6" r="3"/><path d="M9 17h6M7.5 14.5l3-6M16.5 14.5l-3-6"/>',
+        'lifebuoy' => '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="m5.6 5.6 3.9 3.9M14.5 14.5l3.9 3.9M18.4 5.6l-3.9 3.9M9.5 14.5l-3.9 3.9"/>',
         'lock' => '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
         // severity shapes (the shape itself carries meaning for colour-blind readers)
         'sev-critical' => '<path d="M8 2h8l6 6v8l-6 6H8l-6-6V8z"/><path d="M12 7v6m0 3v.01"/>',
@@ -139,7 +141,7 @@ final class Ui
         $r = 52;
         $len = 2 * M_PI * $r;
         $dash = round($len * $pct / 100, 1);
-        return '<div class="mcs-gauge mcs-tone-' . $tone . '" role="img" aria-label="' . self::e('امتیاز امنیت ' . ($score < 0 ? 'ندارد' : Text::fa($score) . ' از ۱۰۰، ' . $word)) . '">'
+        return '<div class="mcs-gauge mcs-tone-' . $tone . '" role="img" aria-label="' . self::e($score < 0 ? Lang::t('امتیاز امنیت ندارد') : Lang::t('امتیاز امنیت {n} از ۱۰۰، {word}', ['n' => Text::fa($score), 'word' => Lang::t($word)])) . '">'
             . '<svg viewBox="0 0 120 120" aria-hidden="true"><circle class="mcs-gauge-track" cx="60" cy="60" r="' . $r . '"/>'
             . '<circle class="mcs-gauge-bar" cx="60" cy="60" r="' . $r . '" stroke-dasharray="' . $dash . ' ' . round($len, 1) . '" transform="rotate(-90 60 60)"/></svg>'
             . '<div class="mcs-gauge-text"><strong>' . ($score < 0 ? '—' : self::e(Text::fa($score))) . '</strong><span>' . self::e($word) . '</span></div>'
@@ -150,7 +152,7 @@ final class Ui
     public static function spark(array $points, int $w = 260, int $h = 56): string
     {
         if (count($points) < 2) {
-            return '<p class="mcs-muted mcs-small">برای نمودار روند، دست‌کم دو روز اسکن لازم است.</p>';
+            return '<p class="mcs-muted mcs-small">' . Lang::t('برای نمودار روند، دست‌کم دو روز اسکن لازم است.') . '</p>';
         }
         $n = count($points);
         $xy = [];
@@ -160,7 +162,7 @@ final class Ui
             $xy[] = $x . ',' . $y;
         }
         $last = end($points);
-        return '<figure class="mcs-spark"><svg viewBox="0 0 ' . $w . ' ' . $h . '" role="img" aria-label="' . self::e('روند امتیاز در ' . Text::fa($n) . ' روز؛ امروز ' . Text::fa((int) $last['score'])) . '">'
+        return '<figure class="mcs-spark"><svg viewBox="0 0 ' . $w . ' ' . $h . '" role="img" aria-label="' . self::e(Lang::t('روند امتیاز در {n} روز؛ امروز {score}', ['n' => Text::fa($n), 'score' => Text::fa((int) $last['score'])])) . '">'
             . '<polyline points="' . implode(' ', $xy) . '" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/></svg></figure>';
     }
 
@@ -195,7 +197,7 @@ final class Ui
     /** «این بخش چه کار می‌کند؟» — open while the person has not done the page's first thing yet. */
     public static function guide(string $html, bool $open): string
     {
-        return '<details class="mcs-guide"' . ($open ? ' open' : '') . '><summary>' . self::ico('info') . 'این بخش چه کار می‌کند؟</summary><div class="mcs-guide-body">' . $html . '</div></details>';
+        return '<details class="mcs-guide"' . ($open ? ' open' : '') . '><summary>' . self::ico('info') . Lang::t('این بخش چه کار می‌کند؟') . '</summary><div class="mcs-guide-body">' . $html . '</div></details>';
     }
 
     public static function flash(string $flash): string
@@ -214,17 +216,17 @@ final class Ui
     {
         $id = 'mcs-c-' . substr(md5($text . $label . random_int(0, PHP_INT_MAX)), 0, 10);
         if (!$block) {
-            return '<span class="mcs-copyline"><code dir="ltr" id="' . $id . '">' . self::e($text) . '</code><button type="button" class="mcs-copy" data-mcs-copy="' . $id . '" hidden aria-label="کپی">' . self::ico('copy') . '<span>کپی</span></button></span>';
+            return '<span class="mcs-copyline"><code dir="ltr" id="' . $id . '">' . self::e($text) . '</code><button type="button" class="mcs-copy" data-mcs-copy="' . $id . '" hidden aria-label="' . Lang::t('کپی') . '">' . self::ico('copy') . '<span>' . Lang::t('کپی') . '</span></button></span>';
         }
-        return '<div class="mcs-code">' . ($label !== '' ? '<div class="mcs-code-head"><span dir="ltr">' . self::e($label) . '</span><button type="button" class="mcs-copy" data-mcs-copy="' . $id . '" hidden>' . self::ico('copy') . '<span>کپی</span></button></div>' : '')
-            . '<pre dir="ltr" id="' . $id . '"><code>' . self::e($text) . '</code></pre>' . ($label === '' ? '<button type="button" class="mcs-copy mcs-copy-float" data-mcs-copy="' . $id . '" hidden>' . self::ico('copy') . '<span>کپی</span></button>' : '') . '</div>';
+        return '<div class="mcs-code">' . ($label !== '' ? '<div class="mcs-code-head"><span dir="ltr">' . self::e($label) . '</span><button type="button" class="mcs-copy" data-mcs-copy="' . $id . '" hidden>' . self::ico('copy') . '<span>' . Lang::t('کپی') . '</span></button></div>' : '')
+            . '<pre dir="ltr" id="' . $id . '"><code>' . self::e($text) . '</code></pre>' . ($label === '' ? '<button type="button" class="mcs-copy mcs-copy-float" data-mcs-copy="' . $id . '" hidden>' . self::ico('copy') . '<span>' . Lang::t('کپی') . '</span></button>' : '') . '</div>';
     }
 
     public static function progress(int $pct, string $text, bool $running = false): string
     {
         $pct = max(0, min(100, $pct));
         return '<div class="mcs-progress' . ($running ? ' is-running' : '') . '"><div class="mcs-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' . $pct . '" aria-label="' . self::e($text) . '"><span style="inline-size:' . $pct . '%"></span></div>'
-            . '<div class="mcs-progress-text"><span data-mcs-stage>' . self::e($text) . '</span><strong data-mcs-pct>' . self::e(Text::fa($pct)) . '٪</strong></div></div>';
+            . '<div class="mcs-progress-text"><span data-mcs-stage>' . self::e($text) . '</span><strong data-mcs-pct>' . Lang::t('{n}٪', ['n' => self::e(Text::fa($pct))]) . '</strong></div></div>';
     }
 
     public static function meter(float $used, float $max, string $text): string
@@ -269,7 +271,7 @@ final class Ui
     {
         $th = '';
         foreach ($head as $h) {
-            $th .= '<th scope="col">' . ($h === '' ? '<span class="mcs-sr">کارها</span>' : self::e($h)) . '</th>';
+            $th .= '<th scope="col">' . ($h === '' ? '<span class="mcs-sr">' . Lang::t('کارها') . '</span>' : self::e($h)) . '</th>';
         }
         return '<div class="mcs-table-wrap"><table class="table mcs-table mcs-cards' . ($extra !== '' ? ' ' . $extra : '') . '"><thead><tr>' . $th . '</tr></thead><tbody>' . $rows . '</tbody></table></div>';
     }
@@ -318,7 +320,7 @@ final class Ui
     /** Segmented filter links. @param array<string,string> $items href => label */
     public static function seg(array $items, string $active): string
     {
-        $h = '<nav class="mcs-seg" aria-label="فیلتر">';
+        $h = '<nav class="mcs-seg" aria-label="' . Lang::t('فیلتر') . '">';
         foreach ($items as $href => $label) {
             $h .= '<a class="mcs-seg-item' . ($href === $active ? ' active" aria-current="true' : '') . '" href="' . self::e($href) . '">' . $label . '</a>';
         }
@@ -331,13 +333,13 @@ final class Ui
         if ($pages <= 1) {
             return '';
         }
-        $h = '<nav class="mcs-pager" aria-label="صفحه‌ها">';
+        $h = '<nav class="mcs-pager" aria-label="' . Lang::t('صفحه‌ها') . '">';
         if ($page > 1) {
-            $h .= '<a class="btn btn-default btn-sm" href="' . self::e($base . '&page=' . ($page - 1)) . '">قبلی</a>';
+            $h .= '<a class="btn btn-default btn-sm" href="' . self::e($base . '&page=' . ($page - 1)) . '">' . Lang::t('قبلی') . '</a>';
         }
-        $h .= '<span class="mcs-muted">صفحه‌ی ' . self::e(Text::fa($page)) . ' از ' . self::e(Text::fa($pages)) . '</span>';
+        $h .= '<span class="mcs-muted">' . Lang::t('صفحه‌ی {page} از {pages}', ['page' => self::e(Text::fa($page)), 'pages' => self::e(Text::fa($pages))]) . '</span>';
         if ($page < $pages) {
-            $h .= '<a class="btn btn-default btn-sm" href="' . self::e($base . '&page=' . ($page + 1)) . '">بعدی</a>';
+            $h .= '<a class="btn btn-default btn-sm" href="' . self::e($base . '&page=' . ($page + 1)) . '">' . Lang::t('بعدی') . '</a>';
         }
         return $h . '</nav>';
     }

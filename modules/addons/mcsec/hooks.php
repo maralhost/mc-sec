@@ -94,17 +94,18 @@ add_hook('ClientAreaHomepagePanels', 1, function ($homePagePanels) {
         $c = \McSec\Findings::openCounts($who['client_id']);
         $urgent = $c['critical'] + $c['high'];
         $e = fn ($s) => htmlspecialchars((string) $s, ENT_QUOTES, 'UTF-8');
-        $body = '<div class="mcs-home" dir="rtl" lang="fa" style="padding:12px 16px;line-height:1.9">'
+        $t = fn (string $fa, array $v = []) => \McSec\Lang::t($fa, $v);
+        $body = '<div class="mcs-home" ' . \McSec\Lang::attrs() . ' style="padding:12px 16px;line-height:1.9">'
             . ($score['score'] >= 0
-                ? '<div><strong>' . $e(\McSec\Text::fa($score['score'])) . '</strong> از ۱۰۰ — ' . $e($score['label']) . '</div>'
-                    . ($urgent > 0 ? '<div>' . $e(\McSec\Text::fa($urgent)) . ' مشکل بحرانی یا مهم باز است.</div>' : '<div>مشکل مهمی باز نیست.</div>')
-                : '<div>دارایی‌هایتان را اضافه و اسکن کنید تا وضعیت امنیت این‌جا دیده شود.</div>')
+                ? '<div>' . $t('<strong>{score}</strong> از ۱۰۰ — {label}', ['score' => $e(\McSec\Text::fa($score['score'])), 'label' => $e($t((string) $score['label']))]) . '</div>'
+                    . ($urgent > 0 ? '<div>' . $t('{n} مشکل بحرانی یا مهم باز است.', ['n' => $e(\McSec\Text::fa($urgent))]) . '</div>' : '<div>' . $t('مشکل مهمی باز نیست.') . '</div>')
+                : '<div>' . $t('دارایی‌هایتان را اضافه و اسکن کنید تا وضعیت امنیت این‌جا دیده شود.') . '</div>')
             . '</div>';
         $homePagePanels->addChild('mcsec', [
             'label' => \McSec\Settings::menuLabel(),
             'icon' => 'fa-shield-alt',
             'order' => 15,
-            'extras' => ['color' => $urgent > 0 ? 'red' : 'green', 'btn-link' => 'index.php?m=mcsec', 'btn-text' => 'باز کردن'],
+            'extras' => ['color' => $urgent > 0 ? 'red' : 'green', 'btn-link' => 'index.php?m=mcsec', 'btn-text' => $t('باز کردن')],
             'bodyHtml' => $body,
         ]);
     } catch (\Throwable $e) {

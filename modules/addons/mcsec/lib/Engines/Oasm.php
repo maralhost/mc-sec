@@ -11,6 +11,7 @@ use McSec\Crypto;
 use McSec\Db;
 use McSec\Http;
 use McSec\Kv;
+use McSec\Lang;
 use McSec\Settings;
 use McSec\Trace;
 
@@ -183,7 +184,7 @@ final class Oasm implements Engine
     {
         $this->cid = (int) $asset->client_id;
         if (Http::circuitOpen('oasm')) {
-            return ['ok' => false, 'error' => 'OASM موقتاً در دسترس نیست', 'retry' => true];
+            return ['ok' => false, 'error' => Lang::t('OASM موقتاً در دسترس نیست'), 'retry' => true];
         }
         try {
             $ws = $this->workspace((int) $asset->client_id);
@@ -203,14 +204,14 @@ final class Oasm implements Engine
             }
             if ($t['created']) {
                 // a target made just now has no hosts or services yet: its discovery runs first, then the tools (poll starts them)
-                return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'tools' => $tools, 'wait' => 1], 'progress' => 1, 'stage' => 'شناخت دارایی پیش از اسکن'];
+                return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'tools' => $tools, 'wait' => 1], 'progress' => 1, 'stage' => Lang::t('شناخت دارایی پیش از اسکن')];
             }
             try {
                 $run = $this->runPipeline($asset, $ws, $t['id'], (string) $profile['key'], $steps);
             } catch (\Throwable $e) {
                 return ['ok' => false, 'error' => mb_substr($e->getMessage(), 0, 200), 'retry' => true];
             }
-            return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'tools' => $tools, 'project' => $run['project'], 'run' => $run['run']], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
+            return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'tools' => $tools, 'project' => $run['project'], 'run' => $run['run']], 'progress' => 1, 'stage' => Lang::t('در صف موتور OASM')];
         } elseif (!$t['created']) {
             $r = $this->call('POST', '/api/targets/' . rawurlencode($t['id']) . '/re-scan', null, $ws);
         } else {
@@ -219,7 +220,7 @@ final class Oasm implements Engine
         if (!$r['ok']) {
             return ['ok' => false, 'error' => 'OASM: HTTP ' . $r['status'] . ' ' . mb_substr((string) $r['body'], 0, 160), 'retry' => $r['status'] === 0 || $r['status'] >= 500];
         }
-        return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
+        return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind], 'progress' => 1, 'stage' => Lang::t('در صف موتور OASM')];
     }
 
     /**
@@ -457,7 +458,7 @@ final class Oasm implements Engine
                 $done = $done || !empty($dr['isCompleted']);
             }
             if (!$done && Clock::now() - (int) $scan->started_at < 900) {
-                return ['status' => 'running', 'progress' => 2, 'stage' => 'شناخت دارایی پیش از اسکن'];
+                return ['status' => 'running', 'progress' => 2, 'stage' => Lang::t('شناخت دارایی پیش از اسکن')];
             }
             $tools = array_values(array_filter(array_map('strval', (array) ($m['tools'] ?? [])), fn ($n) => isset(Catalog::TOOLS[$n])));
             $steps = $this->steps($ws, $asset, $profile, $tools);
@@ -467,31 +468,31 @@ final class Oasm implements Engine
             try {
                 $run = $this->runPipeline($asset, $ws, (string) $scan->backend_ref, (string) $profile['key'], $steps);
             } catch (\Throwable $e) {
-                return Clock::now() - (int) $scan->started_at > 3600 ? ['status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 200)] : ['status' => 'running', 'progress' => 2, 'stage' => 'در انتظار پاسخ OASM'];
+                return Clock::now() - (int) $scan->started_at > 3600 ? ['status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 200)] : ['status' => 'running', 'progress' => 2, 'stage' => Lang::t('در انتظار پاسخ OASM')];
             }
-            return ['status' => 'running', 'progress' => 3, 'stage' => 'در صف موتور OASM', 'meta' => ['project' => $run['project'], 'run' => $run['run'], 'wait' => 0, 'discovered' => $done]];
+            return ['status' => 'running', 'progress' => 3, 'stage' => Lang::t('در صف موتور OASM'), 'meta' => ['project' => $run['project'], 'run' => $run['run'], 'wait' => 0, 'discovered' => $done]];
         }
         if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
             $run = $this->pipelineRun($m);
             if ($run === null) {
-                return ['status' => 'running', 'stage' => 'در انتظار پاسخ OASM'];
+                return ['status' => 'running', 'stage' => Lang::t('در انتظار پاسخ OASM')];
             }
             if (!$run) {
-                return Clock::now() - (int) $scan->started_at > 3 * 3600 ? ['status' => 'failed', 'error' => 'OASM کار را شروع نکرد'] : ['status' => 'running', 'progress' => 2, 'stage' => 'در صف موتور OASM'];
+                return Clock::now() - (int) $scan->started_at > 3 * 3600 ? ['status' => 'failed', 'error' => Lang::t('OASM کار را شروع نکرد')] : ['status' => 'running', 'progress' => 2, 'stage' => Lang::t('در صف موتور OASM')];
             }
             if (!empty($run['isCompleted'])) {
                 // "failed" because the target banned the scanner is an incomplete assessment (collect says why), not a broken scan
                 $bad = in_array((string) ($run['status'] ?? ''), ['failed', 'cancelled'], true) && (int) ($run['stepsDone'] ?? 0) === 0;
-                return $bad && !$this->blockedByTarget($m) ? ['status' => 'failed', 'error' => 'OASM: ' . $run['status']] : ['status' => 'completed', 'progress' => 100, 'stage' => 'تمام شد'];
+                return $bad && !$this->blockedByTarget($m) ? ['status' => 'failed', 'error' => 'OASM: ' . $run['status']] : ['status' => 'completed', 'progress' => 100, 'stage' => Lang::t('تمام شد')];
             }
             $total = (int) ($run['stepsTotal'] ?? 0);
-            $names = implode('، ', array_map(fn ($n) => Catalog::TOOLS[$n]['label'] ?? $n, (array) ($m['tools'] ?? ['nuclei'])));
+            $names = Lang::join(array_map(fn ($n) => Lang::t((string) (Catalog::TOOLS[$n]['label'] ?? $n)), (array) ($m['tools'] ?? ['nuclei'])));
             return ['status' => 'running', 'progress' => max(3, $total > 0 ? (int) min(95, floor(100 * (int) ($run['stepsDone'] ?? 0) / $total)) : 5),
-                'stage' => 'در حال اجرا: ' . $names . ($total > 1 ? ' (گام ' . ((int) ($run['stepsDone'] ?? 0) + 1) . ' از ' . $total . ')' : '')];
+                'stage' => $total > 1 ? Lang::t('در حال اجرا: {tools} (گام {n} از {total})', ['tools' => $names, 'n' => (int) ($run['stepsDone'] ?? 0) + 1, 'total' => $total]) : Lang::t('در حال اجرا: {tools}', ['tools' => $names])];
         }
         $r = $this->call('GET', '/api/targets/' . rawurlencode((string) $scan->backend_ref) . '/runs?limit=10&sortOrder=DESC', null, $ws, 8);
         if (!$r['ok']) {
-            return ['status' => 'running', 'stage' => 'در انتظار پاسخ OASM'];
+            return ['status' => 'running', 'stage' => Lang::t('در انتظار پاسخ OASM')];
         }
         $since = strtotime((string) ($m['since'] ?? '')) ?: (int) $scan->started_at;
         $runs = [];
@@ -506,7 +507,7 @@ final class Oasm implements Engine
         if (!$runs) {
             // nothing picked up yet; OASM workers may be busy
             $waited = Clock::now() - (int) $scan->started_at;
-            return $waited > 3 * 3600 ? ['status' => 'failed', 'error' => 'OASM کار را شروع نکرد'] : ['status' => 'running', 'progress' => 2, 'stage' => 'در صف موتور OASM'];
+            return $waited > 3 * 3600 ? ['status' => 'failed', 'error' => Lang::t('OASM کار را شروع نکرد')] : ['status' => 'running', 'progress' => 2, 'stage' => Lang::t('در صف موتور OASM')];
         }
         $total = 0;
         $done = 0;
@@ -525,10 +526,10 @@ final class Oasm implements Engine
             if (in_array($status, ['failed', 'cancelled'], true) && $done === 0) {
                 return ['status' => 'failed', 'error' => 'OASM: ' . $status];
             }
-            return ['status' => 'completed', 'progress' => 100, 'stage' => 'تمام شد'];
+            return ['status' => 'completed', 'progress' => 100, 'stage' => Lang::t('تمام شد')];
         }
         $pct = $total > 0 ? (int) min(95, floor(100 * $done / $total)) : 5;
-        return ['status' => 'running', 'progress' => max(3, $pct), 'stage' => $tool !== '' ? 'در حال اجرا: ' . $tool : 'در حال اجرا'];
+        return ['status' => 'running', 'progress' => max(3, $pct), 'stage' => $tool !== '' ? Lang::t('در حال اجرا: {tools}', ['tools' => $tool]) : Lang::t('در حال اجرا')];
     }
 
     public function collect(object $scan, object $asset, array $profile): array
@@ -612,7 +613,7 @@ final class Oasm implements Engine
             // a run the target cut short saw nothing: say so, and never mark earlier findings fixed because of it
             $run = $this->pipelineRun($m, 20) ?? [];
             $blocked = in_array((string) ($run['status'] ?? ''), ['failed', 'cancelled'], true) && $this->blockedByTarget($m);
-            $out['partial'] = $blocked ? self::BLOCKED : '';
+            $out['partial'] = $blocked ? Lang::t(self::BLOCKED) : '';
             $out['complete'] = !$blocked && (string) ($run['status'] ?? '') === 'completed';
             // proof that work was done: the run exists, it has jobs, and the scanner could reach something
             $jobs = $this->runJobs($m);
@@ -625,9 +626,9 @@ final class Oasm implements Engine
             $web = (bool) array_intersect((array) ($m['tools'] ?? []), ['katana', 'zap', 'nuclei', 'ffuf', 'dirsearch', 'arjun', 'wpscan', 'acunetix']);
             if ($out['partial'] === '') {
                 if (!$run || $jobs === []) {
-                    $out['partial'] = self::NO_WORK;
+                    $out['partial'] = Lang::t(self::NO_WORK);
                 } elseif ($web && $services === 0 && !$findings) {
-                    $out['partial'] = self::NO_SERVICE;
+                    $out['partial'] = Lang::t(self::NO_SERVICE);
                 }
                 $out['complete'] = $out['complete'] && $out['partial'] === '';
             }
@@ -747,6 +748,7 @@ final class Oasm implements Engine
 
     public function health(): array
     {
+        // i18n-skip-begin (the admin's setup page only)
         if (!$this->configured()) {
             return ['ok' => false, 'message' => 'آدرس، حساب سرویس یا رمز OASM تنظیم نشده است.'];
         }
@@ -777,6 +779,7 @@ final class Oasm implements Engine
         } else {
             $msg .= ' nuclei در فهرست ابزارهای OASM پیدا نشد؛ «اسکن آسیب‌پذیری» اجرا نمی‌شود.';
         }
+        // i18n-skip-end
         return ['ok' => true, 'message' => $msg, 'version' => $ver, 'ms' => $h['ms'], 'vuln' => $sws === '' ? null : ($n['known'] && $online > 0), 'workers' => $online];
     }
 }

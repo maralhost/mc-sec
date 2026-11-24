@@ -67,12 +67,12 @@ setting('support_dept', '3');
 $h = html(client_get(['p' => 'asset', 'id' => $ip->id]));
 ok(str_contains($h, 'سرویس‌های همین حساب در مارال کلاد') && str_contains($h, 'روش ۱ (پیشنهادی): فایل متنی روی همین سرور') && str_contains($h, 'روش ۲: DNS معکوس (PTR)') && str_contains($h, 'روش ۳: درخواست تأیید از پشتیبانی'), 'automatic (Maral service), file, reverse DNS, manual request');
 ok(str_contains($h, 'http://93.184.216.50/.well-known/mcsec-verify.txt') && str_contains($h, 'python3 -m http.server 80') && str_contains($h, '/var/www/html/.well-known') && substr_count($h, $proof) >= 3, 'the address to open, the file content and two ready commands');
-ok(str_contains($h, 'submitticket.php?step=2&amp;deptid=3'), 'the manual request opens a ready ticket');
+ok(str_contains($h, 'p=support&amp;topic=verify&amp;asset=' . $ip->id), 'the manual request opens the expert-request form with this asset');
 ok(!str_contains($h, 'name="dns_token"') && str_contains($h, 'الان بررسی کن'), 'no DNS token for an IP; the check button is there');
-setting('support_dept', '0');
-ok(!str_contains(html(client_get(['p' => 'asset', 'id' => $ip->id])), 'درخواست تأیید از پشتیبانی'), 'no support department set: no manual-request way');
-setting('support_dept', '3');
-ok(str_contains(html(client_get(['p' => 'asset', 'id' => $cidr->id])), 'submitticket.php'), 'a range: the manual request');
+setting('support_requests', '0');
+ok(!str_contains(html(client_get(['p' => 'asset', 'id' => $ip->id])), 'درخواست تأیید از پشتیبانی'), 'expert requests off: no manual-request way');
+setting('support_requests', '1');
+ok(str_contains(html(client_get(['p' => 'asset', 'id' => $cidr->id])), 'p=support&amp;topic=verify'), 'a range: the manual request');
 // the file way still works for an IP, on port 80
 http_mock(function ($method, $url) use ($proof) {
     return $url === 'http://93.184.216.50/.well-known/mcsec-verify.txt' ? ['status' => 200, 'body' => $proof . "\n"] : ['status' => 0, 'error' => 'refused', 'body' => ''];

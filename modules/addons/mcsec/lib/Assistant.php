@@ -52,6 +52,7 @@ final class Assistant
 
     public const STATUS = ['pending' => 'در انتظار تأیید شما', 'running' => 'در حال انجام', 'done' => 'انجام شد', 'failed' => 'انجام نشد', 'cancelled' => 'رد شد', 'expired' => 'منقضی شد'];
 
+    // i18n-skip-begin (the prompt for the model; system() adds the reader's language)
     public const SYSTEM = <<<'TXT'
 You are «دستیار امنیت», the security assistant inside the customer panel of Maral Cloud (مارال کلاد), an Iranian hosting and cloud company. The customer owns websites and servers; many customers are not technical.
 LANGUAGE: answer in fluent, plain, polite Persian (Farsi) with correct half-spaces. Keep technical tokens (domains, IPs, ports, header names, commands, CVE ids) in English with Latin digits. Be short: at most six lines unless the customer asks for steps. No marketing, no fear, no promises.
@@ -64,6 +65,7 @@ TOOLS: you may use at most one tool per reply.
 - When "tool_results" holds an "error" for an action, explain it to the customer in plain words and say what to do next.
 OUTPUT: only one JSON object, nothing else: {"reply": "متن فارسی برای مشتری", "tool": "tool name or empty string", "args": {}}
 TXT;
+    // i18n-skip-end
 
     // ── who may use it ──
 
@@ -117,7 +119,7 @@ TXT;
         }
         $cap = max(1, Settings::int('assistant_daily'));
         if (!RateLimit::hit('chat:' . $cid, $cap, 86400)) {
-            return ['ok' => false, 'error' => 'به سقف ' . Text::fa($cap) . ' پیام امروز رسیده‌اید. فردا ادامه دهید؛ همه‌ی کارها از صفحه‌های همین بخش هم شدنی است.'];
+            return ['ok' => false, 'error' => Lang::t('به سقف {n} پیام امروز رسیده‌اید. فردا ادامه دهید؛ همه‌ی کارها از صفحه‌های همین بخش هم شدنی است.', ['n' => Text::fa($cap)])];
         }
         $msgId = (int) Db::table('mod_mcsec_chat')->insertGetId(['client_id' => $cid, 'user_id' => $uid, 'role' => 'user', 'body' => $text, 'created_at' => Clock::now()]);
         $cost = self::cost($cid);
@@ -125,7 +127,7 @@ TXT;
             $paid = Credits::spend($cid, $cost, 'chat:' . $msgId, 'دستیار امنیت');
             if (!$paid['ok']) {
                 Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $cid)->delete();
-                return ['ok' => false, 'error' => $paid['error'] . ' هر پیام به دستیار ' . Text::fa($cost) . ' اعتبار است.'];
+                return ['ok' => false, 'error' => Lang::t('{error} هر پیام به دستیار {n} اعتبار است.', ['error' => Lang::t((string) $paid['error']), 'n' => Text::fa($cost)])];
             }
         }
         // only the newest proposal can be confirmed
@@ -139,7 +141,9 @@ TXT;
             $back = $cost > 0 ? Credits::refund($cid, 'chat:' . $msgId, 'دستیار جواب نداد') : 0;
             $ref = Trace::error('ai', 'assistant', mb_substr((string) $r['error'], 0, 240), ['message' => $msgId], ['client_id' => $cid, 'user_id' => $uid]);
             Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $cid)->update(['status' => 'failed']);
-            return ['ok' => false, 'error' => 'دستیار الان نتوانست جواب بدهد' . ($back > 0 ? ' و ' . Text::fa($back) . ' اعتبار این پیام برگشت' : '') . '. کمی بعد دوباره بفرستید؛ اگر تکرار شد این کد را به پشتیبانی بدهید: ' . $ref];
+            return ['ok' => false, 'error' => $back > 0
+                ? Lang::t('دستیار الان نتوانست جواب بدهد و {n} اعتبار این پیام برگشت. کمی بعد دوباره بفرستید؛ اگر تکرار شد این کد را به پشتیبانی بدهید: {ref}', ['n' => Text::fa($back), 'ref' => $ref])
+                : Lang::t('دستیار الان نتوانست جواب بدهد. کمی بعد دوباره بفرستید؛ اگر تکرار شد این کد را به پشتیبانی بدهید: {ref}', ['ref' => $ref])];
         }
         return ['ok' => true];
     }
@@ -155,28 +159,28 @@ TXT;
         $verified = array_values(array_filter($assets, fn ($a) => $a->status === 'verified'));
         foreach ($assets as $a) {
             if ($a->status === 'pending') {
-                $out[] = 'مالکیت ' . $a->value . ' را بررسی کن';
+                $out[] = Lang::t('مالکیت {asset} را بررسی کن', ['asset' => $a->value]);
                 break;
             }
         }
         $top = Findings::search($clientId, ['status' => 'open'], 1)['rows'][0] ?? null;
         if ($top && Findings::rank((string) $top->severity) >= Findings::rank('medium')) {
-            $out[] = 'مشکل «' . mb_substr((string) $top->title, 0, 70) . '» را توضیح بده و بگو چطور رفعش کنم';
+            $out[] = Lang::t('مشکل «{title}» را توضیح بده و بگو چطور رفعش کنم', ['title' => mb_substr((string) $top->title, 0, 70)]);
         }
         foreach ($verified as $a) {
             if ((int) $a->last_scan_at === 0) {
-                $out[] = 'از ' . $a->value . ' اسکن بگیر';
+                $out[] = Lang::t('از {asset} اسکن بگیر', ['asset' => $a->value]);
                 break;
             }
         }
         if ($verified && !Db::table('mod_mcsec_schedules')->where('client_id', $clientId)->exists()) {
-            $out[] = $verified[0]->value . ' را هر هفته خودکار بررسی کن';
+            $out[] = Lang::t('{asset} را هر هفته خودکار بررسی کن', ['asset' => $verified[0]->value]);
         }
         if (!$assets) {
-            $out[] = 'یک دامنه‌ی تازه اضافه کن';
+            $out[] = Lang::t('یک دامنه‌ی تازه اضافه کن');
         }
-        $out[] = 'وضعیت امنیت من چطور است؟';
-        $out[] = 'مهم‌ترین کاری که الان باید بکنم چیست؟';
+        $out[] = Lang::t('وضعیت امنیت من چطور است؟');
+        $out[] = Lang::t('مهم‌ترین کاری که الان باید بکنم چیست؟');
         return array_slice(array_values(array_unique($out)), 0, 4);
     }
 
@@ -187,38 +191,41 @@ TXT;
      */
     public static function bot(int $clientId, string $text, string $ref): string
     {
-        if (!self::allowed($clientId) || !Access::clientAllowed($clientId) || !Ai::ready()) {
-            return 'دستیار امنیت برای این حساب روشن نیست. اعلان‌ها مثل قبل همین‌جا می‌رسند.';
-        }
-        $text = trim(mb_substr(preg_replace('~[^\S\n]+~u', ' ', str_replace("\r", '', $text)) ?? '', 0, self::MAX_TEXT));
-        if ($text === '' || str_starts_with($text, '/')) {
-            return 'پرسش خود را درباره‌ی امنیت دارایی‌هایتان بنویسید. برای انجام کار (اسکن، افزودن دارایی) به صفحه‌ی «دستیار امنیت» در ناحیه‌ی کاربری بروید.';
-        }
-        $cap = max(1, Settings::int('assistant_daily'));
-        if (!RateLimit::hit('chat:' . $clientId, $cap, 86400)) {
-            return 'به سقف ' . Text::fa($cap) . ' پیام امروز رسیده‌اید. فردا ادامه دهید.';
-        }
-        $who = ['client_id' => $clientId, 'user_id' => 0];
-        $msgId = (int) Db::table('mod_mcsec_chat')->insertGetId(['client_id' => $clientId, 'user_id' => 0, 'role' => 'user', 'body' => $text, 'created_at' => Clock::now()]);
-        $cost = self::cost($clientId);
-        if ($cost > 0 && !Credits::spend($clientId, $cost, 'chat:' . $msgId, 'دستیار امنیت (' . $ref . ')')['ok']) {
-            Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $clientId)->delete();
-            return 'اعتبار کافی نیست: هر پیام به دستیار ' . Text::fa($cost) . ' اعتبار است.';
-        }
-        try {
-            $r = self::think($who, $msgId, false);
-        } catch (\Throwable $e) {
-            $r = ['ok' => false, 'error' => $e->getMessage()];
-        }
-        if (!$r['ok']) {
-            if ($cost > 0) {
-                Credits::refund($clientId, 'chat:' . $msgId, 'دستیار جواب نداد');
+        // background work: answer in the account's own language
+        return Lang::with(Lang::forClient($clientId), function () use ($clientId, $text, $ref): string {
+            if (!self::allowed($clientId) || !Access::clientAllowed($clientId) || !Ai::ready()) {
+                return Lang::t('دستیار امنیت برای این حساب روشن نیست. اعلان‌ها مثل قبل همین‌جا می‌رسند.');
             }
-            Trace::error('ai', 'assistant.bot', mb_substr((string) $r['error'], 0, 240), ['message' => $msgId], ['client_id' => $clientId]);
-            Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $clientId)->update(['status' => 'failed']);
-            return 'دستیار الان نتوانست جواب بدهد. کمی بعد دوباره بپرسید.';
-        }
-        return mb_substr((string) Db::table('mod_mcsec_chat')->where('client_id', $clientId)->where('user_id', 0)->where('role', 'assistant')->where('id', '>', $msgId)->orderByDesc('id')->value('body'), 0, 3500);
+            $text = trim(mb_substr(preg_replace('~[^\S\n]+~u', ' ', str_replace("\r", '', $text)) ?? '', 0, self::MAX_TEXT));
+            if ($text === '' || str_starts_with($text, '/')) {
+                return Lang::t('پرسش خود را درباره‌ی امنیت دارایی‌هایتان بنویسید. برای انجام کار (اسکن، افزودن دارایی) به صفحه‌ی «دستیار امنیت» در ناحیه‌ی کاربری بروید.');
+            }
+            $cap = max(1, Settings::int('assistant_daily'));
+            if (!RateLimit::hit('chat:' . $clientId, $cap, 86400)) {
+                return Lang::t('به سقف {n} پیام امروز رسیده‌اید. فردا ادامه دهید.', ['n' => Text::fa($cap)]);
+            }
+            $who = ['client_id' => $clientId, 'user_id' => 0];
+            $msgId = (int) Db::table('mod_mcsec_chat')->insertGetId(['client_id' => $clientId, 'user_id' => 0, 'role' => 'user', 'body' => $text, 'created_at' => Clock::now()]);
+            $cost = self::cost($clientId);
+            if ($cost > 0 && !Credits::spend($clientId, $cost, 'chat:' . $msgId, Lang::t('دستیار امنیت ({ref})', ['ref' => $ref]))['ok']) {
+                Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $clientId)->delete();
+                return Lang::t('اعتبار کافی نیست: هر پیام به دستیار {n} اعتبار است.', ['n' => Text::fa($cost)]);
+            }
+            try {
+                $r = self::think($who, $msgId, false);
+            } catch (\Throwable $e) {
+                $r = ['ok' => false, 'error' => $e->getMessage()];
+            }
+            if (!$r['ok']) {
+                if ($cost > 0) {
+                    Credits::refund($clientId, 'chat:' . $msgId, 'دستیار جواب نداد');
+                }
+                Trace::error('ai', 'assistant.bot', mb_substr((string) $r['error'], 0, 240), ['message' => $msgId], ['client_id' => $clientId]);
+                Db::table('mod_mcsec_chat')->where('id', $msgId)->where('client_id', $clientId)->update(['status' => 'failed']);
+                return Lang::t('دستیار الان نتوانست جواب بدهد. کمی بعد دوباره بپرسید.');
+            }
+            return mb_substr((string) Db::table('mod_mcsec_chat')->where('client_id', $clientId)->where('user_id', 0)->where('role', 'assistant')->where('id', '>', $msgId)->orderByDesc('id')->value('body'), 0, 3500);
+        });
     }
 
     /** The model loop of one turn: read tools are answered here; an action becomes a pending card. */
@@ -277,7 +284,7 @@ TXT;
                 }
             }
             if ($reply === '') {
-                $reply = $action ? 'این کار را آماده کردم. اگر درست است، روی کارت زیر تأیید کنید.' : 'متوجه نشدم. لطفاً کمی روشن‌تر بنویسید چه می‌خواهید.';
+                $reply = $action ? Lang::t('این کار را آماده کردم. اگر درست است، روی کارت زیر تأیید کنید.') : Lang::t('متوجه نشدم. لطفاً کمی روشن‌تر بنویسید چه می‌خواهید.');
             }
             Db::table('mod_mcsec_chat')->insert(['client_id' => $cid, 'user_id' => $uid, 'role' => 'assistant', 'body' => mb_substr($reply, 0, 4000),
                 'data' => Db::json(['links' => array_slice(array_values($links), 0, 3)]), 'created_at' => Clock::now()]);
@@ -297,13 +304,23 @@ TXT;
             $s .= '- ' . $name . ': ' . $what . "\n";
         }
         if (!$acting) {
-            return $s . 'ACTION TOOLS: none here. Tell the customer in which page of the panel they can do the work themselves.';
+            return $s . 'ACTION TOOLS: none here. Tell the customer in which page of the panel they can do the work themselves.' . self::language();
         }
         $s .= "ACTION TOOLS (each becomes a card the customer must confirm):\n";
         foreach (self::ACTIONS as $name => [, $what]) {
             $s .= '- ' . $name . ': ' . $what . "\n";
         }
-        return $s;
+        return $s . self::language();
+    }
+
+    /** The Persian prompt stays as it is; a reader of the English panel gets one more line that asks for English. */
+    private static function language(): string
+    {
+        if (Lang::fa()) {
+            return '';
+        }
+        return "\nLANGUAGE OVERRIDE: this customer reads English, not Persian. Answer in English. Write all reply text in plain English. "
+            . 'The "reply" value is English text; give names of scan types, statuses and pages in English. On the English panel the button on a card is called "' . Lang::t('تأیید و انجام') . '".';
     }
 
     /** The model's text as plain text: no markup, no control characters, a sane length. It is escaped again when shown. */
@@ -342,7 +359,7 @@ TXT;
         }
         $types = [];
         foreach (Catalog::forClient($cid) as $k => $p) {
-            $types[] = ['type' => (string) $k, 'name' => (string) $p['label'], 'credits_per_asset' => (int) $p['credits'], 'in_plan' => (bool) $p['allowed'], 'for' => array_values($p['kinds'])];
+            $types[] = ['type' => (string) $k, 'name' => Lang::t((string) $p['label']), 'credits_per_asset' => (int) $p['credits'], 'in_plan' => (bool) $p['allowed'], 'for' => array_values($p['kinds'])];
         }
         $top = [];
         foreach (Findings::search($cid, ['status' => 'open'], 6)['rows'] as $f) {
@@ -401,7 +418,7 @@ TXT;
                     $surface[$kind] = ['count' => count($rows), 'some' => array_map(fn ($r) => (string) $r->value, array_slice($rows, 0, 12))];
                 }
                 return ['id' => (int) $x->id, 'value' => (string) $x->value, 'kind' => (string) $x->kind, 'status' => (string) $x->status,
-                    'ownership' => $x->status === 'verified' ? 'verified (' . (Verify::METHODS[(string) $x->method] ?? (string) $x->method) . ')'
+                    'ownership' => $x->status === 'verified' ? 'verified (' . Lang::t((string) (Verify::METHODS[(string) $x->method] ?? (string) $x->method)) . ')'
                         : 'not verified yet. The asset page shows the exact proof to place: a DNS TXT record, a file on the site, or a meta tag; services hosted at Maral Cloud verify by themselves. After placing it the customer can ask you to check ownership.',
                     'behind_cdn' => (string) ($x->cdn ?? ''), 'score' => (int) $x->last_scan_at > 0 ? (int) $x->score : null, 'open_findings' => Findings::openCounts(0, (int) $x->id),
                     'recent_scans' => $scans, 'attack_surface' => $surface];
@@ -481,10 +498,10 @@ TXT;
                 return $no('unknown scan type; the valid keys are: ' . implode(', ', array_keys($types)));
             }
             if (!$p['allowed']) {
-                return $no('«' . $p['label'] . '» در پلن فعلی این حساب نیست. پلن‌ها در صفحه‌ی «اعتبار و پلن» هستند.');
+                return $no(Lang::t('«{type}» در پلن فعلی این حساب نیست. پلن‌ها در صفحه‌ی «اعتبار و پلن» هستند.', ['type' => Lang::t((string) $p['label'])]));
             }
             if ($asset && !in_array($asset->kind, $p['kinds'], true)) {
-                return $no('«' . $p['label'] . '» برای ' . (Assets::KINDS[$asset->kind] ?? $asset->kind) . ' اجرا نمی‌شود.');
+                return $no(Lang::t('«{type}» برای {kind} اجرا نمی‌شود.', ['type' => Lang::t((string) $p['label']), 'kind' => Lang::t((string) (Assets::KINDS[$asset->kind] ?? $asset->kind))]));
             }
             $p['key'] = $key;
             return $p;
@@ -496,25 +513,25 @@ TXT;
                     return $no((string) $t['error']);
                 }
                 if (self::asset($cid, $t['value'])) {
-                    return $no('این دارایی از قبل در فهرست این حساب است.');
+                    return $no(Lang::t('این دارایی از قبل در فهرست این حساب است.'));
                 }
-                return ['ok' => true, 'summary' => 'افزودن دارایی ' . $t['value'], 'cost' => 0, 'args' => ['value' => (string) $t['value']], 'note' => 'پس از افزودن، مالکیت آن باید تأیید شود تا بتوان اسکن گرفت.'];
+                return ['ok' => true, 'summary' => Lang::t('افزودن دارایی {asset}', ['asset' => $t['value']]), 'cost' => 0, 'args' => ['value' => (string) $t['value']], 'note' => Lang::t('پس از افزودن، مالکیت آن باید تأیید شود تا بتوان اسکن گرفت.')];
             case 'check_ownership':
                 $x = self::asset($cid, $a['asset'] ?? '');
                 if (!$x) {
                     return $no('no such asset in this account');
                 }
                 if ($x->status === 'verified') {
-                    return $no('مالکیت ' . $x->value . ' از قبل تأیید شده است.');
+                    return $no(Lang::t('مالکیت {asset} از قبل تأیید شده است.', ['asset' => $x->value]));
                 }
-                return ['ok' => true, 'summary' => 'بررسی مالکیت ' . $x->value, 'cost' => 0, 'args' => ['asset' => (int) $x->id]];
+                return ['ok' => true, 'summary' => Lang::t('بررسی مالکیت {asset}', ['asset' => $x->value]), 'cost' => 0, 'args' => ['asset' => (int) $x->id]];
             case 'start_scan':
                 $x = self::asset($cid, $a['asset'] ?? '');
                 if (!$x) {
                     return $no('no such asset in this account; ask which asset, or offer to add it');
                 }
                 if ($x->status !== 'verified') {
-                    return $no('مالکیت ' . $x->value . ' هنوز تأیید نشده است؛ اسکن فقط پس از تأیید مالکیت ممکن است.');
+                    return $no(Lang::t('مالکیت {asset} هنوز تأیید نشده است؛ اسکن فقط پس از تأیید مالکیت ممکن است.', ['asset' => $x->value]));
                 }
                 $p = $type(is_scalar($a['type'] ?? null) ? (string) $a['type'] : '', $x);
                 if (isset($p['ok'])) {
@@ -523,9 +540,9 @@ TXT;
                 $cost = Catalog::cost($p, $x);
                 $have = Credits::balance($cid)['total'];
                 if ($cost > $have) {
-                    return $no('اعتبار کافی نیست: این اسکن ' . Text::fa($cost) . ' اعتبار می‌خواهد و ' . Text::fa($have) . ' اعتبار دارید. بسته‌ی اعتبار در صفحه‌ی «اعتبار و پلن» است.');
+                    return $no(Lang::t('اعتبار کافی نیست: این اسکن {cost} اعتبار می‌خواهد و {have} اعتبار دارید. بسته‌ی اعتبار در صفحه‌ی «اعتبار و پلن» است.', ['cost' => Text::fa($cost), 'have' => Text::fa($have)]));
                 }
-                return ['ok' => true, 'summary' => $p['label'] . ' روی ' . $x->value, 'cost' => $cost, 'args' => ['asset' => (int) $x->id, 'type' => (string) $p['key']]];
+                return ['ok' => true, 'summary' => Lang::t('{type} روی {asset}', ['type' => Lang::t((string) $p['label']), 'asset' => $x->value]), 'cost' => $cost, 'args' => ['asset' => (int) $x->id, 'type' => (string) $p['key']]];
             case 'create_schedule':
                 $all = is_string($a['asset'] ?? null) && strtolower(trim($a['asset'])) === 'all';
                 $x = $all ? null : self::asset($cid, $a['asset'] ?? '');
@@ -543,12 +560,13 @@ TXT;
                 $args = ['asset' => $x ? (int) $x->id : 0, 'type' => (string) $p['key'], 'every' => $freq, 'hour' => max(0, min(23, (int) ($a['hour'] ?? 3))),
                     'weekday' => max(0, min(6, (int) ($a['weekday'] ?? 6))), 'day' => max(1, min(28, (int) ($a['day'] ?? 1)))];
                 $when = match ($freq) {
-                    'daily' => 'هر روز',
-                    'monthly' => 'روز ' . Text::fa($args['day']) . ' هر ماه',
-                    default => 'هر ' . (Schedules::DOW[$args['weekday']] ?? ''),
+                    'daily' => Lang::t('هر روز'),
+                    'monthly' => Lang::t('روز {day} هر ماه', ['day' => Text::fa($args['day'])]),
+                    default => Lang::t('هر {weekday}', ['weekday' => Lang::t((string) (Schedules::DOW[$args['weekday']] ?? ''))]),
                 };
-                return ['ok' => true, 'summary' => 'زمان‌بندی «' . $p['label'] . '» برای ' . ($x ? $x->value : 'همه‌ی دارایی‌ها') . '، ' . $when . ' حدود ساعت ' . Text::fa($args['hour']), 'cost' => 0, 'args' => $args,
-                    'note' => (int) $p['credits'] > 0 ? 'هر بار اجرا ' . Text::fa((int) $p['credits']) . ' اعتبار برای هر دارایی کم می‌کند. ساختن زمان‌بندی هزینه ندارد.' : 'این اسکن رایگان است.'];
+                return ['ok' => true, 'summary' => Lang::t('زمان‌بندی «{type}» برای {asset}، {when} حدود ساعت {hour}', ['type' => Lang::t((string) $p['label']), 'asset' => $x ? $x->value : Lang::t('همه‌ی دارایی‌ها'), 'when' => $when, 'hour' => Text::fa($args['hour'])]),
+                    'cost' => 0, 'args' => $args,
+                    'note' => (int) $p['credits'] > 0 ? Lang::t('هر بار اجرا {n} اعتبار برای هر دارایی کم می‌کند. ساختن زمان‌بندی هزینه ندارد.', ['n' => Text::fa((int) $p['credits'])]) : Lang::t('این اسکن رایگان است.')];
             case 'set_finding_status':
                 $f = Findings::get($cid, (int) Text::toAscii(is_scalar($a['finding'] ?? null) ? (string) $a['finding'] : '0'));
                 $status = is_string($a['status'] ?? null) ? $a['status'] : '';
@@ -562,14 +580,14 @@ TXT;
                 if ($status !== 'open' && mb_strlen($reason) < 5) {
                     return $no('ask the customer for their reason first; it is saved with the decision');
                 }
-                return ['ok' => true, 'summary' => 'یافته‌ی «' . mb_substr((string) $f->title, 0, 120) . '» ← ' . (Findings::STATUS[$status] ?? $status), 'cost' => 0,
-                    'args' => ['finding' => (int) $f->id, 'status' => $status, 'reason' => $reason], 'note' => $reason !== '' ? 'دلیل: ' . $reason : ''];
+                return ['ok' => true, 'summary' => Lang::t('یافته‌ی «{title}» ← {status}', ['title' => mb_substr((string) $f->title, 0, 120), 'status' => Lang::t((string) (Findings::STATUS[$status] ?? $status))]), 'cost' => 0,
+                    'args' => ['finding' => (int) $f->id, 'status' => $status, 'reason' => $reason], 'note' => $reason !== '' ? Lang::t('دلیل: {reason}', ['reason' => $reason]) : ''];
             case 'retest_finding':
                 $f = Findings::get($cid, (int) Text::toAscii(is_scalar($a['finding'] ?? null) ? (string) $a['finding'] : '0'));
                 if (!$f || $f->status !== 'open') {
-                    return $no('این یافته باز نیست یا در این حساب نیست.');
+                    return $no(Lang::t('این یافته باز نیست یا در این حساب نیست.'));
                 }
-                return ['ok' => true, 'summary' => 'بررسی دوباره‌ی «' . mb_substr((string) $f->title, 0, 120) . '»', 'cost' => 0, 'args' => ['finding' => (int) $f->id], 'note' => 'رایگان؛ هر یافته روزی یک بار.'];
+                return ['ok' => true, 'summary' => Lang::t('بررسی دوباره‌ی «{title}»', ['title' => mb_substr((string) $f->title, 0, 120)]), 'cost' => 0, 'args' => ['finding' => (int) $f->id], 'note' => Lang::t('رایگان؛ هر یافته روزی یک بار.')];
             case 'create_report':
                 $x = !empty($a['asset']) ? self::asset($cid, $a['asset']) : null;
                 if (!empty($a['asset']) && !$x) {
@@ -577,10 +595,10 @@ TXT;
                 }
                 $ai = !empty($a['ai']) && $a['ai'] !== 'false';
                 if ($ai && (!Ai::configured() || !Plans::limits($cid)['ai'])) {
-                    return $no('گزارش هوش مصنوعی برای این حساب در دسترس نیست؛ گزارش پایه را پیشنهاد کن.');
+                    return $no(Lang::t('گزارش هوش مصنوعی برای این حساب در دسترس نیست؛ گزارش پایه را پیشنهاد کن.'));
                 }
                 $cost = $ai ? Rules::cost($cid, max(0, Settings::int('ai_report_cost'))) : 0;
-                return ['ok' => true, 'summary' => ($ai ? 'گزارش هوش مصنوعی' : 'گزارش پایه') . ' برای ' . ($x ? $x->value : 'کل حساب'), 'cost' => $cost, 'args' => ['asset' => $x ? (int) $x->id : 0, 'ai' => $ai]];
+                return ['ok' => true, 'summary' => Lang::t('{report} برای {asset}', ['report' => $ai ? Lang::t('گزارش هوش مصنوعی') : Lang::t('گزارش پایه'), 'asset' => $x ? $x->value : Lang::t('کل حساب')]), 'cost' => $cost, 'args' => ['asset' => $x ? (int) $x->id : 0, 'ai' => $ai]];
         }
         return $no('unknown tool');
     }
@@ -626,7 +644,7 @@ TXT;
             $r = self::run($who, $tool, (array) ($d['args'] ?? []), (int) ($d['cost'] ?? 0));
         } catch (\Throwable $e) {
             $ref = Trace::error('ai', 'assistant.run', $e->getMessage(), ['chat' => $id, 'tool' => $tool], ['client_id' => $cid, 'user_id' => $uid]);
-            $r = ['ok' => false, 'error' => 'این کار انجام نشد. اگر تکرار شد این کد را به پشتیبانی بدهید: ' . $ref];
+            $r = ['ok' => false, 'error' => Lang::t('این کار انجام نشد. اگر تکرار شد این کد را به پشتیبانی بدهید: {ref}', ['ref' => $ref])];
         }
         $d['result'] = array_intersect_key($r, ['message' => 1, 'error' => 1, 'href' => 1, 'link' => 1]);
         Db::table('mod_mcsec_chat')->where('id', $id)->where('client_id', $cid)->update(['status' => $r['ok'] ? 'done' : 'failed', 'data' => Db::json($d)]);
@@ -664,8 +682,8 @@ TXT;
                     return $no('چند دقیقه صبر کنید و دوباره بررسی کنید. خودکار هم هر چند دقیقه بررسی می‌کنیم و خبرتان می‌کنیم.');
                 }
                 $r = Verify::check($x);
-                return $r['ok'] ? ['ok' => true, 'message' => 'مالکیت تأیید شد (' . (Verify::METHODS[$r['method']] ?? $r['method']) . '). حالا می‌توانید اسکن بگیرید.', 'href' => $href, 'link' => 'صفحه‌ی دارایی']
-                    : $no('هنوز تأیید نشد. ' . $r['note'] . ' اگر رکورد را تازه گذاشته‌اید تا یک ساعت صبر کنید؛ خودکار دوباره بررسی می‌کنیم.');
+                return $r['ok'] ? ['ok' => true, 'message' => Lang::t('مالکیت تأیید شد ({method}). حالا می‌توانید اسکن بگیرید.', ['method' => Lang::t((string) (Verify::METHODS[$r['method']] ?? $r['method']))]), 'href' => $href, 'link' => 'صفحه‌ی دارایی']
+                    : $no(Lang::t('هنوز تأیید نشد. {note} اگر رکورد را تازه گذاشته‌اید تا یک ساعت صبر کنید؛ خودکار دوباره بررسی می‌کنیم.', ['note' => Lang::t((string) $r['note'])]));
             case 'start_scan':
                 $x = Assets::get($cid, (int) ($a['asset'] ?? 0));
                 $p = Catalog::forClient($cid)[(string) ($a['type'] ?? '')] ?? null;
@@ -679,7 +697,8 @@ TXT;
                 if (!$r['ok']) {
                     return $no((string) $r['error']);
                 }
-                return ['ok' => true, 'message' => !empty($r['again']) ? 'همین اسکن از قبل در جریان است.' : 'اسکن در صف قرار گرفت' . ((int) ($r['credits'] ?? 0) > 0 ? ' و ' . Text::fa((int) $r['credits']) . ' اعتبار کم شد' : '') . '. پس از پایان خبرتان می‌کنیم.',
+                return ['ok' => true, 'message' => !empty($r['again']) ? 'همین اسکن از قبل در جریان است.'
+                        : ((int) ($r['credits'] ?? 0) > 0 ? Lang::t('اسکن در صف قرار گرفت و {n} اعتبار کم شد. پس از پایان خبرتان می‌کنیم.', ['n' => Text::fa((int) $r['credits'])]) : 'اسکن در صف قرار گرفت. پس از پایان خبرتان می‌کنیم.'),
                     'href' => 'index.php?m=mcsec&p=scan&id=' . (int) $r['scan_id'], 'link' => 'دیدن پیشرفت'];
             case 'create_schedule':
                 $r = Schedules::save($who, ['id' => 0, 'asset' => (int) ($a['asset'] ?? 0), 'profile' => (string) ($a['type'] ?? ''), 'freq' => (string) ($a['every'] ?? ''),

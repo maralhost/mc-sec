@@ -2,7 +2,7 @@
 // Visual preview of MC-Sec's pages for the RTL and UX check (skill mcsec-rtl-review): every page runs through the real
 // controllers on a fake WHMCS with demo data, inside a minimal Lagom2 stand-in (Bootstrap 4 RTL-ish base styles).
 //   php -S 127.0.0.1:8796 tests/tools/preview.php
-// Client area: http://127.0.0.1:8796/index.php?m=mcsec (&as=viewer|new, &dark=1 for dark mode)
+// Client area: http://127.0.0.1:8796/index.php?m=mcsec (&as=viewer|new, &dark=1 for dark mode, &lang=en for English)
 // Admin:       http://127.0.0.1:8796/addonmodules.php?module=mcsec&tier=view|ops|settings
 // Delete tests/tmp/preview.sqlite to start the demo data again. Development only: never shipped.
 declare(strict_types=1);
@@ -35,6 +35,13 @@ if ($fresh) {
         : ['ok' => false, 'error' => 'preview']);
 }
 $dark = ($_GET['dark'] ?? '') === '1';
+// language of the client pages: ?lang=en or ?lang=fa, kept in a cookie so the section's own links keep it
+if (isset($_GET['lang'])) {
+    $_COOKIE['mcsprev_lang'] = $_GET['lang'] === 'en' ? 'en' : 'fa';
+    setcookie('mcsprev_lang', $_COOKIE['mcsprev_lang'], 0, '/');
+}
+$lang = ($_COOKIE['mcsprev_lang'] ?? 'fa') === 'en' && $path !== '/addonmodules.php' ? 'en' : 'fa';
+\McSec\Lang::$force = $lang;
 $who = match ($_GET['as'] ?? '') {
     'viewer' => [11, 1],
     'new' => [5, 5],
@@ -73,7 +80,7 @@ if ($path === '/addonmodules.php') {
     $title = (string) ($r['pagetitle'] ?? 'MC-Sec');
 }
 ?><!doctype html>
-<html lang="fa" dir="rtl" class="<?= $dark ? 'lagom-dark-mode' : '' ?>">
+<html lang="<?= $lang ?>" dir="<?= $lang === 'fa' ? 'rtl' : 'ltr' ?>" class="<?= $dark ? 'lagom-dark-mode' : '' ?>">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title><?= htmlspecialchars($title) ?> - مارال کلاد</title>
 <style>
 :root{--body-bg:#f3f5f9;--ui-block-bg:#fff;--text-body-color:#334155;--text-heading-color:#0f172a;--text-lighter-color:#5b6778;--ui-block-divider-color:#e2e8f0;--brand-primary:#1d4ed8;--input-border-color:#cbd5e1;--input-bg:#fff}
@@ -91,5 +98,6 @@ a{color:var(--brand-primary)}
 </style></head>
 <body class="lagom"><div class="lagom-top"><b>مارال کلاد</b><span>پیش‌نمایش MC-Sec</span>
 <a href="<?= htmlspecialchars($keep('/index.php?m=mcsec')) ?>">ناحیه‌ی کاربری</a><a href="/addonmodules.php?module=mcsec">پنل مدیر</a>
-<a href="?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['dark' => $dark ? '' : '1']))) ?>"><?= $dark ? 'روشن' : 'تیره' ?></a></div>
+<a href="?<?= htmlspecialchars(http_build_query(array_merge($_GET, ['dark' => $dark ? '' : '1']))) ?>"><?= $dark ? 'روشن' : 'تیره' ?></a>
+<a href="/index.php?m=mcsec&amp;lang=<?= $lang === 'fa' ? 'en' : 'fa' ?>"><?= $lang === 'fa' ? 'English' : 'فارسی' ?></a></div>
 <div class="wrap"><?= $body ?></div></body></html>

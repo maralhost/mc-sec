@@ -85,8 +85,18 @@ final class Notify
         return ['ok' => true];
     }
 
-    /** Records an event: panel notice + outbox rows. Idempotent per ref. */
+    /** Records an event: panel notice + outbox rows, written in the account's own language. Idempotent per ref. */
     public static function event(int $clientId, string $event, array $data, string $ref): void
+    {
+        try {
+            $lang = Lang::forClient($clientId);
+        } catch (\Throwable $e) {
+            $lang = 'fa';
+        }
+        Lang::with($lang, fn () => self::record($clientId, $event, $data, $ref));
+    }
+
+    private static function record(int $clientId, string $event, array $data, string $ref): void
     {
         try {
             $msg = self::message($event, $data);
@@ -142,11 +152,14 @@ final class Notify
         };
     }
 
-    /** Persian title, lines, link and tone of one event. @return array{title:string,lines:string[],link:string,tone:string}|null */
+    /**
+     * Title, lines, link and tone of one event, in the current language (event() and the callers run it in the
+     * account's own language). @return array{title:string,lines:string[],link:string,tone:string}|null
+     */
     public static function message(string $event, array $d): ?array
     {
         $asset = (string) ($d['asset'] ?? '');
-        $sev = fn (string $s) => Findings::SEVERITIES[$s]['label'] ?? $s;
+        $sev = fn (string $s) => isset(Findings::SEVERITIES[$s]) ? Lang::t(Findings::SEVERITIES[$s]['label']) : $s;
         switch ($event) {
             case 'new_findings':
                 $f = (array) ($d['findings'] ?? []);
@@ -155,51 +168,51 @@ final class Notify
                 }
                 $lines = [];
                 foreach (array_slice($f, 0, 8) as $x) {
-                    $lines[] = '• [' . $sev((string) $x['severity']) . '] ' . $x['title'] . ' — ' . $x['location'] . (!empty($x['reopened']) ? ' (دوباره دیده شد)' : '');
+                    $lines[] = '• [' . $sev((string) $x['severity']) . '] ' . $x['title'] . ' — ' . $x['location'] . (!empty($x['reopened']) ? ' ' . Lang::t('(دوباره دیده شد)') : '');
                 }
                 if (count($f) > 8) {
-                    $lines[] = 'و ' . Text::fa(count($f) - 8) . ' مورد دیگر.';
+                    $lines[] = Lang::t('و {n} مورد دیگر.', ['n' => Text::fa(count($f) - 8)]);
                 }
                 $top = (string) ($f[0]['severity'] ?? 'info');
-                return ['title' => Text::fa(count($f)) . ' یافته‌ی تازه روی ' . $asset, 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=findings&scan=' . (int) ($d['scan_id'] ?? 0), 'tone' => Findings::rank($top) >= 4 ? 'err' : 'warn'];
+                return ['title' => Lang::t('{n} یافته‌ی تازه روی {asset}', ['n' => Text::fa(count($f)), 'asset' => $asset]), 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=findings&scan=' . (int) ($d['scan_id'] ?? 0), 'tone' => Findings::rank($top) >= 4 ? 'err' : 'warn'];
             case 'new_exposure':
-                $lines = array_map(fn ($i) => '• ' . (Surface::KINDS[$i['kind']] ?? $i['kind']) . ': ' . $i['value'], array_slice((array) ($d['items'] ?? []), 0, 10));
-                return ['title' => 'چیز تازه‌ای از ' . $asset . ' روی اینترنت دیده شد', 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=asset&id=' . self::assetIdFromScan((int) ($d['scan_id'] ?? 0)), 'tone' => 'warn'];
+                $lines = array_map(fn ($i) => '• ' . (isset(Surface::KINDS[$i['kind']]) ? Lang::t(Surface::KINDS[$i['kind']]) : $i['kind']) . ': ' . $i['value'], array_slice((array) ($d['items'] ?? []), 0, 10));
+                return ['title' => Lang::t('چیز تازه‌ای از {asset} روی اینترنت دیده شد', ['asset' => $asset]), 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=asset&id=' . self::assetIdFromScan((int) ($d['scan_id'] ?? 0)), 'tone' => 'warn'];
             case 'scan_completed':
                 $s = (array) ($d['summary'] ?? []);
                 $open = (array) ($s['open'] ?? []);
-                $lines = ['یافته‌ی تازه: ' . Text::fa((int) ($s['new'] ?? 0)) . '، رفع‌شده: ' . Text::fa((int) ($s['fixed'] ?? 0)) . '، دوباره دیده‌شده: ' . Text::fa((int) ($s['reopened'] ?? 0))];
-                $lines[] = 'باز: بحرانی ' . Text::fa((int) ($open['critical'] ?? 0)) . '، بالا ' . Text::fa((int) ($open['high'] ?? 0)) . '، متوسط ' . Text::fa((int) ($open['medium'] ?? 0)) . '، پایین ' . Text::fa((int) ($open['low'] ?? 0));
+                $lines = [Lang::t('یافته‌ی تازه: {new}، رفع‌شده: {fixed}، دوباره دیده‌شده: {reopened}', ['new' => Text::fa((int) ($s['new'] ?? 0)), 'fixed' => Text::fa((int) ($s['fixed'] ?? 0)), 'reopened' => Text::fa((int) ($s['reopened'] ?? 0))])];
+                $lines[] = Lang::t('باز: بحرانی {critical}، بالا {high}، متوسط {medium}، پایین {low}', ['critical' => Text::fa((int) ($open['critical'] ?? 0)), 'high' => Text::fa((int) ($open['high'] ?? 0)), 'medium' => Text::fa((int) ($open['medium'] ?? 0)), 'low' => Text::fa((int) ($open['low'] ?? 0))]);
                 if (!empty($d['retest'])) {
-                    $lines[] = 'این اسکن برای سنجیدن دوباره‌ی یک یافته بود.';
+                    $lines[] = Lang::t('این اسکن برای سنجیدن دوباره‌ی یک یافته بود.');
                 }
                 if (!empty($s['partial'])) {
-                    $lines[] = 'ارزیابی ناقص: ' . $s['partial'];
+                    $lines[] = Lang::t('ارزیابی ناقص: {why}', ['why' => $s['partial']]);
                 }
-                return ['title' => '«' . $d['profile'] . '» روی ' . $asset . ' تمام شد', 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=scan&id=' . (int) ($d['scan_id'] ?? 0), 'tone' => 'ok'];
+                return ['title' => Lang::t('«{profile}» روی {asset} تمام شد', ['profile' => $d['profile'], 'asset' => $asset]), 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=scan&id=' . (int) ($d['scan_id'] ?? 0), 'tone' => 'ok'];
             case 'scan_failed':
                 $lines = [(string) ($d['error'] ?? '')];
                 if ((int) ($d['refunded'] ?? 0) > 0) {
-                    $lines[] = Text::fa((int) $d['refunded']) . ' اعتبار به حسابتان برگشت.';
+                    $lines[] = Lang::t('{n} اعتبار به حسابتان برگشت.', ['n' => Text::fa((int) $d['refunded'])]);
                 }
                 if (!empty($d['ref'])) {
-                    $lines[] = 'کد پیگیری برای پشتیبانی: ' . $d['ref'];
+                    $lines[] = Lang::t('کد پیگیری برای پشتیبانی: {ref}', ['ref' => $d['ref']]);
                 }
-                return ['title' => '«' . $d['profile'] . '» روی ' . $asset . ' انجام نشد', 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=scan&id=' . (int) ($d['scan_id'] ?? 0), 'tone' => 'err'];
+                return ['title' => Lang::t('«{profile}» روی {asset} انجام نشد', ['profile' => $d['profile'], 'asset' => $asset]), 'lines' => $lines, 'link' => 'index.php?m=mcsec&p=scan&id=' . (int) ($d['scan_id'] ?? 0), 'tone' => 'err'];
             case 'findings_fixed':
-                return ['title' => Text::fa((int) ($d['count'] ?? 0)) . ' یافته روی ' . $asset . ' رفع شد', 'lines' => ['در آخرین اسکن دیگر دیده نشدند.'], 'link' => 'index.php?m=mcsec&p=findings&status=fixed', 'tone' => 'ok'];
+                return ['title' => Lang::t('{n} یافته روی {asset} رفع شد', ['n' => Text::fa((int) ($d['count'] ?? 0)), 'asset' => $asset]), 'lines' => [Lang::t('در آخرین اسکن دیگر دیده نشدند.')], 'link' => 'index.php?m=mcsec&p=findings&status=fixed', 'tone' => 'ok'];
             case 'asset_verified':
-                return ['title' => 'مالکیت ' . $asset . ' تأیید شد', 'lines' => ['حالا می‌توانید اسکن بگیرید یا زمان‌بندی بسازید.'], 'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'ok'];
+                return ['title' => Lang::t('مالکیت {asset} تأیید شد', ['asset' => $asset]), 'lines' => [Lang::t('حالا می‌توانید اسکن بگیرید یا زمان‌بندی بسازید.')], 'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'ok'];
             case 'asset_lapsed':
-                return ['title' => 'تأیید مالکیت ' . $asset . ' منقضی شد', 'lines' => ['رکورد یا فایل تأیید دیگر پیدا نمی‌شود؛ زمان‌بندی‌های این دارایی متوقف شد. آن را برگردانید تا دوباره تأیید شود.'], 'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'warn'];
+                return ['title' => Lang::t('تأیید مالکیت {asset} منقضی شد', ['asset' => $asset]), 'lines' => [Lang::t('رکورد یا فایل تأیید دیگر پیدا نمی‌شود؛ زمان‌بندی‌های این دارایی متوقف شد. آن را برگردانید تا دوباره تأیید شود.')], 'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'warn'];
             case 'schedule_paused':
-                return ['title' => 'زمان‌بندی «' . $d['profile'] . '» متوقف شد', 'lines' => ['دلیل: ' . $d['reason'], (string) ($d['detail'] ?? '')], 'link' => 'index.php?m=mcsec&p=schedules', 'tone' => 'warn'];
+                return ['title' => Lang::t('زمان‌بندی «{profile}» متوقف شد', ['profile' => $d['profile']]), 'lines' => [Lang::t('دلیل: {reason}', ['reason' => $d['reason']]), (string) ($d['detail'] ?? '')], 'link' => 'index.php?m=mcsec&p=schedules', 'tone' => 'warn'];
             case 'credits_low':
-                return ['title' => 'اعتبار اسکن شما رو به پایان است', 'lines' => ['مانده: ' . Text::fa((int) ($d['total'] ?? 0)) . ' اعتبار. زمان‌بندی‌ها بدون اعتبار متوقف می‌شوند.'], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'warn'];
+                return ['title' => Lang::t('اعتبار اسکن شما رو به پایان است'), 'lines' => [Lang::t('مانده: {n} اعتبار. زمان‌بندی‌ها بدون اعتبار متوقف می‌شوند.', ['n' => Text::fa((int) ($d['total'] ?? 0))])], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'warn'];
             case 'credits_added':
-                return ['title' => Text::fa((int) ($d['credits'] ?? 0)) . ' اعتبار اسکن افزوده شد', 'lines' => !empty($d['note']) ? [(string) $d['note']] : ['ممنون از خریدتان.'], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'];
+                return ['title' => Lang::t('{n} اعتبار اسکن افزوده شد', ['n' => Text::fa((int) ($d['credits'] ?? 0))]), 'lines' => !empty($d['note']) ? [(string) $d['note']] : [Lang::t('ممنون از خریدتان.')], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'];
             case 'report_ready':
-                return ['title' => 'گزارش «' . ($d['title'] ?? '') . '» آماده است', 'lines' => [], 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
+                return ['title' => Lang::t('گزارش «{title}» آماده است', ['title' => $d['title'] ?? '']), 'lines' => [], 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
             case 'kev_alert':
                 $f = (array) ($d['findings'] ?? []);
                 if (!$f) {
@@ -209,41 +222,44 @@ final class Notify
                 foreach (array_slice($f, 0, 8) as $x) {
                     $lines[] = '• ' . $x['title'] . ' — ' . $x['location'] . ' (' . $x['cve'] . ')';
                 }
-                $lines[] = 'سازمان امنیت سایبری آمریکا (CISA) این آسیب‌پذیری را در فهرست «در حال بهره‌برداری فعال» (KEV) گذاشته است: مهاجمان همین حالا از آن استفاده می‌کنند. همین امروز رفعش کنید.';
-                return ['title' => count($f) === 1 ? 'یک آسیب‌پذیری باز شما اکنون در حال بهره‌برداری فعال است' : Text::fa(count($f)) . ' آسیب‌پذیری باز شما اکنون در حال بهره‌برداری فعال‌اند',
+                $lines[] = Lang::t('سازمان امنیت سایبری آمریکا (CISA) این آسیب‌پذیری را در فهرست «در حال بهره‌برداری فعال» (KEV) گذاشته است: مهاجمان همین حالا از آن استفاده می‌کنند. همین امروز رفعش کنید.');
+                return ['title' => count($f) === 1 ? Lang::t('یک آسیب‌پذیری باز شما اکنون در حال بهره‌برداری فعال است') : Lang::t('{n} آسیب‌پذیری باز شما اکنون در حال بهره‌برداری فعال‌اند', ['n' => Text::fa(count($f))]),
                     'lines' => $lines, 'link' => count($f) === 1 ? 'index.php?m=mcsec&p=finding&id=' . (int) $f[0]['id'] : 'index.php?m=mcsec&p=findings', 'tone' => 'err'];
             case 'site_down':
-                return ['title' => $asset . ' از دسترس خارج شد', 'lines' => ['دو بررسی پشت سر هم پاسخی نگرفت' . (!empty($d['note']) ? ': ' . $d['note'] : '') . '.', 'وقتی دوباره در دسترس شد خبر می‌دهیم.'],
+                return ['title' => Lang::t('{asset} از دسترس خارج شد', ['asset' => $asset]),
+                    'lines' => [!empty($d['note']) ? Lang::t('دو بررسی پشت سر هم پاسخی نگرفت: {note}.', ['note' => $d['note']]) : Lang::t('دو بررسی پشت سر هم پاسخی نگرفت.'), Lang::t('وقتی دوباره در دسترس شد خبر می‌دهیم.')],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'err'];
             case 'site_up':
                 $m = intdiv(max(0, (int) ($d['down_for'] ?? 0)), 60);
-                return ['title' => $asset . ' دوباره در دسترس است', 'lines' => ['حدود ' . ($m >= 120 ? Text::fa(intdiv($m, 60)) . ' ساعت' : Text::fa(max(1, $m)) . ' دقیقه') . ' از دسترس خارج بود.'],
+                return ['title' => Lang::t('{asset} دوباره در دسترس است', ['asset' => $asset]),
+                    'lines' => [$m >= 120 ? Lang::t('حدود {n} ساعت از دسترس خارج بود.', ['n' => Text::fa(intdiv($m, 60))]) : Lang::t('حدود {n} دقیقه از دسترس خارج بود.', ['n' => Text::fa(max(1, $m))])],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'ok'];
             case 'ssl_expiring':
                 $days = (int) ($d['days'] ?? 0);
-                return ['title' => $days < 0 ? 'گواهی SSL ' . $asset . ' منقضی شده است' : 'گواهی SSL ' . $asset . ' ' . ($days === 0 ? 'امروز' : Text::fa($days) . ' روز دیگر') . ' منقضی می‌شود',
-                    'lines' => ['تاریخ انقضا: ' . Text::ymd((string) ($d['end'] ?? '')), $days < 0 ? 'مرورگرها اکنون برای بازدیدکنندگان هشدار امنیتی نشان می‌دهند.' : 'اگر تمدید خودکار دارید، بررسی کنید که کار می‌کند؛ وگرنه همین حالا تمدید کنید.'],
+                return ['title' => $days < 0 ? Lang::t('گواهی SSL {asset} منقضی شده است', ['asset' => $asset])
+                        : ($days === 0 ? Lang::t('گواهی SSL {asset} امروز منقضی می‌شود', ['asset' => $asset]) : Lang::t('گواهی SSL {asset} {n} روز دیگر منقضی می‌شود', ['asset' => $asset, 'n' => Text::fa($days)])),
+                    'lines' => [Lang::t('تاریخ انقضا: {date}', ['date' => Text::ymd((string) ($d['end'] ?? ''))]), $days < 0 ? Lang::t('مرورگرها اکنون برای بازدیدکنندگان هشدار امنیتی نشان می‌دهند.') : Lang::t('اگر تمدید خودکار دارید، بررسی کنید که کار می‌کند؛ وگرنه همین حالا تمدید کنید.')],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => $days < 0 ? 'err' : 'warn'];
             case 'domain_expiring':
                 $days = (int) ($d['days'] ?? 0);
                 $dom = (string) ($d['domain'] ?? '');
-                return ['title' => 'دامنه‌ی ' . $dom . ' ' . ($days <= 0 ? 'امروز' : Text::fa($days) . ' روز دیگر') . ' منقضی می‌شود',
-                    'lines' => ['تاریخ انقضا: ' . Text::ymd((string) ($d['end'] ?? '')), !empty($d['auto']) ? 'تمدید خودکار روشن است؛ مطمئن شوید فاکتور تمدید پرداخت می‌شود.' : 'تمدید خودکار این دامنه خاموش است.',
-                        'دامنه‌ی منقضی‌شده سایت و ایمیل را از کار می‌اندازد و ممکن است دیگری آن را ثبت کند.'],
+                return ['title' => $days <= 0 ? Lang::t('دامنه‌ی {domain} امروز منقضی می‌شود', ['domain' => $dom]) : Lang::t('دامنه‌ی {domain} {n} روز دیگر منقضی می‌شود', ['domain' => $dom, 'n' => Text::fa($days)]),
+                    'lines' => [Lang::t('تاریخ انقضا: {date}', ['date' => Text::ymd((string) ($d['end'] ?? ''))]), !empty($d['auto']) ? Lang::t('تمدید خودکار روشن است؛ مطمئن شوید فاکتور تمدید پرداخت می‌شود.') : Lang::t('تمدید خودکار این دامنه خاموش است.'),
+                        Lang::t('دامنه‌ی منقضی‌شده سایت و ایمیل را از کار می‌اندازد و ممکن است دیگری آن را ثبت کند.')],
                     'link' => 'clientarea.php?action=domains', 'tone' => $days <= 7 ? 'err' : 'warn'];
             case 'threat_alert':
                 // product and CVE come from CISA's catalogue; hosts are this account's own assets
                 $hosts = array_slice(array_map('strval', (array) ($d['assets'] ?? [])), 0, 5);
-                return ['title' => 'آسیب‌پذیری تازه‌ی ' . (string) ($d['product'] ?? '') . ' در حمله‌های واقعی استفاده می‌شود',
+                return ['title' => Lang::t('آسیب‌پذیری تازه‌ی {product} در حمله‌های واقعی استفاده می‌شود', ['product' => (string) ($d['product'] ?? '')]),
                     'lines' => array_values(array_filter([(string) ($d['cve'] ?? '') . ((string) ($d['name'] ?? '') !== '' ? ' — ' . (string) $d['name'] : ''),
-                        'این فناوری روی ' . implode('، ', $hosts) . ' دیده شده است.',
-                        'دیده شدن فناوری یعنی نسخه‌ی شما حتماً آسیب‌پذیر نیست. پیشنهاد ما: نرم‌افزار را به‌روز کنید و با «اسکن آسیب‌پذیری» مطمئن شوید.'], 'strlen')),
+                        Lang::t('این فناوری روی {hosts} دیده شده است.', ['hosts' => Lang::join($hosts)]),
+                        Lang::t('دیده شدن فناوری یعنی نسخه‌ی شما حتماً آسیب‌پذیر نیست. پیشنهاد ما: نرم‌افزار را به‌روز کنید و با «اسکن آسیب‌پذیری» مطمئن شوید.')], 'strlen')),
                     'link' => 'index.php?m=mcsec&p=scans#new', 'tone' => 'warn'];
             case 'billing':
-                // text and link are written by this module (Credits, Codes), never by a customer
+                // text and link are written by this module (Credits, Codes) in the account's language, never by a customer
                 return ['title' => (string) ($d['title'] ?? ''), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => (string) ($d['link'] ?? 'index.php?m=mcsec&p=credits'), 'tone' => (string) ($d['tone'] ?? 'info')];
             case 'digest':
-                return ['title' => (string) ($d['title'] ?? 'گزارش دوره‌ای امنیت'), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
+                return ['title' => (string) ($d['title'] ?? Lang::t('گزارش دوره‌ای امنیت')), 'lines' => array_map('strval', (array) ($d['lines'] ?? [])), 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
         }
         return null;
     }
@@ -286,7 +302,8 @@ final class Notify
             $p = json_decode((string) $o->payload, true) ?: [];
             $acc = Accounts::get((int) $o->client_id);
             try {
-                $r = self::send((string) $o->channel, (int) $o->client_id, $acc, (array) ($p['msg'] ?? []), (string) $o->event, (array) ($p['data'] ?? []));
+                // the wrapper of an e-mail is written now, in the language the message itself was written in: the account's
+                $r = Lang::with(Lang::forClient((int) $o->client_id), fn () => self::send((string) $o->channel, (int) $o->client_id, $acc, (array) ($p['msg'] ?? []), (string) $o->event, (array) ($p['data'] ?? [])));
             } catch (\Throwable $e) {
                 $r = ['ok' => false, 'error' => $e->getMessage(), 'final' => false];
             }
@@ -369,7 +386,7 @@ final class Notify
                     continue;
                 }
                 if (preg_match('~^/id\b~i', trim((string) $m['text']))) {
-                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'شناسه‌ی این گفت‌وگو: ' . $m['chat']['id']]);
+                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'شناسه‌ی این گفت‌وگو: ' . $m['chat']['id']]); // i18n-skip (no account behind this chat: the admin's own check)
                     continue;
                 }
                 if (!preg_match('~^(?:/start\s+)?([2-9A-HJ-NP-Z]{8})\s*$~', strtoupper(trim(Text::toAscii((string) $m['text']))), $mm)) {
@@ -377,20 +394,22 @@ final class Notify
                     $linked = Settings::bool('assistant_bots') ? Db::table('mod_mcsec_accounts')->where($which === 'telegram' ? 'tg_chat' : 'bale_chat', (string) $m['chat']['id'])->first() : null;
                     if ($linked) {
                         $asked++;
-                        $answer = $asked <= 3 ? Assistant::bot((int) $linked->client_id, (string) $m['text'], $which . ':' . (int) ($u['update_id'] ?? 0)) : 'الان چند پرسش با هم رسیده است. چند دقیقه‌ی دیگر دوباره بپرسید.';
+                        // a linked chat is answered in its account's language
+                        $answer = Lang::with(Lang::forClient((int) $linked->client_id), fn () => $asked <= 3 ? Assistant::bot((int) $linked->client_id, (string) $m['text'], $which . ':' . (int) ($u['update_id'] ?? 0)) : Lang::t('الان چند پرسش با هم رسیده است. چند دقیقه‌ی دیگر دوباره بپرسید.'));
                         self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => $answer]);
                         continue;
                     }
-                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'برای اتصال، کد ۸ نویسه‌ای را از صفحه‌ی «اعلان‌ها» در بخش امنیت سایبری حساب کاربری‌تان بفرستید.']);
+                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'برای اتصال، کد ۸ نویسه‌ای را از صفحه‌ی «اعلان‌ها» در بخش امنیت سایبری حساب کاربری‌تان بفرستید.']); // i18n-skip (a chat that is not linked to any account yet)
                     continue;
                 }
                 $acc = Db::table('mod_mcsec_accounts')->where('link_code', $mm[1])->first();
                 if (!$acc) {
-                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'این کد پیدا نشد یا منقضی شده است. کد تازه را از صفحه‌ی اعلان‌ها بردارید.']);
+                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'این کد پیدا نشد یا منقضی شده است. کد تازه را از صفحه‌ی اعلان‌ها بردارید.']); // i18n-skip (no account behind this chat)
                     continue;
                 }
                 Accounts::update((int) $acc->client_id, [$which === 'telegram' ? 'tg_chat' : 'bale_chat' => (string) $m['chat']['id'], 'link_code' => Crypto::code(8)]);
-                self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'اتصال برقرار شد. از این پس اعلان‌های امنیتی حساب «' . Whmcs::clientName((int) $acc->client_id) . '» را این‌جا می‌گیرید.']);
+                self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => Lang::with(Lang::forClient((int) $acc->client_id),
+                    fn () => Lang::t('اتصال برقرار شد. از این پس اعلان‌های امنیتی حساب «{name}» را این‌جا می‌گیرید.', ['name' => Whmcs::clientName((int) $acc->client_id)]))]);
                 $n++;
             }
             Kv::set('bot:' . $which . ':offset', (string) $offset);
@@ -408,10 +427,10 @@ final class Notify
             }
         }
         $color = ['err' => '#b42318', 'warn' => '#b54708', 'ok' => '#067647'][$msg['tone'] ?? ''] ?? '#1d4ed8';
-        return '<div dir="rtl" lang="fa" style="font-family:Tahoma,Arial,sans-serif;line-height:1.9;color:#1f2937;max-width:620px">'
+        return '<div ' . Lang::attrs() . ' style="font-family:Tahoma,Arial,sans-serif;line-height:1.9;color:#1f2937;max-width:620px">'
             . '<div style="border-inline-start:4px solid ' . $color . ';padding:4px 12px;margin:0 0 12px"><strong style="font-size:16px">' . $e($msg['title'] ?? '') . '</strong></div>'
-            . $lines . '<p style="margin:16px 0"><a href="' . $e($url) . '" style="background:' . $color . ';color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none">دیدن در پنل</a></p>'
-            . '<p style="font-size:12px;color:#6b7280">این پیام از بخش امنیت سایبری مارال کلاد است. تنظیم اعلان‌ها: صفحه‌ی «اعلان‌ها».</p></div>';
+            . $lines . '<p style="margin:16px 0"><a href="' . $e($url) . '" style="background:' . $color . ';color:#fff;padding:8px 16px;border-radius:8px;text-decoration:none">' . Lang::t('دیدن در پنل') . '</a></p>'
+            . '<p style="font-size:12px;color:#6b7280">' . Lang::t('این پیام از بخش امنیت سایبری مارال کلاد است. تنظیم اعلان‌ها: صفحه‌ی «اعلان‌ها».') . '</p></div>';
     }
 
     /** Daily: the weekly/monthly digest of each account whose time has come (Tehran time). */
@@ -439,7 +458,8 @@ final class Notify
             $mode = (string) (self::prefs($cid)['digest'] ?? 'weekly');
             if (($mode === 'weekly' && $isWeekDay) || ($mode === 'monthly' && $isMonthDay)) {
                 $days = $mode === 'weekly' ? 7 : 31;
-                $rid = Reports::periodic($cid, Clock::now() - $days * 86400, Clock::now(), $mode);
+                // the digest (report, notice, e-mail) is written in the account's own language
+                $rid = (int) Lang::with(Lang::forClient($cid), fn () => Reports::periodic($cid, Clock::now() - $days * 86400, Clock::now(), $mode));
                 $n += $rid > 0 ? 1 : 0;
             }
             Accounts::update($cid, ['digest_at' => Clock::now()]);

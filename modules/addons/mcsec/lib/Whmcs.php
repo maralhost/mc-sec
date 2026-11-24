@@ -7,7 +7,8 @@ namespace McSec;
 /**
  * The only place that reads WHMCS's own tables (tbl*) and calls localAPI. Reads are batched (about 13k client
  * accounts). Writes to WHMCS data happen only through localAPI and only through the calls listed in CLAUDE.md:
- * SendEmail (custom 'general' message) and CreateInvoice (credit packs). `noemail` is never sent.
+ * SendEmail (custom 'general' message), CreateInvoice (credit packs) and OpenTicket (the customer's own «درخواست بررسی
+ * کارشناس», Support::open). `noemail` is never sent.
  */
 final class Whmcs
 {
@@ -31,6 +32,20 @@ final class Whmcs
         if (!array_key_exists($clientId, $cache)) {
             $cache[$clientId] = Db::table('tblclients')->where('id', $clientId)
                 ->first(['id', 'firstname', 'lastname', 'companyname', 'email', 'groupid', 'currency', 'status']);
+        }
+        return $cache[$clientId];
+    }
+
+    /** The WHMCS language name of an account ('farsi', 'english', …; '' = the system's default). */
+    public static function clientLanguage(int $clientId): string
+    {
+        static $cache = [];
+        if (!array_key_exists($clientId, $cache)) {
+            try {
+                $cache[$clientId] = Db::hasColumn('tblclients', 'language') ? (string) (Db::table('tblclients')->where('id', $clientId)->value('language') ?? '') : '';
+            } catch (\Throwable $e) {
+                $cache[$clientId] = '';
+            }
         }
         return $cache[$clientId];
     }
@@ -190,6 +205,69 @@ final class Whmcs
             'itemdescription1' => $description, 'itemamount1' => number_format($amount, 2, '.', ''), 'itemtaxed1' => true,
         ]);
         return $r['ok'] ? ['ok' => true, 'invoice_id' => (int) ($r['data']['invoiceid'] ?? 0), 'error' => ''] : ['ok' => false, 'invoice_id' => 0, 'error' => $r['error']];
+    }
+
+    /**
+     * A support ticket in the customer's own name (their request for an expert, sent by themselves in a POST).
+     * Plain text only (no markdown), and the service is attached only when it is a plan service of this account.
+     * @return array{ok:bool,id:int,tid:string,c:string,error:string}
+     */
+    public static function openTicket(int $clientId, int $deptId, string $subject, string $message, int $serviceId = 0): array
+    {
+        $p = ['clientid' => $clientId, 'deptid' => $deptId, 'subject' => $subject, 'message' => $message, 'priority' => 'Medium', 'markdown' => false];
+        if ($serviceId > 0) {
+            $p['serviceid'] = $serviceId;
+        }
+        $r = self::api('OpenTicket', $p);
+        return $r['ok'] ? ['ok' => true, 'id' => (int) ($r['data']['id'] ?? 0), 'tid' => (string) ($r['data']['tid'] ?? ''), 'c' => (string) ($r['data']['c'] ?? ''), 'error' => '']
+            : ['ok' => false, 'id' => 0, 'tid' => '', 'c' => '', 'error' => $r['error']];
+    }
+
+    /** The department for expert requests: the admin's choice when it exists, otherwise the first one customers can see. */
+    public static function supportDept(int $preferred): int
+    {
+        try {
+            $rows = Db::rows(Db::table('tblticketdepartments')->orderBy('order')->orderBy('id')->limit(100)->select(['id', 'hidden']));
+        } catch (\Throwable $e) {
+            return max(0, $preferred);
+        }
+        $first = 0;
+        foreach ($rows as $d) {
+            if ((int) $d->id === $preferred) {
+                return $preferred;
+            }
+            if ($first === 0 && (string) ($d->hidden ?? '') === '') {
+                $first = (int) $d->id;
+            }
+        }
+        return $first;
+    }
+
+    /** @return array<int,string> id => name, for the admin's settings help */
+    public static function departments(): array
+    {
+        $out = [];
+        try {
+            foreach (Db::rows(Db::table('tblticketdepartments')->orderBy('order')->orderBy('id')->limit(100)->select(['id', 'name'])) as $d) {
+                $out[(int) $d->id] = (string) $d->name;
+            }
+        } catch (\Throwable $e) {
+        }
+        return $out;
+    }
+
+    /** The account's active plan service (mcsecplan), so a ticket is filed under «امنیت سایبری»; 0 when it has none. */
+    public static function planService(int $clientId): int
+    {
+        $ids = array_map(fn ($p) => (int) $p->id, self::planProducts());
+        if (!$ids) {
+            return 0;
+        }
+        try {
+            return (int) (Db::table('tblhosting')->where('userid', $clientId)->whereIn('packageid', $ids)->whereIn('domainstatus', ['Active', 'Suspended'])->orderBy('id')->value('id') ?? 0);
+        } catch (\Throwable $e) {
+            return 0;
+        }
     }
 
     public static function invoice(int $invoiceId): ?object

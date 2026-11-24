@@ -68,6 +68,19 @@ final class Verify
             self::instant($asset);
             return ['ok' => true, 'method' => self::instantMethod($asset), 'note' => ''];
         }
+        // what was not found is written for the account that will read it (the worker has no visitor)
+        return Lang::with(self::noteLang((int) $asset->client_id), fn () => self::probe($asset));
+    }
+
+    /** The language of a stored note: the visitor's when the account's own person is on the page, else the account's. */
+    private static function noteLang(int $clientId): string
+    {
+        return Lang::$force !== null || (int) ($_SESSION['uid'] ?? 0) === $clientId ? Lang::code() : Lang::forClient($clientId);
+    }
+
+    /** @return array{ok:bool,method:string,note:string} */
+    private static function probe(object $asset): array
+    {
         $acc = Accounts::ensure((int) $asset->client_id);
         $proof = Accounts::proof($acc);
         $notes = [];
@@ -91,7 +104,7 @@ final class Verify
             }
             $notes[] = $r['note'];
         } else {
-            $notes[] = 'بازه‌ی IP با روش خودکار تأیید نمی‌شود؛ از «درخواست تأیید دستی» استفاده کنید یا IPها را تک‌تک بیفزایید.';
+            $notes[] = Lang::t('بازه‌ی IP با روش خودکار تأیید نمی‌شود؛ از «درخواست تأیید دستی» استفاده کنید یا IPها را تک‌تک بیفزایید.');
         }
         $note = mb_substr(implode(' ', array_filter($notes)), 0, 250);
         Db::table('mod_mcsec_assets')->where('id', $asset->id)->update(['checked_at' => Clock::now(), 'check_note' => $note]);
@@ -119,7 +132,7 @@ final class Verify
                 }
             }
         }
-        return ['ok' => false, 'note' => $found ? 'رکورد TXT پیدا شد ولی مقدارش با کد این حساب یکی نیست.' : 'رکورد TXT هنوز دیده نمی‌شود (ممکن است تا چند ساعت طول بکشد).'];
+        return ['ok' => false, 'note' => $found ? Lang::t('رکورد TXT پیدا شد ولی مقدارش با کد این حساب یکی نیست.') : Lang::t('رکورد TXT هنوز دیده نمی‌شود (ممکن است تا چند ساعت طول بکشد).')];
     }
 
     public static function tryFile(string $host, string $proof, string $token): array
@@ -133,10 +146,10 @@ final class Verify
                 return ['ok' => true, 'note' => ''];
             }
             if ($r['status'] === 200) {
-                return ['ok' => false, 'note' => 'فایل تأیید باز شد ولی کد درست در آن نیست.'];
+                return ['ok' => false, 'note' => Lang::t('فایل تأیید باز شد ولی کد درست در آن نیست.')];
             }
         }
-        return ['ok' => false, 'note' => 'فایل تأیید روی سایت پیدا نشد.'];
+        return ['ok' => false, 'note' => Lang::t('فایل تأیید روی سایت پیدا نشد.')];
     }
 
     public static function tryMeta(string $domain, string $proof, string $token): array
@@ -152,18 +165,18 @@ final class Verify
                         return ['ok' => true, 'note' => ''];
                     }
                 }
-                return ['ok' => false, 'note' => 'تگ متا هست ولی مقدارش درست نیست.'];
+                return ['ok' => false, 'note' => Lang::t('تگ متا هست ولی مقدارش درست نیست.')];
             }
-            return ['ok' => false, 'note' => 'تگ متا در صفحه‌ی اصلی پیدا نشد.'];
+            return ['ok' => false, 'note' => Lang::t('تگ متا در صفحه‌ی اصلی پیدا نشد.')];
         }
-        return ['ok' => false, 'note' => 'صفحه‌ی اصلی سایت باز نشد.'];
+        return ['ok' => false, 'note' => Lang::t('صفحه‌ی اصلی سایت باز نشد.')];
     }
 
     public static function tryPtr(object $asset): array
     {
         $host = Net::ptr((string) $asset->value);
         if ($host === '') {
-            return ['ok' => false, 'note' => 'DNS معکوس (PTR) برای این IP تعریف نشده است.'];
+            return ['ok' => false, 'note' => Lang::t('DNS معکوس (PTR) برای این IP تعریف نشده است.')];
         }
         $domains = Db::table('mod_mcsec_assets')->where('client_id', $asset->client_id)->where('status', 'verified')->where('kind', 'domain')->pluck('value');
         $domains = is_array($domains) ? $domains : $domains->all();
@@ -172,7 +185,7 @@ final class Verify
                 return ['ok' => true, 'note' => ''];
             }
         }
-        return ['ok' => false, 'note' => 'DNS معکوس این IP (' . $host . ') زیر هیچ دامنه‌ی تأییدشده‌ی شما نیست.'];
+        return ['ok' => false, 'note' => Lang::t('DNS معکوس این IP ({host}) زیر هیچ دامنه‌ی تأییدشده‌ی شما نیست.', ['host' => $host])];
     }
 
     /** A GET to the customer's own host, pinned to a public IP (no SSRF into our network). */

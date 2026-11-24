@@ -97,7 +97,7 @@ foreach ([['kind' => 'port', 'value' => 'shop.example:443'], ['kind' => 'port', 
 Notify::event(1, 'site_down', ['asset' => 'blog.example', 'asset_id' => (int) $blog->id, 'note' => 'HTTP 502'], 't1');
 Notify::event(2, 'site_down', ['asset' => 'other.example', 'asset_id' => (int) $theirs->id, 'note' => 'secret-of-account-2'], 't2');
 $h = html(client_get(['p' => 'home']));
-ok(str_contains($h, 'class="mcs-card mcs-hero"') && str_contains($h, 'کار فوری دارید') && str_contains($h, 'از دسترس خارج است'), 'a sentence says how things are');
+ok(str_contains($h, 'class="mcs-console"') && str_contains($h, 'mcs-radar') && str_contains($h, 'class="mcs-donut"') && str_contains($h, 'کار فوری دارید') && str_contains($h, 'از دسترس خارج است'), 'a sentence says how things are');
 ok(str_contains($h, 'اول این‌ها را انجام دهید') && substr_count($h, 'چطور رفع کنم؟') === 3 && strpos($h, 'SQL Injection') < strpos($h, 'درگاه MySQL'), 'three jobs, the critical one first');
 ok(!str_contains($h, '<script>alert(9)') && !str_contains($h, '<b>nginx</b>'), 'finding titles and scanned technology names are escaped');
 ok(str_contains($h, 'class="mcs-sites"') && substr_count($h, 'class="mcs-site') >= 3 && str_contains($h, 'p=shot&amp;id=' . (int) $shop->id) && !str_contains($h, 'p=shot&amp;id=' . (int) $blog->id), 'a card per site; a picture only where one is stored');
@@ -126,7 +126,7 @@ client_post('view_mode', ['view' => 'advanced'], [], false);
 
 section('advanced view');
 $h = html(client_get(['p' => 'home']));
-ok(str_contains($h, 'class="mcs-stats"') && str_contains($h, 'کار فوری') && str_contains($h, '۱ بحرانی، ۱ بالا') && str_contains($h, '۱ از ۲') && str_contains($h, '۱۱ روز'), 'the strip: urgent work, availability and the nearest certificate');
+ok(str_contains($h, 'class="mcs-tiles"') && str_contains($h, 'سطح حمله از بیرون') && str_contains($h, 'کار فوری') && str_contains($h, '۱ بحرانی، ۱ بالا') && str_contains($h, '۱ از ۲') && str_contains($h, '۱۱ روز'), 'the strip: urgent work, availability and the nearest certificate');
 ok(str_contains($h, 'دارایی‌های شما') && str_contains($h, 'mcs-dots') && substr_count($h, '<i class="c"></i>') >= 1 && str_contains($h, 'mcs-scorebar'), 'one row per asset with its findings as squares and a score bar');
 ok(str_contains($h, '443') && str_contains($h, 'WordPress') && !str_contains($h, '<b>nginx</b>') && str_contains($h, 'گواهی‌های SSL') && str_contains($h, 'Let&#039;s Encrypt'), 'ports, technologies and certificates, escaped');
 ok(str_contains($h, 'به تفکیک ابزار') && str_contains($h, 'Nuclei') && str_contains($h, 'ZAP') && str_contains($h, 'بررسی پایه'), 'open findings per tool');

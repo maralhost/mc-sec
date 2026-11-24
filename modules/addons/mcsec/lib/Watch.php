@@ -64,31 +64,31 @@ final class Watch
         $a = Db::table('mod_mcsec_assets')->where('client_id', $clientId)->where('value', $domain)->where('status', '!=', 'removed')->first();
         $name = '<bdi dir="ltr">' . $e($domain) . '</bdi>';
         if (!$a) {
-            $text = 'امنیت ' . $name . ' هنوز بررسی نشده است. «بررسی سلامت پایه» رایگان است و کمتر از دو دقیقه طول می‌کشد.';
+            $text = Lang::t('امنیت {site} هنوز بررسی نشده است. «بررسی سلامت پایه» رایگان است و کمتر از دو دقیقه طول می‌کشد.', ['site' => $name]);
             $href = 'index.php?m=mcsec&p=assets&add=' . rawurlencode($domain) . '#add';
-            $btn = 'افزودن و بررسی';
+            $btn = Lang::t('افزودن و بررسی');
             $tone = '#1d4ed8';
         } elseif ($a->status !== 'verified') {
-            $text = 'برای بررسی امنیت ' . $name . ' یک قدم مانده است: تأیید مالکیت.';
+            $text = Lang::t('برای بررسی امنیت {site} یک قدم مانده است: تأیید مالکیت.', ['site' => $name]);
             $href = 'index.php?m=mcsec&p=asset&id=' . (int) $a->id;
-            $btn = 'تأیید مالکیت';
+            $btn = Lang::t('تأیید مالکیت');
             $tone = '#b45309';
         } elseif ((int) $a->last_scan_at === 0 || (int) $a->score < 0) {
-            $text = $name . ' آماده‌ی بررسی است؛ هنوز اسکنی گرفته نشده.';
+            $text = Lang::t('{site} آماده‌ی بررسی است؛ هنوز اسکنی گرفته نشده.', ['site' => $name]);
             $href = 'index.php?m=mcsec&p=asset&id=' . (int) $a->id;
-            $btn = 'گرفتن اولین اسکن';
+            $btn = Lang::t('گرفتن اولین اسکن');
             $tone = '#1d4ed8';
         } else {
             $c = Assets::counts($a);
             $urgent = (int) $c['critical'] + (int) $c['high'];
-            $text = 'امتیاز امنیت ' . $name . ': <strong>' . $e(Text::fa((int) $a->score)) . '</strong> از ۱۰۰ (' . $e(Score::label((int) $a->score)) . '). '
-                . ($urgent > 0 ? $e(Text::fa($urgent)) . ' مشکل بحرانی یا مهم باز است.' : 'مشکل بحرانی یا مهمی باز نیست.')
-                . ' <span style="opacity:.75">آخرین بررسی: ' . $e(Text::date((int) $a->last_scan_at, false)) . '</span>';
+            $text = Lang::t('امتیاز امنیت {site}: <strong>{score}</strong> از ۱۰۰ ({label}).', ['site' => $name, 'score' => $e(Text::fa((int) $a->score)), 'label' => $e(Lang::t(Score::label((int) $a->score)))]) . ' '
+                . ($urgent > 0 ? Lang::t('{n} مشکل بحرانی یا مهم باز است.', ['n' => $e(Text::fa($urgent))]) : Lang::t('مشکل بحرانی یا مهمی باز نیست.'))
+                . ' <span style="opacity:.75">' . Lang::t('آخرین بررسی: {date}', ['date' => $e(Text::date((int) $a->last_scan_at, false))]) . '</span>';
             $href = 'index.php?m=mcsec&p=asset&id=' . (int) $a->id;
-            $btn = 'دیدن جزئیات';
+            $btn = Lang::t('دیدن جزئیات');
             $tone = $urgent > 0 ? '#b91c1c' : '#15803d';
         }
-        return '<div class="mcs-svc" dir="rtl" lang="fa" style="margin:12px 0;padding:12px 16px;border:1px solid rgba(127,140,160,.35);border-inline-start:4px solid ' . $tone . ';border-radius:10px;line-height:1.9;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between">'
+        return '<div class="mcs-svc" ' . Lang::attrs() . ' style="margin:12px 0;padding:12px 16px;border:1px solid rgba(127,140,160,.35);border-inline-start:4px solid ' . $tone . ';border-radius:10px;line-height:1.9;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;justify-content:space-between">'
             . '<div><strong>' . $e(Settings::menuLabel()) . '</strong><br>' . $text . '</div><a class="btn btn-default btn-sm" href="' . $e($href) . '">' . $e($btn) . '</a></div>';
     }
 }

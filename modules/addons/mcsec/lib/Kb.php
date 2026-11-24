@@ -1393,10 +1393,24 @@ curl -s -o /dev/null -w "%{http_code}\n" https://example.com/path'],
         ['~disclos|error|exception|leak|verbose|sensitive|exposure~', 'info-disclosure'],
     ];
 
-    /** The entry for a kb key, or null when the key is unknown. */
+    /** The entry for a kb key in the reader's language (English from lang/en/kb_*.php), or null when the key is unknown. */
     public static function get(string $key): ?array
     {
-        return self::ENTRIES[$key] ?? null;
+        $e = self::ENTRIES[$key] ?? null;
+        if ($e === null || Lang::fa()) {
+            return $e;
+        }
+        foreach (['title', 'why', 'effort', 'maral'] as $f) {
+            if (isset($e[$f])) {
+                $e[$f] = Lang::t((string) $e[$f]);
+            }
+        }
+        $e['steps'] = array_map(fn ($s) => Lang::t((string) $s), (array) ($e['steps'] ?? []));
+        foreach ((array) ($e['snippets'] ?? []) as $i => $sn) {
+            $e['snippets'][$i]['label'] = Lang::t((string) ($sn['label'] ?? ''));
+            $e['snippets'][$i]['code'] = Lang::t((string) ($sn['code'] ?? ''));
+        }
+        return $e;
     }
 
     /**

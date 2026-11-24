@@ -57,13 +57,14 @@ final class Reports
         if ($userId > 0 && !RateLimit::hit('report:' . $clientId, 20, 86400)) {
             return ['ok' => false, 'error' => 'امروز گزارش‌های زیادی خواسته‌اید. فردا دوباره امتحان کنید.'];
         }
-        $title = self::title($clientId, $kind, $scanId, $assetId);
+        // the title is stored and read later: written in the account's language, like the report itself
+        $title = Lang::with(Lang::forClient($clientId), fn () => self::title($clientId, $kind, $scanId, $assetId));
         $id = Db::table('mod_mcsec_reports')->insertGetId(['client_id' => $clientId, 'kind' => $kind, 'scan_id' => $scanId, 'asset_id' => $assetId, 'title' => $title,
             'status' => 'queued', 'ai' => $ai ? 1 : 0, 'requested_by' => $userId, 'created_at' => Clock::now(),
             'period_from' => (int) ($scope['from'] ?? 0), 'period_to' => (int) ($scope['to'] ?? 0)]);
         $cost = $ai ? Rules::cost($clientId, max(0, Settings::int('ai_report_cost'))) : 0;
         if ($cost > 0) {
-            $paid = Credits::spend($clientId, $cost, 'report:' . $id, 'گزارش هوش مصنوعی: ' . $title);
+            $paid = Credits::spend($clientId, $cost, 'report:' . $id, Lang::t('گزارش هوش مصنوعی: {title}', ['title' => $title]));
             if (!$paid['ok']) {
                 Db::table('mod_mcsec_reports')->where('id', $id)->delete();
                 return ['ok' => false, 'error' => $paid['error']];
@@ -81,10 +82,10 @@ final class Reports
         $asset = $assetId > 0 ? Db::table('mod_mcsec_assets')->where('id', $assetId)->first() : null;
         $s = $scanId > 0 ? Db::table('mod_mcsec_scans')->where('id', $scanId)->first() : null;
         return match ($kind) {
-            'scan' => (Catalog::label((string) ($s->profile ?? ''), 'اسکن')) . ' — ' . ($asset->value ?? ''),
-            'asset' => 'وضعیت امنیت ' . ($asset->value ?? ''),
-            'periodic' => 'گزارش دوره‌ای امنیت — ' . Text::date(Clock::now(), false),
-            default => 'گزارش کامل امنیت — ' . Text::date(Clock::now(), false),
+            'scan' => Lang::t(Catalog::label((string) ($s->profile ?? ''), 'اسکن')) . ' — ' . ($asset->value ?? ''),
+            'asset' => Lang::t('وضعیت امنیت {asset}', ['asset' => $asset->value ?? '']),
+            'periodic' => Lang::t('گزارش دوره‌ای امنیت — {date}', ['date' => Text::date(Clock::now(), false)]),
+            default => Lang::t('گزارش کامل امنیت — {date}', ['date' => Text::date(Clock::now(), false)]),
         };
     }
 
@@ -104,12 +105,19 @@ final class Reports
         return $n;
     }
 
+    /** Builds one queued report in the language of its account (the worker has no visitor). */
     public static function build(int $id): void
     {
         $r = Db::table('mod_mcsec_reports')->where('id', $id)->where('status', 'queued')->first();
         if (!$r) {
             return;
         }
+        Lang::with(Lang::forClient((int) $r->client_id), fn () => self::buildNow($r));
+    }
+
+    private static function buildNow(object $r): void
+    {
+        $id = (int) $r->id;
         try {
             $data = self::compose($r);
             $aiError = '';
@@ -130,7 +138,7 @@ final class Reports
             }
         } catch (\Throwable $e) {
             $ref = Trace::error('worker', 'report.build', $e->getMessage(), Trace::exception($e), ['client_id' => (int) $r->client_id]);
-            Db::table('mod_mcsec_reports')->where('id', $id)->update(['status' => 'failed', 'error' => 'ساخت گزارش انجام نشد.' . Trace::forCustomer($ref)]);
+            Db::table('mod_mcsec_reports')->where('id', $id)->update(['status' => 'failed', 'error' => Lang::t('ساخت گزارش انجام نشد.') . Trace::forCustomer($ref)]);
             if ((int) $r->credits > 0) {
                 Credits::refund((int) $r->client_id, 'report:' . $r->id, 'بازگشت اعتبار گزارش ناموفق', 0);
             }
@@ -221,26 +229,26 @@ final class Reports
     {
         $lines = [];
         if ($score < 0) {
-            return ['هنوز اسکنی کامل نشده است؛ پس از اولین اسکن، وضعیت این‌جا خلاصه می‌شود.'];
+            return [Lang::t('هنوز اسکنی کامل نشده است؛ پس از اولین اسکن، وضعیت این‌جا خلاصه می‌شود.')];
         }
-        $lines[] = 'امتیاز امنیت: ' . Text::fa($score) . ' از ۱۰۰ (' . Score::label($score) . ').';
+        $lines[] = Lang::t('امتیاز امنیت: {score} از ۱۰۰ ({label}).', ['score' => Text::fa($score), 'label' => Lang::t(Score::label($score))]);
         $urgent = $c['critical'] + $c['high'];
         if ($urgent > 0) {
-            $lines[] = Text::fa($urgent) . ' مشکل بحرانی یا مهم باز است که بهتر است همین هفته رفع شود.';
+            $lines[] = Lang::t('{n} مشکل بحرانی یا مهم باز است که بهتر است همین هفته رفع شود.', ['n' => Text::fa($urgent)]);
             $top = array_values(array_filter($findings, fn ($f) => in_array($f['severity'], ['critical', 'high'], true)));
             foreach (array_slice($top, 0, 3) as $f) {
-                $lines[] = 'اولویت: ' . $f['title'] . ' (' . $f['location'] . ')';
+                $lines[] = Lang::t('اولویت: {title} ({where})', ['title' => Lang::whole((string) $f['title']), 'where' => $f['location']]);
             }
         } elseif ($c['medium'] > 0) {
-            $lines[] = 'مشکل بحرانی باز نیست؛ ' . Text::fa($c['medium']) . ' مورد با اهمیت متوسط مانده که در برنامه‌ی این ماه بگنجانید.';
+            $lines[] = Lang::t('مشکل بحرانی باز نیست؛ {n} مورد با اهمیت متوسط مانده که در برنامه‌ی این ماه بگنجانید.', ['n' => Text::fa($c['medium'])]);
         } else {
-            $lines[] = 'مشکل مهمی باز نیست. اسکن‌های دوره‌ای را ادامه دهید تا تغییرها دیده شوند.';
+            $lines[] = Lang::t('مشکل مهمی باز نیست. اسکن‌های دوره‌ای را ادامه دهید تا تغییرها دیده شوند.');
         }
         if ($new > 0) {
-            $lines[] = Text::fa($new) . ' یافته‌ی تازه در این دوره دیده شد.';
+            $lines[] = Lang::t('{n} یافته‌ی تازه در این دوره دیده شد.', ['n' => Text::fa($new)]);
         }
         if ($fixed > 0) {
-            $lines[] = Text::fa($fixed) . ' مشکل رفع شد؛ آفرین.';
+            $lines[] = Lang::t('{n} مشکل رفع شد؛ آفرین.', ['n' => Text::fa($fixed)]);
         }
         return $lines;
     }
@@ -260,16 +268,31 @@ final class Reports
             'fixed_recently' => count($data['fixed']), 'surface' => ['ports' => array_slice($data['surface']['ports'] ?? [], 0, 25), 'technologies' => array_slice($data['surface']['tech'] ?? [], 0, 25)],
             'findings' => $items];
         $user = "Analyse this scan data and write the report.\n<scan_data>\n" . Db::json($payload) . "\n</scan_data>\n"
-            . "Return JSON exactly in this shape (all prose in Persian):\n"
+            . 'Return JSON exactly in this shape (all prose in ' . (Lang::fa() ? 'Persian' : 'English') . "):\n"
             . '{"executive_summary":"3-6 sentences for a business owner","risk_level":"critical|high|medium|low","key_risks":[{"title":"","impact":"","finding_ids":[1]}],'
-            . '"quick_wins":["short actionable items that take under an hour"],"plan":[{"when":"این هفته|این ماه|سه ماه آینده","action":""}],'
-            . '"findings":[{"id":1,"priority":1,"why":"why it matters here, 1-2 sentences","steps":["concrete step"],"snippet":{"label":"nginx|Apache|WordPress|cPanel|DNS|...","code":""},"verify":"how to check the fix","effort":"e.g. ۱۵ دقیقه","needs_confirmation":false}]}'
-            . "\nCover every finding id you were given in \"findings\" (at most " . self::AI_FINDINGS . '); keep snippets short and correct; omit "snippet" when not applicable.';
+            . '"quick_wins":["short actionable items that take under an hour"],"plan":[{"when":"' . (Lang::fa() ? 'این هفته|این ماه|سه ماه آینده' : 'This week|This month|Next three months') . '","action":""}],' // i18n-skip (prompt)
+            . '"findings":[{"id":1,"priority":1,"why":"why it matters here, 1-2 sentences","steps":["concrete step"],"snippet":{"label":"nginx|Apache|WordPress|cPanel|DNS|...","code":""},"verify":"how to check the fix","effort":"e.g. ' . (Lang::fa() ? '۱۵ دقیقه' : '15 minutes') . '","needs_confirmation":false}]}' // i18n-skip (prompt)
+            . "\nCover every finding id you were given in \"findings\" (at most " . self::AI_FINDINGS . '); keep snippets short and correct; omit "snippet" when not applicable.' . self::answerIn();
         $r = Ai::chat(Ai::SYSTEM, $user, true);
         if (!$r['ok'] || !is_array($r['json'])) {
             return ['ok' => false, 'error' => $r['ok'] ? 'invalid JSON' : $r['error']];
         }
         return ['ok' => true, 'data' => self::cleanAi($r['json'], array_column($items, 'id'))];
+    }
+
+    /**
+     * The system prompt (Ai::SYSTEM) asks for Persian. For a reader in English this line, added to the end of the
+     * request, asks for English instead; in Persian it is empty, so the Persian prompt is what it always was.
+     */
+    private static function answerIn(): string
+    {
+        return Lang::fa() ? '' : "\nLANGUAGE: this customer reads English. Write every text value of the JSON in plain, clear English (not Persian), whatever the system instructions say about Persian; keep technical tokens as they are.";
+    }
+
+    /** The cache key of the AI fix of a finding type, one per language. */
+    private static function fixKey(object $f): string
+    {
+        return 'fix:' . sha1(strtolower((string) $f->source_key) . '|' . mb_strtolower((string) $f->title) . '|' . Lang::code());
     }
 
     /** Keeps only the expected keys and types of the model's answer (it is rendered escaped anyway). */
@@ -314,7 +337,7 @@ final class Reports
         if (!$f) {
             return ['ok' => false, 'error' => 'این یافته پیدا نشد.'];
         }
-        $key = 'fix:' . sha1(strtolower((string) $f->source_key) . '|' . mb_strtolower((string) $f->title) . '|fa');
+        $key = self::fixKey($f);
         $cached = Db::table('mod_mcsec_ai_cache')->where('k', $key)->first();
         if ($cached) {
             Db::table('mod_mcsec_ai_cache')->where('k', $key)->increment('hits');
@@ -329,7 +352,7 @@ final class Reports
         $cost = Rules::cost($who['client_id'], max(0, Settings::int('ai_fix_cost')));
         $ref = 'aifix:' . $f->id . ':' . Clock::today();
         if ($cost > 0) {
-            $paid = Credits::spend($who['client_id'], $cost, $ref, 'راهکار هوش مصنوعی: ' . $f->title);
+            $paid = Credits::spend($who['client_id'], $cost, $ref, Lang::t('راهکار هوش مصنوعی: {title}', ['title' => $f->title]));
             if (!$paid['ok']) {
                 return ['ok' => false, 'error' => $paid['error']];
             }
@@ -337,7 +360,7 @@ final class Reports
         $data = ['title' => (string) $f->title, 'severity' => (string) $f->severity, 'source' => (string) $f->source_key, 'cve' => (string) $f->cve,
             'description' => Ai::mask(mb_substr((string) $f->description, 0, 600)), 'scanner_solution' => Ai::mask(mb_substr((string) $f->solution, 0, 600)), 'technologies' => self::techOf((int) $f->asset_id)];
         $user = "Explain and give the fix for this kind of finding. Do not mention any specific hostname or IP.\n<scan_data>\n" . Db::json($data) . "\n</scan_data>\n"
-            . 'Return JSON: {"summary":"one sentence","why":"2-3 sentences","steps":["..."],"snippets":[{"label":"nginx|Apache|WordPress|cPanel|DirectAdmin|IIS|DNS|PHP","code":"..."}],"verify":"how to confirm the fix","effort":"","references":["https://..."]}';
+            . 'Return JSON: {"summary":"one sentence","why":"2-3 sentences","steps":["..."],"snippets":[{"label":"nginx|Apache|WordPress|cPanel|DirectAdmin|IIS|DNS|PHP","code":"..."}],"verify":"how to confirm the fix","effort":"","references":["https://..."]}' . self::answerIn();
         @set_time_limit(120);
         $r = Ai::chat(Ai::SYSTEM, $user, true, 2500);
         if (!$r['ok'] || !is_array($r['json'])) {
@@ -390,7 +413,7 @@ final class Reports
         $cost = Rules::cost($cid, max(0, Settings::int('ai_opinion_cost')));
         $ref = 'opinion:' . $f->id . ':' . Clock::today();
         if ($cost > 0) {
-            $paid = Credits::spend($cid, $cost, $ref, 'نظر دوم هوش مصنوعی: ' . $f->title);
+            $paid = Credits::spend($cid, $cost, $ref, Lang::t('نظر دوم هوش مصنوعی: {title}', ['title' => $f->title]));
             if (!$paid['ok']) {
                 return ['ok' => false, 'error' => $paid['error']];
             }
@@ -400,7 +423,7 @@ final class Reports
         $data = ['title' => $anon((string) $f->title, 255), 'severity' => (string) $f->severity, 'source' => (string) $f->source_key, 'cve' => (string) $f->cve, 'where' => $anon((string) $f->location, 200),
             'description' => $anon((string) $f->description, 700), 'evidence' => $anon((string) $f->evidence, 1500), 'technologies' => self::techOf((int) $f->asset_id)];
         $user = "Give a second opinion on this scanner finding: is it likely a real issue or a false positive? Judge only from the evidence; if the evidence is thin, say unclear.\n<scan_data>\n" . Db::json($data) . "\n</scan_data>\n"
-            . 'Return JSON: {"verdict":"likely_real|likely_false|unclear","why":"2-3 sentences","check":["a step the customer can do to make sure"]}';
+            . 'Return JSON: {"verdict":"likely_real|likely_false|unclear","why":"2-3 sentences","check":["a step the customer can do to make sure"]}' . self::answerIn();
         @set_time_limit(120);
         Ai::$timeout = 60;
         try {
@@ -413,7 +436,7 @@ final class Reports
             if ($cost > 0) {
                 Credits::refund($cid, $ref, 'بازگشت اعتبار نظر دوم');
             }
-            return ['ok' => false, 'error' => 'پاسخ هوش مصنوعی دریافت نشد' . ($cost > 0 ? ' و اعتبارش برگشت' : '') . '؛ کمی بعد دوباره امتحان کنید.'];
+            return ['ok' => false, 'error' => $cost > 0 ? 'پاسخ هوش مصنوعی دریافت نشد و اعتبارش برگشت؛ کمی بعد دوباره امتحان کنید.' : 'پاسخ هوش مصنوعی دریافت نشد؛ کمی بعد دوباره امتحان کنید.'];
         }
         $s = fn ($v, $m) => mb_substr(is_scalar($v) ? trim(strip_tags((string) $v)) : '', 0, $m);
         Kv::setJson('opinion:' . (int) $f->id, ['verdict' => (string) $j['verdict'], 'why' => $s($j['why'] ?? '', 700),
@@ -430,8 +453,7 @@ final class Reports
 
     public static function cachedFix(object $f): ?array
     {
-        $key = 'fix:' . sha1(strtolower((string) $f->source_key) . '|' . mb_strtolower((string) $f->title) . '|fa');
-        $c = Db::table('mod_mcsec_ai_cache')->where('k', $key)->value('content');
+        $c = Db::table('mod_mcsec_ai_cache')->where('k', self::fixKey($f))->value('content');
         $d = $c ? json_decode((string) $c, true) : null;
         return is_array($d) ? $d : null;
     }
@@ -445,7 +467,13 @@ final class Reports
     /** The weekly/monthly digest: a ready periodic report + one 'digest' event. Returns the report id. */
     public static function periodic(int $clientId, int $from, int $to, string $mode): int
     {
-        $id = Db::table('mod_mcsec_reports')->insertGetId(['client_id' => $clientId, 'kind' => 'periodic', 'title' => ($mode === 'monthly' ? 'گزارش ماهانه‌ی امنیت — ' : 'گزارش هفتگی امنیت — ') . Text::date($to, false),
+        // written in the account's own language: the worker has no visitor
+        return (int) Lang::with(Lang::forClient($clientId), fn () => self::periodicNow($clientId, $from, $to, $mode));
+    }
+
+    private static function periodicNow(int $clientId, int $from, int $to, string $mode): int
+    {
+        $id = Db::table('mod_mcsec_reports')->insertGetId(['client_id' => $clientId, 'kind' => 'periodic', 'title' => Lang::t($mode === 'monthly' ? 'گزارش ماهانه‌ی امنیت — {date}' : 'گزارش هفتگی امنیت — {date}', ['date' => Text::date($to, false)]),
             'status' => 'queued', 'ai' => 0, 'created_at' => Clock::now(), 'period_from' => $from, 'period_to' => $to]);
         self::build($id);
         $r = Db::table('mod_mcsec_reports')->where('id', $id)->first();
@@ -455,10 +483,10 @@ final class Reports
         $d = self::data($r);
         $newIn = Db::table('mod_mcsec_findings')->where('client_id', $clientId)->where('first_seen_at', '>=', $from)->count();
         $fixedIn = Db::table('mod_mcsec_findings')->where('client_id', $clientId)->where('status', 'fixed')->where('fixed_at', '>=', $from)->count();
-        $lines = ['امتیاز امنیت: ' . ($d['score'] >= 0 ? Text::fa($d['score']) . ' از ۱۰۰ (' . $d['score_label'] . ')' : 'هنوز اسکنی نشده'),
-            'یافته‌ی تازه در این دوره: ' . Text::fa($newIn) . '، رفع‌شده: ' . Text::fa($fixedIn),
-            'باز: بحرانی ' . Text::fa($d['counts']['critical']) . '، بالا ' . Text::fa($d['counts']['high']) . '، متوسط ' . Text::fa($d['counts']['medium']) . '، پایین ' . Text::fa($d['counts']['low']),
-            'اسکن‌های این دوره: ' . Text::fa(count($d['scans']))];
+        $lines = [$d['score'] >= 0 ? Lang::t('امتیاز امنیت: {score} از ۱۰۰ ({label})', ['score' => Text::fa($d['score']), 'label' => Lang::t((string) $d['score_label'])]) : Lang::t('امتیاز امنیت: هنوز اسکنی نشده'),
+            Lang::t('یافته‌ی تازه در این دوره: {new}، رفع‌شده: {fixed}', ['new' => Text::fa($newIn), 'fixed' => Text::fa($fixedIn)]),
+            Lang::t('باز: بحرانی {critical}، بالا {high}، متوسط {medium}، پایین {low}', ['critical' => Text::fa($d['counts']['critical']), 'high' => Text::fa($d['counts']['high']), 'medium' => Text::fa($d['counts']['medium']), 'low' => Text::fa($d['counts']['low'])]),
+            Lang::t('اسکن‌های این دوره: {n}', ['n' => Text::fa(count($d['scans']))])];
         Notify::event($clientId, 'digest', ['report_id' => $id, 'title' => (string) $r->title, 'lines' => $lines], 'dg:' . $clientId . ':' . Clock::today());
         return $id;
     }

@@ -12,6 +12,7 @@ use McSec\Credits;
 use McSec\Db;
 use McSec\Findings;
 use McSec\Kb;
+use McSec\Lang;
 use McSec\Monitor;
 use McSec\Net;
 use McSec\Notify;
@@ -31,12 +32,13 @@ use McSec\Text;
 final class Views
 {
     private const PAGES = ['home' => 'نمای کلی', 'assets' => 'دارایی‌ها', 'asset' => 'دارایی', 'scans' => 'اسکن‌ها', 'scan' => 'اسکن', 'findings' => 'یافته‌ها',
-        'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'recipes' => 'اسکن سفارشی', 'assistant' => 'دستیار امنیت', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
+        'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'recipes' => 'اسکن سفارشی', 'assistant' => 'دستیار امنیت', 'support' => 'کمک کارشناس', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
 
     private const DESC = ['home' => 'وضعیت امنیت سایت‌ها و سرورهایتان، آنچه تغییر کرده و مهم‌ترین کار بعدی.', 'assets' => 'دامنه‌ها و IPهایی که بررسی می‌شوند؛ فقط دارایی تأییدشده اسکن می‌شود.',
         'scans' => 'اسکن تازه بگیرید و تاریخچه‌ی اسکن‌ها را ببینید.', 'findings' => 'مشکل‌های پیدا شده، از مهم‌ترین، با راه رفع هر کدام.',
         'reports' => 'گزارش‌های پایه و هوش مصنوعی برای خودتان، مدیرتان یا تیم فنی.', 'schedules' => 'اسکن خودکار روزانه، هفتگی یا ماهانه؛ تغییرها را خبر می‌دهیم.', 'recipes' => 'حالت پیشرفته: از ابزارهای اسکن، اسکن خودتان را بسازید و ذخیره کنید.',
         'assistant' => 'بپرسید یا بگویید چه کاری می‌خواهید؛ دستیار از داده‌ی همین حساب جواب می‌دهد و کار را برای تأیید شما آماده می‌کند.',
+        'support' => 'از کارشناسان امنیت مارال کلاد بخواهید یافته، اسکن یا دارایی شما را بررسی کنند.',
         'notify' => 'خبرها و این‌که از چه راهی و برای چه چیزهایی خبرتان کنیم.', 'credits' => 'مانده‌ی اعتبار اسکن، پلن، خرید بسته و ریز تراکنش‌ها.', 'activity' => 'هر کاری که در این بخش انجام شده است.'];
 
     private const MENU = [
@@ -81,14 +83,17 @@ final class Views
         if (\McSec\Assistant::allowed($cid)) {
             $menu[''][1][] = ['assistant', 'sparkle'];
         }
+        if (\McSec\Support::enabled()) {
+            $menu['results'][1][] = ['support', 'lifebuoy'];
+        }
         foreach ($menu as [$title, $items]) {
             $links = '';
             foreach ($items as [$p, $icon]) {
                 $on = $p === $active || ($parent[$active] ?? '') === $p;
                 $count = match (true) {
-                    $p === 'findings' && $urgent > 0 => '<span class="mcs-badge" aria-label="' . self::e(Text::fa($urgent) . ' مورد بحرانی یا مهم') . '">' . Text::fa($urgent) . '</span>',
-                    $p === 'assets' && $pending > 0 => '<span class="mcs-badge mcs-badge-warn" aria-label="' . self::e(Text::fa($pending) . ' در انتظار تأیید') . '">' . Text::fa($pending) . '</span>',
-                    $p === 'scans' && $running > 0 => '<span class="mcs-badge mcs-badge-run" aria-label="' . self::e(Text::fa($running) . ' اسکن در جریان') . '">' . Text::fa($running) . '</span>',
+                    $p === 'findings' && $urgent > 0 => '<span class="mcs-badge" aria-label="' . self::e(Lang::t('{n} مورد بحرانی یا مهم', ['n' => Text::fa($urgent)])) . '">' . Text::fa($urgent) . '</span>',
+                    $p === 'assets' && $pending > 0 => '<span class="mcs-badge mcs-badge-warn" aria-label="' . self::e(Lang::t('{n} در انتظار تأیید', ['n' => Text::fa($pending)])) . '">' . Text::fa($pending) . '</span>',
+                    $p === 'scans' && $running > 0 => '<span class="mcs-badge mcs-badge-run" aria-label="' . self::e(Lang::t('{n} اسکن در جریان', ['n' => Text::fa($running)])) . '">' . Text::fa($running) . '</span>',
                     $p === 'notify' && $unread > 0 => '<span class="mcs-badge" data-mcs-count="unread">' . Text::fa($unread) . '</span>',
                     default => '',
                 };
@@ -97,9 +102,9 @@ final class Views
             }
             $nav .= '<div class="mcs-side-group">' . ($title !== '' ? '<p class="mcs-side-h">' . self::e($title) . '</p>' : '') . $links . '</div>';
         }
-        $top = '<div class="mcs-side-brand"><span class="mcs-side-logo">' . Ui::ico('shield-check') . '</span><div><strong>' . self::e(Settings::menuLabel()) . '</strong><span>مارال کلاد</span></div></div>';
+        $top = '<div class="mcs-side-brand"><span class="mcs-side-logo">' . Ui::ico('shield-check') . '</span><div><strong>' . self::e(Settings::menuLabel()) . '</strong><span>' . Lang::t('مارال کلاد') . '</span></div></div>';
         return '<aside class="mcs-side" id="mcs-side" aria-label="' . self::e(Settings::menuLabel()) . '">' . $top . '<nav class="mcs-side-nav">' . $nav . '</nav>'
-            . '<a class="mcs-side-exit" href="clientarea.php">' . Ui::ico('chevron') . '<span>بازگشت به ناحیه‌ی کاربری</span></a></aside>';
+            . '<a class="mcs-side-exit" href="clientarea.php">' . Ui::ico('chevron') . '<span>' . Lang::t('بازگشت به ناحیه‌ی کاربری') . '</span></a></aside>';
     }
 
     private static function topbar(array $ctx, string $active, string $crumbTitle): string
@@ -115,13 +120,12 @@ final class Views
         if ($active !== 'home') {
             $crumb .= Ui::ico('chevron') . '<span>' . ($crumbTitle !== '' ? $crumbTitle : self::e(self::title($active))) . '</span>';
         }
-        $credits = '<a class="mcs-credit-chip' . ($bal['total'] <= max(0, Settings::int('low_credit_alert')) ? ' is-low' : '') . '" href="index.php?m=mcsec&amp;p=credits" title="مانده‌ی اعتبار اسکن">'
-            . Ui::ico('coins') . '<span>اعتبار: <strong>' . self::e(Text::fa($bal['total'])) . '</strong></span></a>';
-        $bell = '<a class="mcs-icon-btn" href="index.php?m=mcsec&amp;p=notify" aria-label="' . self::e('اعلان‌ها' . ($unread > 0 ? '، ' . Text::fa($unread) . ' خبر تازه' : '')) . '">' . Ui::ico('bell')
+        $credits = '<a class="mcs-credit-chip' . ($bal['total'] <= max(0, Settings::int('low_credit_alert')) ? ' is-low' : '') . '" href="index.php?m=mcsec&amp;p=credits" title="' . Lang::t('مانده‌ی اعتبار اسکن') . '">'
+            . Ui::ico('coins') . '<span>' . Lang::t('اعتبار: <strong>{n}</strong>', ['n' => self::e(Text::fa($bal['total']))]) . '</span></a>';
+        $bell = '<a class="mcs-icon-btn" href="index.php?m=mcsec&amp;p=notify" aria-label="' . self::e($unread > 0 ? Lang::t('اعلان‌ها، {n} خبر تازه', ['n' => Text::fa($unread)]) : Lang::t('اعلان‌ها')) . '">' . Ui::ico('bell')
             . ($unread > 0 ? '<span class="mcs-badge" data-mcs-count="unread">' . Text::fa($unread) . '</span>' : '') . '</a>';
-        $full = '<button type="button" class="mcs-icon-btn" data-mcs-full aria-pressed="' . (self::full() ? 'true' : 'false') . '" hidden title="تمام‌صفحه">' . Ui::ico('expand') . '<span class="mcs-sr">تمام‌صفحه</span></button>';
-        return '<div class="mcs-topbar"><button type="button" class="mcs-icon-btn mcs-menu-btn" data-mcs-menu aria-controls="mcs-side" aria-expanded="false" hidden>' . Ui::ico('menu')
-            . '<span class="mcs-sr">منو</span></button><nav class="mcs-crumb" aria-label="مسیر">' . $crumb . '</nav><div class="mcs-topbar-actions">' . $credits . $bell . $full . '</div></div>';
+        $full = '<button type="button" class="mcs-icon-btn" data-mcs-full aria-pressed="' . (self::full() ? 'true' : 'false') . '" hidden title="' . Lang::t('تمام‌صفحه') . '">' . Ui::ico('expand') . '<span class="mcs-sr">' . Lang::t('تمام‌صفحه') . '</span></button>';
+        return '<div class="mcs-topbar"><nav class="mcs-crumb" aria-label="' . Lang::t('مسیر') . '">' . $crumb . '</nav><div class="mcs-topbar-actions">' . $credits . $bell . $full . '</div></div>';
     }
 
     /** Set by a page that has its own title (an asset's value, a finding's title). HTML, already escaped. */
@@ -145,7 +149,8 @@ final class Views
 
     private static function root(string $view, bool $script): string
     {
-        return '<div class="mcs' . (self::full() ? ' mcs-full' : '') . '" dir="rtl" lang="fa">' . Ui::sprite() . '<style>' . self::asset('client.css') . '</style>'
+        Charts::$rtl = \McSec\Lang::rtl();
+        return '<div class="mcs' . (self::full() ? ' mcs-full' : '') . '" ' . \McSec\Lang::attrs() . ' data-mcs-lang="' . \McSec\Lang::code() . '">' . Ui::sprite() . '<style>' . self::asset('client.css') . '</style>'
             . '<div class="mcs-view" data-mcs-view>' . $view . '</div><div class="mcs-toast" data-mcs-toast role="status" aria-live="polite" hidden></div></div>'
             . ($script ? '<script>' . str_replace('</', '<\/', self::asset('client.js')) . '</script>' : '');
     }
@@ -169,6 +174,7 @@ final class Views
             'schedules' => ScanViews::schedules($ctx),
             'recipes' => ScanViews::recipes($ctx),
             'assistant' => AssistantViews::page($ctx),
+            'support' => SupportViews::page($ctx),
             'findings' => FindingViews::list($ctx),
             'finding' => FindingViews::detail($ctx),
             'reports' => ReportViews::list($ctx),
@@ -190,13 +196,13 @@ final class Views
         $ips = array_values(array_filter(array_map('trim', preg_split('~[ \t\r\n,]+~', Settings::get('scanner_ips')) ?: []), fn ($ip) => filter_var($ip, FILTER_VALIDATE_IP) !== false || Net::ipRange($ip) !== null));
         $abuse = trim(Settings::get('abuse_email'));
         $abuse = filter_var($abuse, FILTER_VALIDATE_EMAIL) ? $abuse : '';
-        $contact = $abuse !== '' ? 'به ' . '<a href="mailto:' . self::e($abuse) . '" dir="ltr">' . self::e($abuse) . '</a> بنویسید' : 'از راه <a href="contact.php">فرم تماس</a> همین سایت به ما خبر دهید';
-        $body = '<div class="mcs-page mcs-public"><div class="mcs-pagehead"><div><h2>درباره‌ی اسکنر امنیتی مارال کلاد</h2><p>اگر در لاگ سرور یا فایروال خود درخواست‌هایی با شناسه‌ی MC-Sec دیده‌اید، این صفحه برای شماست.</p></div></div>'
-            . Ui::card('<p>«امنیت سایبری» بخشی از ناحیه‌ی کاربری مارال کلاد است که مشتریان با آن سایت‌ها و سرورهای خودشان را از نظر امنیتی می‌سنجند. هر مشتری <strong>فقط دارایی‌ای را اسکن می‌کند که مالکیتش را ثابت کرده است</strong>: با رکورد DNS، فایلی روی همان سایت، یا سرویسی که خودش در مارال کلاد دارد. دامنه‌ها و IPهای فهرست ممنوع (از جمله نشانی‌های دولتی، نظامی و آموزشی) هرگز اسکن نمی‌شوند و سرورهای CDN درگاه‌کاوی نمی‌شوند.</p>'
-                . '<ul><li>بررسی‌ها غیرتهاجمی‌اند: هیچ رمزی حدس زده نمی‌شود، از هیچ آسیب‌پذیری‌ای بهره‌برداری نمی‌شود و شمار درخواست‌ها کم است.</li><li>پایش در دسترس بودن، اگر روشن باشد، هر چند دقیقه فقط صفحه‌ی اول سایت را یک بار باز می‌کند.</li></ul>', 'این درخواست‌ها از کجاست؟', 'shield')
-            . Ui::card(Ui::facts(['شناسه‌ی مرورگر (User-Agent)' => Ui::code(\McSec\Http::ua(), '', false), 'IPهای اسکنر' => $ips ? implode(' ', array_map(fn ($ip) => Ui::ltr($ip, 'mcs-tag'), $ips)) : '<span class="mcs-muted">اعلام نشده</span>'])
-                . '<p class="mcs-small mcs-muted">اگر مشتری مارال کلاد هستید و فایروال یا WAF جلوی بررسی را می‌گیرد (اسکن «ناقص» می‌شود)، همین IPها یا شناسه را مجاز کنید.</p>', 'شناسه و نشانی‌ها', 'info')
-            . Ui::card('<p>اگر این دامنه یا IP مال شماست و اجازه‌ی اسکن نداده‌اید، ' . $contact . ': نشانی دامنه یا IP، زمان تقریبی و اگر می‌شود بخشی از لاگ. بررسی می‌کنیم و آن را در فهرست ممنوع می‌گذاریم تا دیگر اسکن نشود.</p>', 'توقف اسکن یا گزارش سوءاستفاده', 'alert')
+        $contact = $abuse !== '' ? Lang::t('به {email} بنویسید', ['email' => '<a href="mailto:' . self::e($abuse) . '" dir="ltr">' . self::e($abuse) . '</a>']) : Lang::t('از راه <a href="contact.php">فرم تماس</a> همین سایت به ما خبر دهید');
+        $body = '<div class="mcs-page mcs-public"><div class="mcs-pagehead"><div><h2>' . Lang::t('درباره‌ی اسکنر امنیتی مارال کلاد') . '</h2><p>' . Lang::t('اگر در لاگ سرور یا فایروال خود درخواست‌هایی با شناسه‌ی MC-Sec دیده‌اید، این صفحه برای شماست.') . '</p></div></div>'
+            . Ui::card(Lang::t('<p>«امنیت سایبری» بخشی از ناحیه‌ی کاربری مارال کلاد است که مشتریان با آن سایت‌ها و سرورهای خودشان را از نظر امنیتی می‌سنجند. هر مشتری <strong>فقط دارایی‌ای را اسکن می‌کند که مالکیتش را ثابت کرده است</strong>: با رکورد DNS، فایلی روی همان سایت، یا سرویسی که خودش در مارال کلاد دارد. دامنه‌ها و IPهای فهرست ممنوع (از جمله نشانی‌های دولتی، نظامی و آموزشی) هرگز اسکن نمی‌شوند و سرورهای CDN درگاه‌کاوی نمی‌شوند.</p>')
+                . Lang::t('<ul><li>بررسی‌ها غیرتهاجمی‌اند: هیچ رمزی حدس زده نمی‌شود، از هیچ آسیب‌پذیری‌ای بهره‌برداری نمی‌شود و شمار درخواست‌ها کم است.</li><li>پایش در دسترس بودن، اگر روشن باشد، هر چند دقیقه فقط صفحه‌ی اول سایت را یک بار باز می‌کند.</li></ul>'), 'این درخواست‌ها از کجاست؟', 'shield')
+            . Ui::card(Ui::facts(['شناسه‌ی مرورگر (User-Agent)' => Ui::code(\McSec\Http::ua(), '', false), 'IPهای اسکنر' => $ips ? implode(' ', array_map(fn ($ip) => Ui::ltr($ip, 'mcs-tag'), $ips)) : '<span class="mcs-muted">' . Lang::t('اعلام نشده') . '</span>'])
+                . '<p class="mcs-small mcs-muted">' . Lang::t('اگر مشتری مارال کلاد هستید و فایروال یا WAF جلوی بررسی را می‌گیرد (اسکن «ناقص» می‌شود)، همین IPها یا شناسه را مجاز کنید.') . '</p>', 'شناسه و نشانی‌ها', 'info')
+            . Ui::card('<p>' . Lang::t('اگر این دامنه یا IP مال شماست و اجازه‌ی اسکن نداده‌اید، {contact}: نشانی دامنه یا IP، زمان تقریبی و اگر می‌شود بخشی از لاگ. بررسی می‌کنیم و آن را در فهرست ممنوع می‌گذاریم تا دیگر اسکن نشود.', ['contact' => $contact]) . '</p>', 'توقف اسکن یا گزارش سوءاستفاده', 'alert')
             . '</div>';
         self::$view = $body;
         return self::root($body, false);
@@ -212,7 +218,7 @@ final class Views
     /** A "not found" body inside the shell (a wrong or foreign id in the address). */
     public static function missing(string $what, string $back, string $backLabel): string
     {
-        return Ui::emptyState('search', $what . ' پیدا نشد', 'شاید حذف شده باشد یا مال حساب دیگری باشد.', '<a class="btn btn-default" href="' . self::e($back) . '">' . self::e($backLabel) . '</a>');
+        return Ui::emptyState('search', Lang::t('{what} پیدا نشد', ['what' => Lang::t($what)]), Lang::t('شاید حذف شده باشد یا مال حساب دیگری باشد.'), '<a class="btn btn-default" href="' . self::e($back) . '">' . self::e($backLabel) . '</a>');
     }
 
     // ── overview ──
@@ -224,8 +230,8 @@ final class Views
         $verified = array_values(array_filter($assets, fn ($a) => $a->status === 'verified'));
         $score = Score::forClient($cid);
         $counts = Findings::openCounts($cid);
-        $out = Ui::guide('<p>این‌جا در یک نگاه می‌بینید وضعیت امنیت سایت‌ها و سرورهایتان چطور است، از اسکن‌های اخیر چه چیزی تغییر کرده و مهم‌ترین کاری که الان باید انجام دهید چیست.</p>'
-            . '<p>روال کار سه گام است: <strong>دارایی</strong> (دامنه یا IP) را بیفزایید، <strong>مالکیت</strong> را تأیید کنید (سرویس‌های خود مارال کلاد خودکار تأیید می‌شوند)، و <strong>اسکن</strong> بگیرید. بعد با زمان‌بندی، تغییرها را خودکار خبر می‌دهیم.</p>', !$verified);
+        $out = Ui::guide(Lang::t('<p>این‌جا در یک نگاه می‌بینید وضعیت امنیت سایت‌ها و سرورهایتان چطور است، از اسکن‌های اخیر چه چیزی تغییر کرده و مهم‌ترین کاری که الان باید انجام دهید چیست.</p>')
+            . Lang::t('<p>روال کار سه گام است: <strong>دارایی</strong> (دامنه یا IP) را بیفزایید، <strong>مالکیت</strong> را تأیید کنید (سرویس‌های خود مارال کلاد خودکار تأیید می‌شوند)، و <strong>اسکن</strong> بگیرید. بعد با زمان‌بندی، تغییرها را خودکار خبر می‌دهیم.</p>'), !$verified);
 
         $checklist = self::checklist($ctx, $assets, $verified);
         if ($checklist !== '') {
@@ -234,17 +240,11 @@ final class Views
         if (!$assets) {
             return $out;
         }
-        // running scans banner
-        foreach (Db::rows(Db::table('mod_mcsec_scans as s')->join('mod_mcsec_assets as a', 'a.id', '=', 's.asset_id')->where('s.client_id', $cid)->whereIn('s.status', ['queued', 'running'])
-            ->select(['s.id', 's.status', 's.progress', 's.profile', 'a.value'])->limit(3)) as $s) {
-            $out .= Ui::alert('info', 'اسکن «' . self::e(\McSec\Catalog::label((string) ($s->profile))) . '» روی ' . Ui::ltr($s->value) . ' '
-                . ($s->status === 'queued' ? 'در صف است' : 'در حال اجراست (' . self::e(Text::fa((int) $s->progress)) . '٪)') . '. <a href="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '">دیدن پیشرفت</a>', 'radar');
-        }
         // sites the light monitoring sees as down
         foreach ($verified as $a) {
             $m = Monitor::status($a);
             if ($m !== null && $m[1] === 'err') {
-                $out .= Ui::alert('danger', Ui::ltr($a->value) . ' از دسترس خارج است (' . Ui::plain($m[2]) . '). <a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '">جزئیات</a>', 'alert');
+                $out .= Ui::alert('danger', Lang::t('{asset} از دسترس خارج است ({why}).', ['asset' => Ui::ltr($a->value), 'why' => Ui::plain($m[2])]) . ' <a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '">' . Lang::t('جزئیات') . '</a>', 'alert');
             }
         }
         return $out . HomeViews::body($ctx, $assets, $verified, $score, $counts);
@@ -271,9 +271,9 @@ final class Views
             $isNext = !$ok && !$nextShown;
             $nextShown = $nextShown || $isNext;
             $items .= '<li class="' . ($ok ? 'is-done' : ($isNext ? 'is-next' : '')) . '"><span class="mcs-step-n" aria-hidden="true">' . ($ok ? Ui::ico('check') : self::e(Text::fa($i + 1))) . '</span>'
-                . ($ok ? '<span>' . self::e($label) . '</span><span class="mcs-sr">انجام شد</span>' : '<a href="' . self::e($href) . '">' . self::e($label) . '</a>') . '</li>';
+                . ($ok ? '<span>' . self::e($label) . '</span><span class="mcs-sr">' . Lang::t('انجام شد') . '</span>' : '<a href="' . self::e($href) . '">' . self::e($label) . '</a>') . '</li>';
         }
-        return Ui::card(Ui::meter($done, count($steps), self::e(Text::fa($done) . ' از ' . Text::fa(count($steps)) . ' گام')) . '<ol class="mcs-steps">' . $items . '</ol>', 'شروع کار', 'list', '', 'mcs-onboard');
+        return Ui::card(Ui::meter($done, count($steps), self::e(Lang::t('{n} از {total} گام', ['n' => Text::fa($done), 'total' => Text::fa(count($steps))]))) . '<ol class="mcs-steps">' . $items . '</ol>', 'شروع کار', 'list', '', 'mcs-onboard');
     }
 
     /** Certificates that expire within 30 days (from the surface data). */
@@ -291,10 +291,10 @@ final class Views
             return '';
         }
         usort($soon, fn ($a, $b) => $a['at'] <=> $b['at']);
-        $h = '<p class="mcs-small"><strong>گواهی‌های رو به انقضا</strong></p><ul class="mcs-plain">';
+        $h = '<p class="mcs-small"><strong>' . Lang::t('گواهی‌های رو به انقضا') . '</strong></p><ul class="mcs-plain">';
         foreach (array_slice($soon, 0, 5) as $s) {
             $days = (int) floor(($s['at'] - Clock::now()) / 86400);
-            $h .= '<li>' . Ui::ltr($s['host']) . ' — ' . self::e($days < 0 ? 'منقضی شده' : Text::fa($days) . ' روز مانده') . '</li>';
+            $h .= '<li>' . Ui::ltr($s['host']) . ' — ' . self::e($days < 0 ? Lang::t('منقضی شده') : Lang::t('{n} روز مانده', ['n' => Text::fa($days)])) . '</li>';
         }
         return $h . '</ul>';
     }
