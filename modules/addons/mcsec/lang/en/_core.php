@@ -14,4 +14,6 @@ return [
     '{n} روز پیش' => '{n} d ago',
     // the default of the admin's consent text (Settings 'terms_text'); a text the admin wrote is shown as written
     'با شروع اسکن تأیید می‌کنم که مالک این دارایی هستم یا از مالک اجازه‌ی کتبی دارم، و می‌دانم اسکن ممکن است بار کوتاهی روی سرویس بگذارد.' => 'By starting a scan I confirm that I own this asset or have the owner\'s written permission, and I understand a scan may put a brief load on the service.',
+    'گزارش برای' => 'Report for',
+    'یک دارایی را انتخاب کنید تا گزارش فقط همان را داشته باشد.' => 'Choose one asset to get a report of that asset only.',
 ];

@@ -30,13 +30,15 @@ final class ReportViews
         $out = Ui::guide(Lang::t('<p>گزارش پایه پس از هر اسکن خودکار و رایگان ساخته می‌شود: امتیاز، یافته‌ها از مهم‌ترین، و راه رفع هر کدام. <strong>گزارش هوش مصنوعی</strong> روی همان داده، خلاصه‌ی مدیریتی، ریسک‌های اصلی، کارهای سریع و برنامه‌ی ۳۰ روزه و راهکار اختصاصی هر یافته را می‌نویسد.</p>')
             . Lang::t('<p>هر گزارش را می‌توانید چاپ یا با «چاپ ← ذخیره به PDF» مرورگر نگه دارید و برای مدیر یا تیم فنی بفرستید. گزارش هفتگی یا ماهانه را در «اعلان‌ها» تنظیم کنید.</p>'), !$list);
         if ($ctx['manage']) {
-            $assets = [];
+            // one choice, not two: «all assets» or one of them. (Until 0.16.1 a second list chose between "all" and
+            // "one asset" and stayed on "all" while people picked an asset in the first: they got the whole account.)
+            $scope = ['0' => Lang::t('همه‌ی دارایی‌ها')];
             foreach (Assets::forClient($cid, 'verified') as $a) {
-                $assets[(string) $a->id] = (string) $a->value;
+                $scope[(string) (int) $a->id] = (string) $a->value;
             }
+            $pre = (string) (int) Text::toAscii((string) ($_POST['asset'] ?? $_GET['asset'] ?? '0'));
             $cost = \McSec\Rules::cost($cid, Settings::int('ai_report_cost'));
-            $body = '<div class="mcs-form-row">' . Ui::field('mcs-rk', 'دامنه‌ی گزارش', Ui::select('kind', ['account' => 'همه‌ی دارایی‌ها', 'asset' => 'یک دارایی'], 'account', 'mcs-rk'))
-                . ($assets ? Ui::field('mcs-ra', 'دارایی (برای «یک دارایی»)', Ui::select('asset', $assets, (string) array_key_first($assets), 'mcs-ra')) : '') . '</div>'
+            $body = '<div class="mcs-form-row">' . Ui::field('mcs-ra', 'گزارش برای', Ui::select('asset', $scope, isset($scope[$pre]) ? $pre : '0', 'mcs-ra'), Lang::t('یک دارایی را انتخاب کنید تا گزارش فقط همان را داشته باشد.')) . '</div>'
                 . ($aiOk ? Ui::toggle('ai', true, $cost > 0 ? Lang::t('با هوش مصنوعی ({n} اعتبار)', ['n' => Text::fa($cost)]) : 'با هوش مصنوعی', Lang::t('خلاصه‌ی مدیریتی، ریسک‌ها، کارهای سریع و راهکار اختصاصی. اگر ساخته نشود، اعتبارش برمی‌گردد.')) : '<p class="mcs-help">' . Lang::t('گزارش هوش مصنوعی در پلن فعلی شما نیست؛ گزارش پایه ساخته می‌شود.') . '</p>')
                 . '<button type="submit" class="btn btn-primary">' . Ui::ico('file') . Lang::t('ساختن گزارش') . '</button>';
             $out .= Ui::card(Ui::form($ctx, 'reports', 'report_create', $body), 'گزارش تازه', 'plus');

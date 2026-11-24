@@ -55,6 +55,28 @@ ok(preg_match('~<(?!/?(?:table|tr|td|span|b|br|p|ul|ol|li)\b)[a-z]~i', $h) === 0
 $empty = Pdf::html(['kind' => 'scan', 'title' => 'x', 'score' => -1, 'counts' => [], 'findings' => []]);
 ok(str_contains($empty, 'یافته‌ی بازی نیست') && str_contains($empty, 'بی‌اسکن'), 'a report with nothing in it still renders');
 
+section('a report of one asset is about that asset only');
+$other = $mk('other-site.example');
+Findings::ingest(Db::table('mod_mcsec_scans')->where('id', $sid)->first(), $other, [['key' => 'builtin.hdr.csp', 'title' => 'یافته‌ی دارایی دیگر', 'severity' => 'high', 'location' => 'https://other-site.example/', 'kb' => 'hdr-csp']], false);
+$h = html(client_get(['p' => 'reports']));
+ok(substr_count($h, '<select') === 1 && str_contains($h, 'name="asset"') && !str_contains($h, 'name="kind"') && str_contains($h, 'همه‌ی دارایی‌ها') && str_contains($h, 'shop.example'), 'one list chooses the scope: all assets or one of them');
+$r = client_post('report_create', ['asset' => (string) $shop->id], ['p' => 'reports']);
+$one = Db::table('mod_mcsec_reports')->orderByDesc('id')->first();
+Reports::build((int) $one->id);
+$d1 = Reports::data(Reports::get(1, (int) $one->id));
+ok($one->kind === 'asset' && (int) $one->asset_id === (int) $shop->id && count($d1['assets']) === 1 && $d1['assets'][0]['value'] === 'shop.example' && !str_contains(json_encode($d1, JSON_UNESCAPED_UNICODE), 'other-site.example') && !str_contains(json_encode($d1, JSON_UNESCAPED_UNICODE), 'یافته‌ی دارایی دیگر'), 'choosing an asset gives a report with that asset and its findings only');
+client_post('report_create', ['asset' => '0'], ['p' => 'reports']);
+$allr = Db::table('mod_mcsec_reports')->orderByDesc('id')->first();
+Reports::build((int) $allr->id);
+$d2 = Reports::data(Reports::get(1, (int) $allr->id));
+ok($allr->kind === 'account' && count($d2['assets']) >= 2 && str_contains(json_encode($d2, JSON_UNESCAPED_UNICODE), 'other-site.example'), '«all assets» gives the whole account');
+$n = Db::table('mod_mcsec_reports')->count();
+Accounts::ensure(2);
+$theirs = $mk('theirs.example', 2);
+$r = client_post('report_create', ['asset' => (string) $theirs->id], ['p' => 'reports']);
+ok(Db::table('mod_mcsec_reports')->count() === $n && str_contains(flash_of($r), 'پیدا نشد'), 'another account\'s asset: no report (IDOR), and never a silent fall back to the whole account');
+ok(str_contains(html(client_get(['p' => 'reports', 'asset' => (string) $shop->id])), '<option value="' . $shop->id . '" selected>'), 'a link with an asset opens the form with it chosen');
+
 section('rendering (needs TCPDF)');
 $tc = __DIR__ . '/tmp/tcpdf/tcpdf.php';
 if (!class_exists('TCPDF') && is_file($tc)) {

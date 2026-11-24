@@ -406,10 +406,11 @@ final class Controller
                         : Lang::t('این میزبان کنار گذاشته شد؛ دیگر یافته‌ای برایش ثبت نمی‌شود. خاموش کردنش در موتور اسکن الان انجام نشد؛ با اسکن بعدی دوباره تلاش می‌کنیم.'))
                     : Lang::t('این میزبان دوباره بررسی می‌شود.'))];
             case 'report_create':
-                $kind = $in('kind') === 'asset' ? 'asset' : 'account';
-                $assetId = $int('asset');
+                // the asset chosen decides the scope: one asset, or (0) the whole account. An old form's kind=account still means all.
+                $assetId = $in('kind') === 'account' ? 0 : $int('asset');
+                $kind = $assetId > 0 || $in('kind') === 'asset' ? 'asset' : 'account';
                 if ($kind === 'asset' && !Assets::get($cid, $assetId)) {
-                    return ['flash' => 'err:' . Lang::t('دارایی را انتخاب کنید.')];
+                    return ['flash' => 'err:' . Lang::t('این دارایی پیدا نشد.')];
                 }
                 $scanId = $int('scan');
                 if ($scanId > 0) {
