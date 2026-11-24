@@ -25,7 +25,7 @@ Accounts::ensure(2);
 Credits::credit(1, 500, 'paid', 'topup', 'topup:adv1', 'test');
 Credits::credit(2, 500, 'paid', 'topup', 'topup:adv2', 'test');
 $mk = function (string $value, string $kind = 'domain', int $client = 1, string $status = 'verified'): object {
-    $id = Db::table('mod_mcsec_assets')->insertGetId(['client_id' => $client, 'kind' => $kind, 'value' => $value, 'status' => $status, 'method' => 'admin', 'verified_at' => Clock::now(), 'created_at' => Clock::now()]);
+    $id = Db::table('mod_mcsec_assets')->insertGetId(['client_id' => $client, 'kind' => $kind, 'value' => $value, 'status' => $status, 'method' => 'admin', 'verified_at' => Clock::now(), 'created_at' => Clock::now(), 'oasm_target' => 't-' . md5($value)]);
     return Db::table('mod_mcsec_assets')->where('id', $id)->first();
 };
 dns_a('shop.example', '93.184.216.80');

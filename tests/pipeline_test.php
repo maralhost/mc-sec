@@ -25,7 +25,7 @@ $who = login(1, 1);
 Accounts::ensure(1);
 Credits::credit(1, 500, 'paid', 'topup', 'topup:pl', 'test');
 $mk = function (string $value, string $kind = 'domain', int $client = 1): object {
-    $id = Db::table('mod_mcsec_assets')->insertGetId(['client_id' => $client, 'kind' => $kind, 'value' => $value, 'status' => 'verified', 'method' => 'admin', 'verified_at' => Clock::now(), 'created_at' => Clock::now()]);
+    $id = Db::table('mod_mcsec_assets')->insertGetId(['client_id' => $client, 'kind' => $kind, 'value' => $value, 'status' => 'verified', 'method' => 'admin', 'verified_at' => Clock::now(), 'created_at' => Clock::now(), 'oasm_target' => 't-' . md5($value)]);
     return Db::table('mod_mcsec_assets')->where('id', $id)->first();
 };
 dns_a('shop.example', '93.184.216.80');
@@ -99,13 +99,13 @@ http_mock(function ($method, $url, $headers, $body) use (&$calls, &$st) {
         return ['status' => 200, 'body' => json_encode(['data' => $runs])];
     }
     if (str_starts_with($path, '/api/assets?')) {
-        return ['status' => 200, 'body' => '{"data":[],"hasNextPage":false}'];
+        return ['status' => 200, 'body' => '{"data":[{"id":"s1","value":"web.test:443","port":443}],"hasNextPage":false}']; // the scanner reached a service
     }
     if (str_starts_with($path, '/api/vulnerabilities?')) {
         return ['status' => 200, 'body' => json_encode(['data' => $st['vulns'], 'hasNextPage' => false])];
     }
     if (str_starts_with($path, '/api/jobs-registry')) {
-        return ['status' => 200, 'body' => '{"data":[]}'];
+        return ['status' => 200, 'body' => '{"data":[{"status":"completed","category":"vulnerabilities"}]}']; // the run really had a job
     }
     return ['status' => 404, 'body' => '{"message":"not mocked ' . $path . '"}'];
 });

@@ -1019,3 +1019,12 @@ The real module code ran against staging (SQLite harness, real HTTP), with `scan
 | Webhooks | `modules/integrations/connectors/webhook.connector.ts`, `schemas/webhook.schema.ts`, `modules/event-bridge/sinks/integrations/*` |
 | MCP | `core-api/src/mcp/*`, `modules/agents/agents.tools.ts` (`MCP_TOOLS`) |
 | Every module | an `AGENTS.md` with routes, permissions and gotchas, which is the most accurate prose documentation available |
+
+## Live observation, 2026-11-24 (first scan from the founder's WHMCS)
+
+Read from the staging database (read-only), workspace `mcsec-c24`:
+
+- A project created 0.4 s after its target ran at once: katana (`url_discovery`, 24 s) then zap (`vulnerabilities`, 3 min), each one job with input `{"target":"<domain>"}`, both `completed`, no error log. So a pipeline does run on a target that has no discovered service yet; it just has nothing to work on.
+- Discovery of the same target: subfinder, then naabu twice; **no `ports` row and no `asset_services` row** (the host answers no scanner), so no httpx job followed. `GET /api/assets?targetIds=` is then empty.
+- A run and its jobs report `completed` whether or not anything was reachable. "Completed" is not proof of an assessment: check the services of the target and the jobs of the run (MC-Sec 0.12.0 does, `Oasm::collect` → `evidence`).
+- The workspace has one member, the client's own OASM user (`mcsec-c24@…`); the platform admin is not a member and does not see it among their own workspaces.

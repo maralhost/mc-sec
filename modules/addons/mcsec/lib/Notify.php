@@ -368,6 +368,10 @@ final class Notify
                 if (!is_array($m) || !isset($m['chat']['id'], $m['text'])) {
                     continue;
                 }
+                if (preg_match('~^/id\b~i', trim((string) $m['text']))) {
+                    self::bot($which, 'sendMessage', ['chat_id' => $m['chat']['id'], 'text' => 'شناسه‌ی این گفت‌وگو: ' . $m['chat']['id']]);
+                    continue;
+                }
                 if (!preg_match('~^(?:/start\s+)?([2-9A-HJ-NP-Z]{8})\s*$~', strtoupper(trim(Text::toAscii((string) $m['text']))), $mm)) {
                     // a question in a chat that is already linked to an account: the assistant answers (never acts) when that is switched on
                     $linked = Settings::bool('assistant_bots') ? Db::table('mod_mcsec_accounts')->where($which === 'telegram' ? 'tg_chat' : 'bale_chat', (string) $m['chat']['id'])->first() : null;

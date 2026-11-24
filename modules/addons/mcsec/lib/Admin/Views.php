@@ -81,9 +81,11 @@ final class Views
     {
         $tabs = '';
         $pills = '';
+        $hot = Settings::bool('ops_alerts') ? count(\McSec\ScanLog::attention(1, 50)) : 0;
         foreach (self::GROUPS as $label => $pages) {
             $on = in_array($page, $pages, true);
-            $tabs .= '<li' . ($on ? ' class="active"' : '') . '><a href="' . self::e(self::url($pages[0])) . '"' . ($on ? ' aria-current="true"' : '') . '>' . self::e($label) . '</a></li>';
+            $badge = $hot > 0 && in_array('scans', $pages, true) ? ' <span class="mcsa-count" title="اسکن‌های ۲۴ ساعت اخیر که نیاز به بررسی دارند">' . self::e(Text::fa($hot)) . '</span>' : '';
+            $tabs .= '<li' . ($on ? ' class="active"' : '') . '><a href="' . self::e(self::url(in_array('scans', $pages, true) && $hot > 0 ? 'scans' : $pages[0])) . '"' . ($on ? ' aria-current="true"' : '') . '>' . self::e($label) . $badge . '</a></li>';
             if ($on && count($pages) > 1) {
                 foreach ($pages as $p) {
                     $pills .= '<li' . ($p === $page ? ' class="active"' : '') . '><a href="' . self::e(self::url($p)) . '"' . ($p === $page ? ' aria-current="page"' : '') . '>' . self::e(Controller::PAGES[$p]) . '</a></li>';
@@ -149,7 +151,7 @@ final class Views
             $rows .= '<tr><td><a href="clientssummary.php?userid=' . (int) $r->client_id . '">#' . (int) $r->client_id . ' ' . self::e($names[(int) $r->client_id] ?? '') . '</a></td><td>' . self::e(Text::fa((int) $r->n)) . '</td><td>' . self::e(Text::fa((int) $r->c)) . '</td></tr>';
         }
         return self::guide('<p>شمار کلی استفاده، سلامت موتورها و پرمصرف‌ترین حساب‌ها. سلامت هر موتور را در «راه‌اندازی موتورها» با دکمه‌ی «آزمودن» تازه کنید.</p>')
-            . $kpis . self::box('سلامت', $health . '<p>' . $worker . '</p>' . self::form('overview', 'run_worker', '<button class="btn btn-default">اجرای کار پس‌زمینه همین حالا</button>'))
+            . $kpis . self::attention(5) . self::box('سلامت', $health . '<p>' . $worker . '</p>' . self::form('overview', 'run_worker', '<button class="btn btn-default">اجرای کار پس‌زمینه همین حالا</button>'))
             . self::box('پرمصرف‌ترین حساب‌ها (۳۰ روز)', $rows !== '' ? '<table class="table"><thead><tr><th>حساب</th><th>اسکن</th><th>اعتبار</th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">هنوز اسکنی نیست.</p>');
     }
 
@@ -379,22 +381,103 @@ final class Views
             . self::box($q !== '' ? 'نتیجه‌ی جستجو' : 'در انتظار تأیید یا منقضی', $rows !== '' ? '<table class="table"><thead><tr><th>دارایی</th><th>حساب</th><th>وضعیت</th><th>آخرین بررسی</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">چیزی نیست.</p>');
     }
 
+    /** Scans of the last week that failed or finished incomplete, each with a link to its journal. */
+    private static function attention(int $limit): string
+    {
+        $list = Settings::bool('ops_alerts') ? \McSec\ScanLog::attention(7, $limit) : [];
+        if (!$list) {
+            return '';
+        }
+        $rows = '';
+        foreach ($list as $s) {
+            $why = $s->status === 'failed' ? (string) $s->error . ' ' . (string) $s->error_ref : (string) (Scans::summary($s)['partial'] ?? '');
+            $rows .= '<tr><td><a href="' . self::e(self::url('scans', '&scan=' . (int) $s->id)) . '">اسکن ' . self::e(Text::fa((int) $s->id)) . '</a></td><td>#' . (int) $s->client_id . '</td><td dir="ltr">' . self::e($s->value) . '</td><td>' . self::e(Catalog::label((string) $s->profile)) . '</td>'
+                . '<td><span class="mcsa-tag ' . ($s->status === 'failed' ? 'mcsa-tag-fix' : 'mcsa-tag-ops') . '">' . ($s->status === 'failed' ? 'ناموفق' : 'ناقص') . '</span> ' . self::e(mb_substr($why, 0, 140)) . '</td><td>' . self::e(Text::ago((int) $s->finished_at)) . '</td></tr>';
+        }
+        return self::box('اسکن‌های نیازمند بررسی (۷ روز)', '<table class="table"><thead><tr><th>اسکن</th><th>حساب</th><th>دارایی</th><th>نوع</th><th>چه شد</th><th>زمان</th></tr></thead><tbody>' . $rows . '</tbody></table>',
+            'اسکنی که ناموفق شد، یا تمام شد ولی مدرکی از کار واقعی موتور نبود (ارزیابی ناقص). روی شماره‌ی اسکن بزنید تا ببینید ماژول از موتور چه خواست و چه جواب گرفت.');
+    }
+
+    /** Everything known about one scan: where it lives in the engine, the proof of work, and its journal. */
+    private static function scanDetail(int $id): string
+    {
+        $s = Db::table('mod_mcsec_scans as s')->join('mod_mcsec_assets as a', 'a.id', '=', 's.asset_id')->where('s.id', $id)->select(['s.*', 'a.value'])->first();
+        $back = '<p><a href="' . self::e(self::url('scans')) . '">→ بازگشت به صف اسکن</a></p>';
+        if (!$s) {
+            return $back . '<div class="alert alert-danger">اسکنی با این شماره پیدا نشد.</div>';
+        }
+        $sum = Scans::summary($s);
+        $ev = (array) ($sum['evidence'] ?? []);
+        $meta = json_decode((string) $s->backend_meta, true) ?: [];
+        $acc = \McSec\Accounts::get((int) $s->client_id);
+        $dl = fn (array $rows) => '<table class="table mcsa-facts"><tbody>' . implode('', array_map(fn ($k, $x) => $x === '' ? '' : '<tr><th>' . self::e($k) . '</th><td>' . $x . '</td></tr>', array_keys($rows), $rows)) . '</tbody></table>';
+        $ltr = fn ($x) => (string) $x === '' ? '' : '<bdi dir="ltr">' . self::e($x) . '</bdi>';
+        $t = fn ($ts) => (int) $ts > 0 ? self::e(Text::date((int) $ts)) : '';
+        $partial = (string) ($sum['partial'] ?? '');
+        $state = self::e(Scans::STATUS[(string) $s->status] ?? (string) $s->status) . ($partial !== '' ? ' <span class="mcsa-tag mcsa-tag-ops">ارزیابی ناقص</span>' : '') . ' — ' . self::e((string) $s->stage);
+        $out = $back . ($partial !== '' ? '<div class="alert alert-warning"><strong>چرا ناقص؟</strong> ' . self::e($partial) . '</div>' : '')
+            . ($s->status === 'failed' ? '<div class="alert alert-danger"><strong>چرا ناموفق؟</strong> ' . self::e((string) $s->error) . ((string) $s->error_ref !== '' ? ' — کد پیگیری: ' . $ltr($s->error_ref) : '') . '</div>' : '')
+            . self::box('اسکن شماره‌ی ' . Text::fa((int) $s->id), $dl(['حساب' => '<a href="clientssummary.php?userid=' . (int) $s->client_id . '">#' . (int) $s->client_id . ' ' . self::e(Whmcs::clientName((int) $s->client_id)) . '</a>',
+                'دارایی' => $ltr($s->value), 'نوع اسکن' => self::e(Catalog::label((string) $s->profile, (string) $s->profile)) . ' (' . self::e(Catalog::engineLabel((string) $s->engine)) . ')', 'وضعیت' => $state,
+                'در صف' => $t($s->queued_at), 'شروع' => $t($s->started_at), 'پایان' => $t($s->finished_at), 'اعتبار' => self::e(Text::fa((int) $s->credits)) . (isset($sum['refunded']) ? ' — ' . self::e(Text::fa((int) $sum['refunded'])) . ' برگشت' : ''),
+                'نتیجه' => isset($sum['seen']) ? self::e(Text::fa((int) $sum['seen']) . ' یافته دیده شد، ' . Text::fa((int) ($sum['new'] ?? 0)) . ' تازه، ' . Text::fa((int) ($sum['fixed'] ?? 0)) . ' رفع‌شده؛ ' . Text::fa((int) ($sum['surface_seen'] ?? 0)) . ' مورد سطح حمله') : '']));
+        if ($s->engine === 'oasm') {
+            $ws = (string) ($ev['workspace'] ?? $meta['ws'] ?? ($acc->oasm_workspace ?? ''));
+            $jobs = '';
+            foreach ((array) ($ev['jobs_by_status'] ?? []) as $st => $n) {
+                $jobs .= self::e(Text::fa((int) $n)) . ' ' . self::e($st) . '، ';
+            }
+            $out .= self::box('این اسکن در OASM کجاست؟', $dl(['فضای کار' => $ltr('mcsec-c' . (int) $s->client_id) . ' ' . $ltr($ws), 'کاربر مالک فضای کار' => $ltr((string) ($acc->oasm_user ?? '')),
+                'هدف (target)' => $ltr((string) $s->backend_ref), 'پروژه (pipeline)' => $ltr((string) ($ev['project'] ?? $meta['project'] ?? '')), 'اجرا (run)' => $ltr((string) ($ev['run'] ?? $meta['run'] ?? '')),
+                'ابزارها' => $ltr(implode(' → ', (array) ($meta['tools'] ?? []))), 'وضعیت اجرا در OASM' => $ltr((string) ($ev['run_status'] ?? '')),
+                'کارهای اجراشده (jobs)' => array_key_exists('jobs', $ev) ? ($ev['jobs'] === null ? 'خوانده نشد' : self::e(Text::fa((int) $ev['jobs'])) . ($jobs !== '' ? ' (' . rtrim($jobs, '، ') . ')' : '')) : '',
+                'آنچه اسکنر دید' => array_key_exists('services', $ev) ? self::e(Text::fa((int) $ev['hosts']) . ' میزبان، ' . Text::fa((int) $ev['services']) . ' سرویس (درگاه باز)') : '']),
+                'MC-Sec برای هر حساب مشتری یک کاربر و یک فضای کار جدا در OASM می‌سازد. این فضای کار مال همان کاربر است، پس وقتی با حساب مدیر وارد کنسول OASM می‌شوید در فهرست فضاهای کار خودتان دیده نمی‌شود؛ در بخش مدیریت (Admin › Workspaces) با نام بالا پیدا می‌شود.');
+        }
+        $steps = ['queue' => 'صف', 'start' => 'شروع', 'poll' => 'پیگیری', 'collect' => 'خواندن نتیجه', 'fail' => 'ناموفق', 'alert' => 'هشدار مدیر'];
+        $rows = '';
+        foreach (\McSec\ScanLog::of((int) $s->id) as $e) {
+            $d = json_decode((string) $e->detail, true);
+            $calls = '';
+            foreach ((array) ($d['calls'] ?? []) as $c) {
+                $bad = (int) $c['status'] === 0 || (int) $c['status'] >= 400;
+                $calls .= '<tr' . ($bad ? ' class="lvl-error"' : '') . '><td dir="ltr">' . self::e($c['m']) . '</td><td dir="ltr">' . self::e($c['path']) . '</td><td dir="ltr">' . self::e((string) $c['status']) . '</td><td dir="ltr">' . self::e((string) $c['ms']) . ' ms</td><td dir="ltr">' . self::e((string) ($c['answer'] ?? '')) . '</td></tr>';
+            }
+            unset($d['calls']);
+            $more = ($calls !== '' ? '<details><summary>' . self::e(Text::fa(substr_count($calls, '<tr')) . ' درخواست به موتور') . '</summary><table class="table"><tbody>' . $calls . '</tbody></table></details>' : '')
+                . ($d ? '<details><summary>جزئیات</summary><pre dir="ltr">' . self::e(json_encode($d, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES)) . '</pre></details>' : '');
+            $lvl = in_array((string) $e->level, ['error', 'warn'], true) ? ' class="lvl-' . ($e->level === 'error' ? 'error' : 'warn') . '"' : '';
+            $rows .= '<tr' . $lvl . '><td>' . self::e(Text::date((int) $e->created_at)) . '</td><td>' . self::e($steps[(string) $e->step] ?? (string) $e->step) . '</td><td>' . self::e((string) $e->message) . $more . '</td></tr>';
+        }
+        return $out . self::box('لاگ این اسکن', $rows !== '' ? '<table class="table mcsa-log"><thead><tr><th>زمان</th><th>گام</th><th>چه شد</th></tr></thead><tbody>' . $rows . '</tbody></table>'
+            : '<p class="mcsa-muted">برای این اسکن لاگی نیست (پیش از نسخه‌ی ۰٫۱۲٫۰ گرفته شده یا لاگش پس از ' . self::e(Text::fa(\McSec\ScanLog::KEEP_DAYS)) . ' روز پاک شده است).</p>',
+            'هر ردیف یک گام است: آنچه ماژول از موتور خواست، کد پاسخ هر درخواست و زمانش. بدنه‌ی درخواست‌ها و هیچ رمزی این‌جا نگه داشته نمی‌شود.');
+    }
+
     private static function scans(): string
     {
+        $one = (int) Text::toAscii((string) ($_GET['scan'] ?? '0'));
+        if ($one > 0) {
+            return self::scanDetail($one);
+        }
         $out = self::guide('<p>صف و اسکن‌های در حال اجرا و ناموفق. «توقف» اعتبار را برمی‌گرداند؛ «دوباره» برای اسکن ناموفق یک اسکن رایگان تازه می‌سازد. علت خطا با کد پیگیری در «گزارش فنی» است.</p>');
-        foreach (['running' => 'در حال اجرا', 'queued' => 'در صف', 'failed' => 'ناموفق (۷ روز)'] as $st => $label) {
+        $out .= '<form method="get" action="addonmodules.php" class="mcsa-search"><input type="hidden" name="module" value="mcsec"><input type="hidden" name="mcsa" value="scans">'
+            . '<input class="form-control" name="scan" dir="ltr" inputmode="numeric" placeholder="شماره‌ی اسکن" aria-label="شماره‌ی اسکن"><button class="btn btn-default">دیدن لاگ اسکن</button></form>';
+        $out .= self::attention(20);
+        foreach (['running' => 'در حال اجرا', 'queued' => 'در صف', 'failed' => 'ناموفق (۷ روز)', 'completed' => 'تمام‌شده (۳۰ تای آخر)'] as $st => $label) {
             $q = Db::table('mod_mcsec_scans as s')->join('mod_mcsec_assets as a', 'a.id', '=', 's.asset_id')->where('s.status', $st);
             if ($st === 'failed') {
                 $q->where('s.finished_at', '>', Clock::now() - 7 * 86400);
             }
-            $list = Db::rows($q->select(['s.*', 'a.value'])->orderByDesc('s.id')->limit(60));
+            $list = Db::rows($q->select(['s.*', 'a.value'])->orderByDesc('s.id')->limit($st === 'completed' ? 30 : 60));
             $rows = '';
             foreach ($list as $s) {
-                $btn = Auth::adminCan('ops') ? ($st === 'failed'
+                $btn = $st === 'completed' ? '' : (Auth::adminCan('ops') ? ($st === 'failed'
                     ? self::form('scans', 'retry_scan', '<input type="hidden" name="scan_id" value="' . (int) $s->id . '"><button class="btn btn-default btn-sm">دوباره</button>')
-                    : self::form('scans', 'cancel_scan', '<input type="hidden" name="scan_id" value="' . (int) $s->id . '"><button class="btn btn-default btn-sm">توقف</button>', 'این اسکن متوقف شود؟')) : '';
-                $rows .= '<tr><td>' . (int) $s->id . '</td><td>#' . (int) $s->client_id . '</td><td dir="ltr">' . self::e($s->value) . '</td><td>' . self::e(Catalog::label((string) ($s->profile))) . ' <small>(' . self::e($s->engine) . ')</small></td>'
-                    . '<td>' . self::e($st === 'failed' ? $s->error . ' ' . $s->error_ref : Text::fa((int) $s->progress) . '٪ ' . $s->stage) . '</td><td>' . self::e(Text::ago((int) ($s->started_at ?: $s->queued_at))) . '</td><td>' . $btn . '</td></tr>';
+                    : self::form('scans', 'cancel_scan', '<input type="hidden" name="scan_id" value="' . (int) $s->id . '"><button class="btn btn-default btn-sm">توقف</button>', 'این اسکن متوقف شود؟')) : '');
+                $sm = $st === 'completed' ? Scans::summary($s) : [];
+                $rows .= '<tr><td><a href="' . self::e(self::url('scans', '&scan=' . (int) $s->id)) . '" title="لاگ و جزئیات این اسکن">' . (int) $s->id . '</a></td><td>#' . (int) $s->client_id . '</td><td dir="ltr">' . self::e($s->value) . '</td><td>' . self::e(Catalog::label((string) ($s->profile))) . ' <small>(' . self::e($s->engine) . ')</small></td>'
+                    . '<td>' . ($st === 'completed' && isset($sm['partial']) ? '<span class="mcsa-tag mcsa-tag-ops">ناقص</span> ' : '') . self::e($st === 'failed' ? $s->error . ' ' . $s->error_ref : ($st === 'completed' ? Text::fa((int) ($sm['seen'] ?? 0)) . ' یافته' : Text::fa((int) $s->progress) . '٪ ' . $s->stage)) . '</td><td>' . self::e(Text::ago((int) ($s->started_at ?: $s->queued_at))) . '</td><td>' . $btn . '</td></tr>';
             }
             $out .= self::box($label . ' (' . Text::fa(count($list)) . ')', $rows !== '' ? '<table class="table"><thead><tr><th>#</th><th>حساب</th><th>دارایی</th><th>اسکن</th><th>وضعیت</th><th>زمان</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">چیزی نیست.</p>');
         }
@@ -517,6 +600,8 @@ final class Views
             . '.mcsa-changes{list-style:none;padding:0;margin:0}.mcsa-changes li{padding:6px 0;border-bottom:1px solid var(--hd)}.mcsa-changes li:last-child{border:0}'
             . '.mcsa-tag{display:inline-block;min-width:4.6rem;text-align:center;font-size:11.5px;font-weight:600;border-radius:6px;padding:1px 9px;margin-inline-end:6px;background:#EEF1F6;color:#4A5466}'
             . '.mcsa-tag-ok{background:#E6F4EC;color:#137A43}.mcsa-tag-fix{background:#FDECEA;color:#B42318}.mcsa-tag-chg{background:#E8F0FE;color:#0847A6}.mcsa-tag-ops{background:#FFF4DC;color:#8A5A00}'
+            . '.mcsa-count{display:inline-block;min-width:20px;padding:0 6px;border-radius:10px;background:#F97066;color:#101828;font-size:11px;text-align:center;font-weight:700;margin-inline-start:6px}'
+            . '.mcsa-facts th{width:190px;color:var(--mu);font-weight:600;background:transparent!important}.mcsa-log tr.lvl-warn td:first-child{border-inline-start:3px solid var(--y)}.mcsa details>summary{cursor:pointer;color:#0B5FDB}'
             . '@media(max-width:700px){.mcsa-topbar,.mcsa-pills,.mcsa-body,.mcsa-flashwrap{padding-inline:12px}.mcsa-ver{display:none}}';
     }
 }

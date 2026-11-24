@@ -121,6 +121,7 @@ final class Scans
                 return ['ok' => false, 'error' => $paid['error'], 'need' => $cost];
             }
         }
+        ScanLog::add((int) $id, $clientId, 'queue', 'در صف قرار گرفت: ' . $profile['label'] . ' روی ' . $asset->value, ['profile' => $profileKey, 'engine' => $profile['engine'], 'credits' => $cost, 'schedule' => $scheduleId, 'user' => $userId]);
         Audit::log($clientId, 'scan_start', $profile['label'] . ' ' . $asset->value, array_filter(['scan' => $id, 'credits' => $cost, 'schedule' => $scheduleId, 'for' => $via]), $userId);
         return ['ok' => true, 'scan_id' => $id, 'credits' => $cost, 'via' => $via !== '' ? (string) $asset->value : ''];
     }
@@ -233,12 +234,14 @@ final class Scans
             self::fail($s, '«' . $asset->value . '» اکنون پشت CDN (' . Net::cdnLabel($sc['cdn']) . ') است و اسکن روی سرورهای CDN انجام نمی‌شود.', true);
             return false;
         }
+        ScanLog::begin((int) $s->id, (int) $s->client_id, 'start');
         try {
             $r = self::engine((string) $s->engine)->start($s, $asset, $profile);
         } catch (\Throwable $e) {
             $r = ['ok' => false, 'error' => $e->getMessage(), 'retry' => true];
             Trace::error('engine', $s->engine . '.start', $e->getMessage(), Trace::exception($e), ['client_id' => (int) $s->client_id]);
         }
+        ScanLog::end(true, $r['ok'] ? 'موتور کار را پذیرفت: ' . (string) ($r['stage'] ?? '') : 'موتور کار را نپذیرفت: ' . mb_substr((string) ($r['error'] ?? ''), 0, 160), ['ref' => (string) ($r['ref'] ?? ''), 'meta' => (array) ($r['meta'] ?? [])], $r['ok'] ? 'info' : 'error');
         if (!$r['ok']) {
             $tries = (int) $s->tries + 1;
             if (!empty($r['retry']) && $tries < self::MAX_TRIES) {
@@ -303,14 +306,23 @@ final class Scans
             self::fail($s, 'اسکن بیش از زمان مجاز طول کشید.', true);
             return Db::table('mod_mcsec_scans')->where('id', $id)->first();
         }
+        ScanLog::begin((int) $s->id, (int) $s->client_id, 'poll');
         try {
             $p = self::engine((string) $s->engine)->poll($s, $asset, $profile);
         } catch (\Throwable $e) {
+            ScanLog::end(true, 'پرسیدن وضعیت از موتور خطا داد: ' . mb_substr($e->getMessage(), 0, 160), [], 'warn');
             Trace::warn('engine', $s->engine . '.poll', $e->getMessage(), ['scan' => $s->id]);
             Db::table('mod_mcsec_scans')->where('id', $s->id)->update(['synced_at' => Clock::now()]);
             return $s;
         }
+        // written only when something changed or a call failed, so a long scan does not fill the journal
+        $changed = $p['status'] !== 'running' || (!empty($p['stage']) && (string) $p['stage'] !== (string) $s->stage) || !empty($p['meta']);
+        ScanLog::end($changed || ScanLog::failed(), 'وضعیت در موتور: ' . $p['status'] . (!empty($p['stage']) ? ' — ' . $p['stage'] : '') . (!empty($p['error']) ? ' — ' . $p['error'] : ''), array_filter(['meta' => (array) ($p['meta'] ?? [])]), $p['status'] === 'failed' ? 'error' : 'info');
         $upd = ['synced_at' => Clock::now()];
+        if (!empty($p['meta'])) {
+            // the engine learned something it needs later (the run it started after the target's discovery)
+            $upd['backend_meta'] = Db::json(array_merge(json_decode((string) $s->backend_meta, true) ?: [], (array) $p['meta']));
+        }
         if (isset($p['progress'])) {
             $upd['progress'] = max((int) $s->progress, min(99, (int) $p['progress']));
         }
@@ -329,9 +341,11 @@ final class Scans
 
     private static function finish(object $s, object $asset, array $profile): void
     {
+        ScanLog::begin((int) $s->id, (int) $s->client_id, 'collect');
         try {
             $res = self::engine((string) $s->engine)->collect($s, $asset, $profile);
         } catch (\Throwable $e) {
+            ScanLog::end(true, 'خواندن نتیجه از موتور خطا داد: ' . mb_substr($e->getMessage(), 0, 160), [], 'error');
             $tries = (int) $s->tries + 1;
             $ref = Trace::error('engine', $s->engine . '.collect', $e->getMessage(), Trace::exception($e), ['client_id' => (int) $s->client_id]);
             if ($tries >= self::MAX_TRIES) {
@@ -348,7 +362,13 @@ final class Scans
         $summary = ['new' => count($diff['new']), 'reopened' => count($diff['reopened']), 'fixed' => count($diff['fixed']), 'seen' => $diff['seen'],
             'open' => $counts, 'surface_new' => count($surf['new']), 'surface_seen' => $surf['seen'], 'surface_gone' => $surf['gone']];
         $partial = mb_substr((string) ($res['partial'] ?? ''), 0, 255);
+        if (!empty($res['evidence'])) {
+            $summary['evidence'] = (array) $res['evidence']; // what proves the engine really worked (ids, jobs, what it could reach)
+        }
+        ScanLog::end(true, $partial !== '' ? 'نتیجه خوانده شد، ولی ارزیابی ناقص است: ' . mb_substr($partial, 0, 120) : 'نتیجه خوانده شد: ' . count($res['findings']) . ' یافته از موتور، ' . count($res['surface']) . ' مورد سطح حمله',
+            ['evidence' => (array) ($res['evidence'] ?? []), 'findings_from_engine' => count($res['findings']), 'new' => count($diff['new']), 'surface' => count($res['surface']), 'complete' => (bool) $res['complete']], $partial !== '' ? 'warn' : 'info');
         if ($partial !== '') {
+            ScanLog::alert($s, 'incomplete', $partial);
             $summary['partial'] = $partial;
             // a paid scan the target cut off before it saw anything gave the customer nothing: the credits go back
             if ((int) $s->credits > 0 && !$res['findings'] && Settings::bool('refund_on_fail')) {
@@ -433,6 +453,8 @@ final class Scans
         if ($refund && (int) $s->credits > 0 && Settings::bool('refund_on_fail')) {
             $back = Credits::refund((int) $s->client_id, 'scan:' . $s->id, 'بازگشت اعتبار اسکن ناموفق', (int) $s->id);
         }
+        ScanLog::add((int) $s->id, (int) $s->client_id, 'fail', $why . ($ref !== '' ? ' (' . $ref . ')' : ''), ['refunded' => $back, 'was' => (string) $s->status, 'stage' => (string) $s->stage], 'error');
+        ScanLog::alert($s, 'failed', $why . ($ref !== '' ? ' کد: ' . $ref : ''));
         $asset = Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->first();
         Notify::event((int) $s->client_id, 'scan_failed', ['scan_id' => (int) $s->id, 'asset' => (string) ($asset->value ?? ''), 'profile' => (string) (Catalog::label((string) ($s->profile))),
             'error' => $why, 'ref' => $ref, 'refunded' => $back], 'sf:' . $s->id);

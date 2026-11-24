@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.11.1';
+    public const SCHEMA = '0.12.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -462,6 +462,19 @@ final class Installer
             $t->string('status', 10)->default('');   // action: pending | running | done | failed | cancelled | expired; user: failed = no answer came
             $t->integer('created_at')->default(0);
             $t->index(['client_id', 'user_id', 'id']);
+        });
+
+        // 0.12.0 the journal of every scan: engine calls per step, proof of work, alerts for the admin
+        $make('mod_mcsec_scan_events', function ($t) {
+            $t->increments('id');
+            $t->integer('scan_id')->index();
+            $t->integer('client_id')->default(0);
+            $t->string('step', 16);                  // queue | start | poll | collect | finish | fail | alert
+            $t->string('level', 8)->default('info'); // info | warn | error; alert rows: new | seen
+            $t->string('message', 255)->default('');
+            $t->text('detail')->nullable();         // json: calls [{m,path,status,ms}], ids, counts
+            $t->integer('created_at')->default(0);
+            $t->index(['step', 'level']);
         });
 
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)

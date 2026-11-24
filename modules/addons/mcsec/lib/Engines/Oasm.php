@@ -66,6 +66,7 @@ final class Oasm implements Engine
                 return $r;
             }
             $r = Http::request($method, $this->base() . $path, $headers, $body, ['timeout' => $timeout, 'connect' => 6, 'verify' => Settings::bool('oasm_verify_tls'), 'cookie' => $cookie]);
+            \McSec\ScanLog::call($method, $path, $r);
             if ($r['status'] !== 401) {
                 Http::circuitRecord('oasm', $r['status'] > 0 && $r['status'] < 500);
                 return $r;
@@ -196,20 +197,13 @@ final class Oasm implements Engine
         if ($tools) {
             // tools run through a project pipeline with MC-Sec's own settings: OASM's built-in vulnerability scan uses
             // its defaults (150 requests a second, interactsh on), which gets the scanner banned by the target
-            $steps = [];
-            foreach ($tools as $i => $name) {
-                $def = Catalog::TOOLS[$name];
-                if (!in_array((string) $asset->kind, $def['kinds'], true)) {
-                    return ['ok' => false, 'retry' => false, 'error' => $def['label'] . ' does not accept a ' . $asset->kind . ' target'];
-                }
-                if (isset($def['needs']) && Settings::secret($def['needs']) === '') {
-                    return ['ok' => false, 'retry' => false, 'error' => $def['label'] . ' is not set up (setting ' . $def['needs'] . ' is empty)'];
-                }
-                $n = $this->tool($ws, $name, true);
-                if (!$n['known'] || !$n['installed']) {
-                    return ['ok' => false, 'retry' => false, 'error' => 'OASM cannot run ' . $name . ': ' . (!$n['known'] ? 'tool list not readable or tool missing' : 'not installed in workspace')];
-                }
-                $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1, 'config' => \McSec\Recipes::apply(self::toolConfig($name), (array) ($profile['options'][$name] ?? []))];
+            $steps = $this->steps($ws, $asset, $profile, $tools);
+            if (is_string($steps)) {
+                return ['ok' => false, 'retry' => false, 'error' => $steps];
+            }
+            if ($t['created']) {
+                // a target made just now has no hosts or services yet: its discovery runs first, then the tools (poll starts them)
+                return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind, 'tools' => $tools, 'wait' => 1], 'progress' => 1, 'stage' => 'شناخت دارایی پیش از اسکن'];
             }
             try {
                 $run = $this->runPipeline($asset, $ws, $t['id'], (string) $profile['key'], $steps);
@@ -226,6 +220,38 @@ final class Oasm implements Engine
             return ['ok' => false, 'error' => 'OASM: HTTP ' . $r['status'] . ' ' . mb_substr((string) $r['body'], 0, 160), 'retry' => $r['status'] === 0 || $r['status'] >= 500];
         }
         return ['ok' => true, 'ref' => $t['id'], 'meta' => ['ws' => $ws, 'since' => $since, 'kind' => $kind], 'progress' => 1, 'stage' => 'در صف موتور OASM'];
+    }
+
+    /**
+     * The pipeline steps of a profile's tools in a workspace (tools installed and given MC-Sec's settings on the way),
+     * or the reason it cannot run.
+     * @return array<int,array>|string
+     */
+    private function steps(string $ws, object $asset, array $profile, array $tools)
+    {
+        $steps = [];
+        foreach ($tools as $i => $name) {
+            $def = Catalog::TOOLS[$name];
+            if (!in_array((string) $asset->kind, $def['kinds'], true)) {
+                return $def['label'] . ' does not accept a ' . $asset->kind . ' target';
+            }
+            if (isset($def['needs']) && Settings::secret($def['needs']) === '') {
+                return $def['label'] . ' is not set up (setting ' . $def['needs'] . ' is empty)';
+            }
+            $n = $this->tool($ws, $name, true);
+            if (!$n['known'] || !$n['installed']) {
+                return 'OASM cannot run ' . $name . ': ' . (!$n['known'] ? 'tool list not readable or tool missing' : 'not installed in workspace');
+            }
+            $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1, 'config' => \McSec\Recipes::apply(self::toolConfig($name), (array) ($profile['options'][$name] ?? []))];
+        }
+        return $steps;
+    }
+
+    /** The jobs of a run, or null when OASM did not answer. @return array<int,array>|null */
+    private function runJobs(array $m): ?array
+    {
+        $r = $this->call('GET', '/api/jobs-registry?jobHistoryId=' . rawurlencode((string) $m['run']) . '&limit=50', null, (string) ($m['ws'] ?? ''), 15);
+        return $r['ok'] ? array_values(array_filter((array) ($r['json']['data'] ?? []), 'is_array')) : null;
     }
 
     /**
@@ -414,6 +440,8 @@ final class Oasm implements Engine
         return false;
     }
 
+    public const NO_WORK = 'موتور اسکن برای این اسکن هیچ کاری اجرا نکرد. اعتبار برگشت؛ کمی بعد دوباره اسکن بگیرید. اگر تکرار شد به پشتیبانی خبر بدهید.';
+    public const NO_SERVICE = 'اسکنر هیچ درگاه یا سرویس بازی روی این دارایی ندید، پس چیزی برای بررسی نبود. اگر سرور پشت فایروال است یا فقط به IPهای مشخص جواب می‌دهد، IP اسکنر را مجاز کنید و دوباره اسکن بگیرید.';
     public const BLOCKED = 'هدف هنگام اسکن دیگر پاسخ نداد؛ به احتمال زیاد فایروال یا محافظ وب سرور، IP اسکنر را مسدود کرده است. IP اسکنر را در آن مجاز کنید و دوباره اسکن بگیرید.';
 
     public function poll(object $scan, object $asset, array $profile): array
@@ -421,6 +449,28 @@ final class Oasm implements Engine
         $this->cid = (int) $asset->client_id;
         $m = json_decode((string) $scan->backend_meta, true) ?: [];
         $ws = (string) ($m['ws'] ?? '');
+        if (!empty($m['wait']) && ($m['run'] ?? '') === '') {
+            // the discovery of a new target must end first (15 minutes at most), so the tools have hosts and services to work on
+            $d = $this->call('GET', '/api/targets/' . rawurlencode((string) $scan->backend_ref) . '/runs?limit=5&sortOrder=DESC', null, $ws, 8);
+            $done = false;
+            foreach ($d['ok'] ? (array) ($d['json']['data'] ?? []) : [] as $dr) {
+                $done = $done || !empty($dr['isCompleted']);
+            }
+            if (!$done && Clock::now() - (int) $scan->started_at < 900) {
+                return ['status' => 'running', 'progress' => 2, 'stage' => 'شناخت دارایی پیش از اسکن'];
+            }
+            $tools = array_values(array_filter(array_map('strval', (array) ($m['tools'] ?? [])), fn ($n) => isset(Catalog::TOOLS[$n])));
+            $steps = $this->steps($ws, $asset, $profile, $tools);
+            if (is_string($steps)) {
+                return ['status' => 'failed', 'error' => $steps];
+            }
+            try {
+                $run = $this->runPipeline($asset, $ws, (string) $scan->backend_ref, (string) $profile['key'], $steps);
+            } catch (\Throwable $e) {
+                return Clock::now() - (int) $scan->started_at > 3600 ? ['status' => 'failed', 'error' => mb_substr($e->getMessage(), 0, 200)] : ['status' => 'running', 'progress' => 2, 'stage' => 'در انتظار پاسخ OASM'];
+            }
+            return ['status' => 'running', 'progress' => 3, 'stage' => 'در صف موتور OASM', 'meta' => ['project' => $run['project'], 'run' => $run['run'], 'wait' => 0, 'discovered' => $done]];
+        }
         if (($m['run'] ?? '') !== '' && ($m['project'] ?? '') !== '') {
             $run = $this->pipelineRun($m);
             if ($run === null) {
@@ -490,12 +540,14 @@ final class Oasm implements Engine
         $surface = [];
         $hosts = [];
         $shots = [];
+        $services = 0; // host:port rows OASM holds for the target: what the scanner could actually reach
         for ($page = 1; $page <= 10; $page++) {
             $r = $this->call('GET', '/api/assets?targetIds=' . rawurlencode($tid) . '&limit=100&page=' . $page, null, $ws, 30);
             if (!$r['ok']) {
                 throw new \RuntimeException('OASM assets: HTTP ' . $r['status']);
             }
             foreach ((array) ($r['json']['data'] ?? []) as $a) {
+                $services++;
                 $value = (string) ($a['value'] ?? '');
                 $host = preg_replace('~:\d+$~', '', $value) ?? $value;
                 if ($host !== '' && !isset($hosts[$host])) {
@@ -562,7 +614,29 @@ final class Oasm implements Engine
             $blocked = in_array((string) ($run['status'] ?? ''), ['failed', 'cancelled'], true) && $this->blockedByTarget($m);
             $out['partial'] = $blocked ? self::BLOCKED : '';
             $out['complete'] = !$blocked && (string) ($run['status'] ?? '') === 'completed';
+            // proof that work was done: the run exists, it has jobs, and the scanner could reach something
+            $jobs = $this->runJobs($m);
+            $by = [];
+            foreach ($jobs ?? [] as $j) {
+                $st = (string) ($j['status'] ?? '?');
+                $by[$st] = ($by[$st] ?? 0) + 1;
+            }
+            $out['evidence'] = ['run_status' => (string) ($run['status'] ?? ''), 'run_found' => (bool) $run, 'jobs' => $jobs === null ? null : count($jobs), 'jobs_by_status' => $by, 'services' => $services, 'hosts' => count($hosts)];
+            $web = (bool) array_intersect((array) ($m['tools'] ?? []), ['katana', 'zap', 'nuclei', 'ffuf', 'dirsearch', 'arjun', 'wpscan', 'acunetix']);
+            if ($out['partial'] === '') {
+                if (!$run || $jobs === []) {
+                    $out['partial'] = self::NO_WORK;
+                } elseif ($web && $services === 0 && !$findings) {
+                    $out['partial'] = self::NO_SERVICE;
+                }
+                $out['complete'] = $out['complete'] && $out['partial'] === '';
+            }
+        } else {
+            $out['evidence'] = ['services' => $services, 'hosts' => count($hosts)];
         }
+        $acc = Accounts::get((int) $asset->client_id);
+        $out['evidence'] += ['engine' => 'oasm', 'workspace' => $ws, 'workspace_name' => 'mcsec-c' . (int) $asset->client_id, 'user' => (string) ($acc->oasm_user ?? ''), 'target' => $tid,
+            'project' => (string) ($m['project'] ?? ''), 'run' => (string) ($m['run'] ?? ''), 'tools' => array_values((array) ($m['tools'] ?? []))];
         return $out;
     }
 

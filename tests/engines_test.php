@@ -43,6 +43,9 @@ http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
     if ($path === '/api/targets/bulk') {
         return ['status' => 201, 'body' => json_encode(['created' => [['id' => 't-1', 'value' => 'example.com', 'type' => 'DOMAIN']], 'skipped' => [], 'totalRequested' => 1, 'totalCreated' => 1, 'totalSkipped' => 0])];
     }
+    if ($method === 'GET' && $path === '/api/targets/t-1') {
+        return ['status' => 200, 'body' => '{"id":"t-1"}'];
+    }
     if (str_starts_with($path, '/api/targets/t-1/runs')) {
         $run = ['id' => 'run-1', 'createdAt' => '2026-11-11T10:00:10Z', 'status' => $state['run_done'] ? 'completed' : 'in_progress', 'isCompleted' => $state['run_done'],
             'workflowName' => 'Domain discovery', 'jobsTotal' => 4, 'jobsDone' => $state['run_done'] ? 4 : 2, 'jobsFailed' => 0, 'jobsRunning' => 1, 'currentTool' => 'naabu', 'newVulnerabilities' => 0];

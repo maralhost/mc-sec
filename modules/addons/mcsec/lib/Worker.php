@@ -34,6 +34,7 @@ final class Worker
                 'reports' => fn () => Reports::process($deadline),
                 'digests' => fn () => self::every('digests', 1800) ? Notify::digests($deadline) : 'skip',
                 'deliver' => fn () => Notify::deliver($deadline + 10),
+                'ops' => fn () => ScanLog::deliverAlerts(),
                 'bots' => fn () => self::every('bots', 120) ? Notify::linkBots() : 'skip',
             ];
             foreach ($steps as $name => $fn) {
@@ -78,6 +79,7 @@ final class Worker
             'notices' => fn () => Notify::purge(),
             'reports' => fn () => Reports::purge(),
             'chat' => fn () => Assistant::purge(),
+            'scan_log' => fn () => ScanLog::purge(),
         ];
         foreach ($steps as $step => $fn) {
             try {
