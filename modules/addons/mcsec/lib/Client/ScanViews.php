@@ -92,27 +92,56 @@ final class ScanViews
                 . '<span>' . Ui::ltr($a->value) . (trim((string) $a->label) !== '' ? '<small>' . self::e($a->label) . '</small>' : '') . '</span></label>';
         }
         $assets .= '</fieldset>';
-        $cards = '<fieldset class="mcs-profiles"><legend>' . Ui::ico('radar') . Lang::t('چه اسکنی؟') . '</legend>';
-        $first = true;
-        foreach (Catalog::forClient($cid) as $k => $p) {
+        $mine = Catalog::forClient($cid);
+        $kindsHere = array_values(array_unique(array_map(fn ($a) => (string) $a->kind, $verified)));
+        $want = array_filter(array_map('strval', (array) ($_POST['profiles'] ?? (isset($_GET['profile']) ? [$_GET['profile']] : []))));
+        $card = function (string $k, array $p) use ($want): string {
             $engineOk = Scans::engine($p['engine'])->configured();
             $disabled = !$p['allowed'] || !$engineOk;
             $why = !$p['allowed'] ? 'در پلن فعلی نیست' : (!$engineOk ? 'موقتاً در دسترس نیست' : '');
-            $cards .= '<label class="mcs-profile' . ($disabled ? ' is-locked' : '') . '"><input type="radio" name="profile" value="' . self::e($k) . '" data-mcs-cost="' . (int) $p['credits'] . '" data-mcs-kinds="' . self::e(implode(',', $p['kinds'])) . '"'
-                . ($disabled ? ' disabled' : '') . ($first && !$disabled ? ' checked' : '') . '>'
+            return '<label class="mcs-profile' . ($disabled ? ' is-locked' : '') . '"><input type="checkbox" name="profiles[]" value="' . self::e($k) . '" data-mcs-cost="' . (int) $p['credits'] . '" data-mcs-kinds="' . self::e(implode(',', $p['kinds'])) . '"'
+                . ($disabled ? ' disabled' : '') . (!$disabled && in_array($k, $want, true) ? ' checked' : '') . '>'
                 . '<span class="mcs-profile-head"><span class="mcs-profile-ico">' . Ui::ico($p['icon'] ?? 'radar') . '</span><strong>' . self::e($p['label']) . '</strong>'
                 . '<span class="mcs-profile-cost">' . ((int) $p['credits'] > 0 ? Lang::t('{n} اعتبار', ['n' => self::e(Text::fa((int) $p['credits']))]) : Lang::t('رایگان')) . '</span></span>'
                 . '<span class="mcs-profile-desc">' . self::e($p['desc']) . (Catalog::risk($p) === 'heavy' ? ' ' . Ui::chip('درخواست زیاد به هدف', 'warn') : '') . '</span>'
                 . '<span class="mcs-profile-meta">' . Ui::ico('clock') . self::e($p['eta']) . ' · ' . self::e(self::kinds($p['kinds']))
-                    . ($why !== '' ? ' · ' . Ui::ico('lock') . self::e($why) : '') . '</span></label>';
-            $first = $first && $disabled;
+                . ($why !== '' ? ' · ' . Ui::ico('lock') . self::e($why) : '') . '</span></label>';
+        };
+        // 1. the ready-made picks: what most people need, one click
+        $bundles = Catalog::bundles(array_filter($mine, fn ($p) => array_intersect($p['kinds'], $kindsHere)));
+        $bcards = '';
+        $pre = !$want && $bundles ? (isset($bundles['b_standard']) ? 'b_standard' : array_key_first($bundles)) : '';
+        foreach ($bundles as $bk => $b) {
+            $names = Lang::join(array_map(fn ($k) => Lang::t((string) $mine[$k]['label']), $b['profiles']));
+            $bcards .= '<label class="mcs-profile mcs-bundle"><input type="checkbox" name="bundles[]" value="' . self::e($bk) . '" data-mcs-bundle="' . self::e(implode(',', $b['profiles'])) . '"' . ($bk === $pre ? ' checked' : '') . '>'
+                . '<span class="mcs-profile-head"><strong>' . self::e($b['label']) . '</strong>' . ($bk === 'b_standard' ? Ui::chip('پیشنهاد ما', 'info') : '')
+                . '<span class="mcs-profile-cost">' . ($b['credits'] > 0 ? Lang::t('{n} اعتبار', ['n' => self::e(Text::fa($b['credits']))]) : Lang::t('رایگان')) . '</span></span>'
+                . '<span class="mcs-profile-desc">' . self::e($b['desc']) . '</span><span class="mcs-profile-meta">' . Ui::ico('layers') . self::e($names) . '</span></label>';
         }
-        $cards .= '</fieldset>' . (\McSec\Recipes::allowed($cid) ? '<p class="mcs-help">' . Ui::ico('layers') . Lang::t('ترکیب دیگری می‌خواهید؟ <a href="index.php?m=mcsec&amp;p=recipes">اسکن سفارشی خودتان را بسازید</a>.') . '</p>' : '');
+        $cards = $bcards !== '' ? '<fieldset class="mcs-profiles"><legend>' . Ui::ico('radar') . Lang::t('چه اسکنی؟') . '</legend>' . $bcards . '</fieldset>' : '';
+        // 2. everything, by category; open only when there is no bundle or something was ticked there
+        $groups = '';
+        $total = 0;
+        foreach (Catalog::grouped($mine) as $cat => $list) {
+            [$cl, $cd, $ci] = Catalog::CATEGORIES[$cat];
+            $inner = '';
+            foreach ($list as $k => $p) {
+                $inner .= $card((string) $k, $p);
+                $total++;
+            }
+            $groups .= '<fieldset class="mcs-profiles mcs-cat"><legend>' . Ui::ico($ci) . self::e($cl) . ' <span class="mcs-small mcs-muted">' . self::e($cd) . '</span></legend>' . $inner . '</fieldset>';
+        }
+        $open = $bcards === '' || $want;
+        $cards .= $bcards !== ''
+            ? '<details class="mcs-drawer mcs-allscans"' . ($open ? ' open' : '') . '><summary>' . Ui::ico('list') . Lang::t('انتخاب دقیق‌تر: همه‌ی اسکن‌ها ({n} نوع، بر اساس دسته)', ['n' => self::e(Text::fa($total))]) . '</summary><div class="mcs-drawer-body">'
+                . '<p class="mcs-help">' . Lang::t('هر چند تا را می‌خواهید تیک بزنید؛ هزینه‌ها جمع می‌شود و روی دکمه‌ی شروع می‌بینید. اسکنی که برای نوع دارایی انتخاب‌شده نیست، برای آن دارایی اجرا نمی‌شود.') . '</p>' . $groups . '</div></details>'
+            : $groups;
+        $cards .= \McSec\Recipes::allowed($cid) ? '<p class="mcs-help">' . Ui::ico('layers') . Lang::t('ترکیب دیگری می‌خواهید؟ <a href="index.php?m=mcsec&amp;p=recipes">اسکن سفارشی خودتان را بسازید</a>.') . '</p>' : '';
         $acc = Accounts::get($cid);
         $terms = (int) $acc->terms_at === 0 ? '<label class="mcs-check mcs-terms"><input type="checkbox" name="terms" value="1" required><span>' . self::e(Settings::get('terms_text')) . '</span></label>' : '';
         $submit = '<div class="mcs-launch-foot"><button type="submit" class="btn btn-primary btn-lg" data-mcs-launch>' . Ui::ico('play') . '<span data-mcs-launch-text>' . Lang::t('شروع اسکن') . '</span></button>'
             . '<span class="mcs-muted mcs-small" data-mcs-balance="' . (int) $bal['total'] . '">' . Lang::t('مانده‌ی اعتبار: {n}', ['n' => self::e(Text::fa($bal['total']))]) . '</span></div>'
-            . '<noscript><p class="mcs-help">' . Lang::t('هزینه‌ی کل = هزینه‌ی نوع اسکن × تعداد دارایی‌ها (بازه‌ی IP به ازای هر ۱۶ آدرس).') . '</p></noscript>';
+            . '<noscript><p class="mcs-help">' . Lang::t('هزینه‌ی کل = جمع هزینه‌ی اسکن‌های انتخاب‌شده × تعداد دارایی‌ها (بازه‌ی IP به ازای هر ۱۶ آدرس).') . '</p></noscript>';
         return Ui::card(Ui::form($ctx, 'scans', 'scan_start', $assets . $cards . $terms . $submit, '', 'mcs-launcher'), 'اسکن تازه', 'play', '', '" id="new');
     }
 

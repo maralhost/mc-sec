@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.15.0';
+    public const SCHEMA = '0.16.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -586,6 +586,13 @@ final class Installer
             Db::table('mod_mcsec_settings')->insert(['k' => 'installed_at', 'v' => (string) Clock::now()]);
         }
         // only now, with every table and column in place, is this schema marked as built
+        // 0.16.0: the domain of a hosting order is no longer proof of ownership. Every proof that rests on the database
+        // is looked at again on the worker's next pass (and at once when a scan is queued: Verify::holds).
+        try {
+            Db::table('mod_mcsec_assets')->where('status', 'verified')->where('kind', 'domain')->whereIn('method', ['whmcs', 'parent'])->update(['next_check_at' => 0]);
+        } catch (\Throwable $e) {
+            Db::log('recheck of database proofs not scheduled: ' . $e->getMessage());
+        }
         Settings::set('schema_version', self::SCHEMA);
     }
 }

@@ -12,7 +12,7 @@ function qa(sel,el){return Array.prototype.slice.call((el||root).querySelectorAl
 // Two languages: the page says which (data-mcs-lang); the few messages this script writes itself have their English here.
 var en=root.getAttribute('data-mcs-lang')==='en';
 var EN={'ارسال انجام نشد؛ دوباره امتحان کنید.':'Could not send. Please try again.','ذخیره انجام نشد؛ دوباره امتحان کنید.':'Could not save. Please try again.','خروج از تمام‌صفحه':'Exit full screen','تمام‌صفحه':'Full screen','کپی شد':'Copied','کپی':'Copy',
- 'متن انتخاب شد؛ با Ctrl+C کپی کنید.':'Text selected. Press Ctrl+C to copy.','دارایی را انتخاب کنید':'Choose an asset','شروع اسکن · {n} اعتبار':'Start scan · {n} credits','شروع اسکن رایگان':'Start free scan',
+ 'متن انتخاب شد؛ با Ctrl+C کپی کنید.':'Text selected. Press Ctrl+C to copy.','دارایی را انتخاب کنید':'Choose an asset','شروع اسکن · {n} اعتبار':'Start scan · {n} credits','شروع اسکن رایگان':'Start free scan','نوع اسکن را انتخاب کنید':'Choose a scan','شروع {s} اسکن · {n} اعتبار':'Start {s} scans · {n} credits','شروع {s} اسکن رایگان':'Start {s} free scans',
  'اعتبار کافی نیست: {need} لازم است و {have} دارید.':'Not enough credits: {need} needed, you have {have}.','مانده پس از این اسکن: {n} اعتبار':'Balance after this scan: {n} credits','{n}٪':'{n}%','اسکن {label}.':'Scan {label}.'};
 function T(s,v){var o=en&&EN[s]?EN[s]:s;if(v)for(var k in v)o=o.split('{'+k+'}').join(v[k]);return o;}
 function fa(n){return en?String(n):String(n).replace(/\d/g,function(d){return '۰۱۲۳۴۵۶۷۸۹'.charAt(+d);});}
@@ -81,14 +81,19 @@ root.addEventListener('click',function(e){var t=e.target;if(!t.closest)return;
 function sel(el){var r=document.createRange();r.selectNodeContents(el);var s=window.getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand('copy');}catch(e){}toast(T('متن انتخاب شد؛ با Ctrl+C کپی کنید.'));}
 
 // the scan launcher: total cost on the button, assets that do not fit the chosen scan are greyed out
-function launcher(){var f=view.querySelector('form.mcs-launcher');if(!f)return;var btn=f.querySelector('[data-mcs-launch-text]');var bal=f.querySelector('[data-mcs-balance]');
- function upd(){var p=f.querySelector('input[name=profile]:checked');var cost=p?+p.getAttribute('data-mcs-cost'):0;var kinds=p?(p.getAttribute('data-mcs-kinds')||'').split(','):[];var n=0;
-  qa('input[name="assets[]"]',f).forEach(function(c){var ok=kinds.indexOf(c.getAttribute('data-mcs-kind'))>=0;c.disabled=!ok;c.closest('label').classList.toggle('is-off',!ok);if(ok&&c.checked)n++;});
-  var total=cost*n;if(btn)btn.textContent=n===0?T('دارایی را انتخاب کنید'):(total>0?T('شروع اسکن · {n} اعتبار',{n:fa(total)}):T('شروع اسکن رایگان'));
-  var b=f.querySelector('[data-mcs-launch]');if(b)b.disabled=n===0;
+function launcher(){var f=view.querySelector('form.mcs-launcher');if(!f)return;
+ var btn=f.querySelector('[data-mcs-launch-text]'),bal=f.querySelector('[data-mcs-balance]');
+ function upd(){var want={},total=0,scans=0;
+  qa('input[name="profiles[]"]:checked',f).forEach(function(i){want[i.value]=1;});
+  qa('input[name="bundles[]"]:checked',f).forEach(function(i){(i.getAttribute('data-mcs-bundle')||'').split(',').forEach(function(k){if(k)want[k]=1;});});
+  var assets=qa('input[name="assets[]"]:checked',f).map(function(a){return a.getAttribute('data-mcs-kind');});
+  qa('input[name="profiles[]"]',f).forEach(function(i){if(!want[i.value]||i.disabled)return;var kinds=(i.getAttribute('data-mcs-kinds')||'').split(','),cost=+i.getAttribute('data-mcs-cost')||0;
+   assets.forEach(function(k){if(kinds.indexOf(k)>=0){total+=cost;scans++;}});});
+  var none=assets.length===0?T('دارایی را انتخاب کنید'):(scans===0?T('نوع اسکن را انتخاب کنید'):'');
+  if(btn)btn.textContent=none||(scans>1?(total>0?T('شروع {s} اسکن · {n} اعتبار',{s:fa(scans),n:fa(total)}):T('شروع {s} اسکن رایگان',{s:fa(scans)})):(total>0?T('شروع اسکن · {n} اعتبار',{n:fa(total)}):T('شروع اسکن رایگان')));
+  var b=f.querySelector('[data-mcs-launch]');if(b)b.disabled=!!none;
   if(bal){var have=+bal.getAttribute('data-mcs-balance');bal.textContent=total>have?T('اعتبار کافی نیست: {need} لازم است و {have} دارید.',{need:fa(total),have:fa(have)}):T('مانده پس از این اسکن: {n} اعتبار',{n:fa(have-total)});bal.style.color=total>have?'var(--t-err)':'';}}
  f.addEventListener('change',upd);upd();}
-
 // live progress of a running scan
 var progT=null,progN=0;
 function progress(){clearTimeout(progT);var el=view.querySelector('[data-mcs-progress]');if(!el){progN=0;return;}

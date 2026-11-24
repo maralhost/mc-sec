@@ -65,7 +65,7 @@ final class Scans
         if (Settings::bool('scans_paused') && empty($opt['admin'])) {
             return ['ok' => false, 'error' => 'اسکن‌ها برای نگهداری موقتاً متوقف‌اند. لطفاً کمی بعد امتحان کنید.'];
         }
-        if ((int) $asset->client_id !== $clientId || $asset->status !== 'verified') {
+        if ((int) $asset->client_id !== $clientId || $asset->status !== 'verified' || !Verify::holds($asset)) {
             return ['ok' => false, 'error' => Lang::t('دارایی «{asset}» هنوز تأیید نشده است؛ اسکن فقط پس از تأیید مالکیت ممکن است.', ['asset' => $asset->value])];
         }
         $via = '';

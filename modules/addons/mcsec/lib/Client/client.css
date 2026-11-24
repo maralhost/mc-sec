@@ -599,4 +599,12 @@ body:not(.lagom) .mcs .btn-primary{background:var(--t-primary);border:1px solid 
 .mcs .mcs-surfacemap p{margin:0 0 .5rem}
 @container (max-width:640px){.mcs .mcs-surfacemap{grid-template-columns:minmax(0,1fr)}}
 .mcs .mcs-about{padding:.6rem .8rem;border-radius:10px;background:var(--t-sunk);margin-block-end:1rem}.mcs .mcs-about ul{margin:.2rem 0 0}
-@media (prefers-reduced-motion:reduce){.mcs .mcs-radar-sweep{display:none}}
+@media (prefers-reduced-motion:reduce){.mcs .mcs-radar-sweep{display:none}}/* 0.16.0: the scan chooser. Ready-made bundles first; every scan by category behind one click; several can be ticked. */
+.mcs .mcs-profile.mcs-bundle{border-width:2px;padding:1rem 1.05rem}
+.mcs .mcs-profile.mcs-bundle strong{font-size:1.02rem}
+.mcs .mcs-profile.mcs-bundle .mcs-chip{margin-inline-start:.1rem}
+.mcs .mcs-profile:has(input[type=checkbox]:checked)::after{content:"";position:absolute;inset-block-start:-7px;inset-inline-end:-7px;width:20px;height:20px;border-radius:50%;background:var(--t-primary) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m5 12 5 5 9-10'/%3E%3C/svg%3E") center/12px no-repeat;box-shadow:0 0 0 2px var(--t-bg)}
+.mcs details.mcs-allscans{margin-block-end:1rem;background:var(--t-bg)}
+.mcs .mcs-profiles.mcs-cat{margin-block-end:1.1rem}
+.mcs .mcs-profiles.mcs-cat legend{flex-wrap:wrap}
+.mcs .mcs-profiles.mcs-cat legend .mcs-small{font-weight:400}

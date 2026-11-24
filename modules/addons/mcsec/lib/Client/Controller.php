@@ -338,21 +338,41 @@ final class Controller
                 if (!$ids) {
                     return ['flash' => 'err:' . Lang::t('دارایی را انتخاب کنید.')];
                 }
+                // one or several scan types: ticked ones, plus those of a ready-made bundle (legacy forms send one `profile`)
+                $mine = \McSec\Catalog::forClient($cid);
+                $one = $in('profile');
+                $keys = \McSec\Catalog::chosen($mine, array_merge($one !== '' ? [$one] : [], array_map(fn ($v) => is_scalar($v) ? (string) $v : '', (array) ($_POST['profiles'] ?? []))),
+                    array_map(fn ($v) => is_scalar($v) ? (string) $v : '', (array) ($_POST['bundles'] ?? [])));
+                if (!$keys) {
+                    return ['flash' => 'err:' . Lang::t('نوع اسکن را انتخاب کنید: یکی از بسته‌های آماده، یا از فهرست همه‌ی اسکن‌ها.')];
+                }
                 $queued = [];
                 $errors = [];
                 $spent = 0;
+                $multi = count($keys) > 1;
                 foreach (array_slice($ids, 0, 50) as $aid) {
                     $asset = Assets::get($cid, $aid);
                     if (!$asset) {
-                        $errors[] = 'دارایی پیدا نشد.';
+                        $errors[] = Lang::t('دارایی پیدا نشد.');
                         continue;
                     }
-                    $r = Scans::queue($cid, $asset, $in('profile'), 0, $who['user_id']);
-                    if ($r['ok']) {
-                        $queued[] = (int) $r['scan_id'];
-                        $spent += (int) ($r['credits'] ?? 0);
-                    } else {
-                        $errors[] = $asset->value . ': ' . Lang::whole((string) $r['error']);
+                    $fits = 0;
+                    foreach (array_slice($keys, 0, 12) as $key) {
+                        // with several types chosen, one that is not for this kind of asset (a port scan on a domain) is left out quietly
+                        if ($multi && !in_array((string) $asset->kind, (array) ($mine[$key]['kinds'] ?? []), true)) {
+                            continue;
+                        }
+                        $fits++;
+                        $r = Scans::queue($cid, $asset, $key, 0, $who['user_id']);
+                        if ($r['ok']) {
+                            $queued[] = (int) $r['scan_id'];
+                            $spent += (int) ($r['credits'] ?? 0);
+                        } else {
+                            $errors[] = $asset->value . ' — ' . \McSec\Catalog::label($key) . ': ' . Lang::t((string) $r['error']);
+                        }
+                    }
+                    if ($fits === 0) {
+                        $errors[] = Lang::t('{asset}: هیچ‌کدام از اسکن‌های انتخاب‌شده برای این نوع دارایی نیست.', ['asset' => $asset->value]);
                     }
                 }
                 if (count($queued) === 1 && !$errors) {

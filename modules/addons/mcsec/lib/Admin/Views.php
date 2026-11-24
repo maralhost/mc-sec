@@ -203,7 +203,7 @@ final class Views
         $rows = '';
         foreach (Catalog::all(true) as $k => $p) {
             $risk = Catalog::risk($p);
-            $rows .= '<tr><td><code dir="ltr">' . self::e($k) . '</code><br><small>' . self::e(Catalog::engineLabel($p['engine']))
+            $rows .= '<tr><td><code dir="ltr">' . self::e($k) . '</code><br><small>' . self::e((Catalog::CATEGORIES[$p['cat'] ?? 'custom'][0] ?? '') . ' · ' . Catalog::engineLabel($p['engine']))
                 . (!empty($p['tools']) ? ': <bdi dir="ltr">' . self::e(implode(' → ', $p['tools'])) . '</bdi> · ' . self::e(Catalog::RISK[$risk] ?? '') : '') . '</small></td>'
                 . '<td><input class="form-control" name="pl[' . $k . ']" value="' . self::e($p['label']) . '"></td>'
                 . '<td><input class="form-control" name="pc[' . $k . ']" value="' . (int) $p['credits'] . '" dir="ltr" style="max-width:90px"></td>'

@@ -133,15 +133,17 @@ final class Whmcs
         return $cache[$id];
     }
 
-    /** Domains this account has in WHMCS (registered domains and hosting services), lowercased, active only. @return string[] */
+    /**
+     * Domains this account has REGISTERED here and that are active: the registrar itself says they are this account's.
+     * Nothing a customer only typed counts as proof (0.16.0): not the domain of a hosting order (anyone can order
+     * hosting for google.com), not a transfer that is still pending, not an expired or cancelled domain.
+     * @return string[] lowercased
+     */
     public static function ownedDomains(int $clientId): array
     {
         $out = [];
-        foreach (Db::rows(Db::table('tbldomains')->where('userid', $clientId)->whereIn('status', ['Active', 'Pending Transfer', 'Grace'])->select(['domain'])) as $d) {
+        foreach (Db::rows(Db::table('tbldomains')->where('userid', $clientId)->where('status', 'Active')->select(['domain'])) as $d) {
             $out[] = strtolower(trim((string) $d->domain));
-        }
-        foreach (Db::rows(Db::table('tblhosting')->where('userid', $clientId)->whereIn('domainstatus', ['Active', 'Suspended'])->where('domain', '!=', '')->select(['domain'])) as $h) {
-            $out[] = strtolower(trim((string) $h->domain));
         }
         return array_values(array_unique(array_filter($out)));
     }

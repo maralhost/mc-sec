@@ -8,15 +8,18 @@ namespace McSec;
  * Proof of ownership before anything is scanned (the legal and ethical line of the product).
  *
  * Instant (database only, at add time and by the worker):
- *  - whmcs:  the domain (or a parent of it) is a registered domain or hosting service of this account, or the IP is a
- *            dedicated/assigned IP of its active services;
+ *  - whmcs:  the domain (or a parent of it) is an ACTIVE domain registered here by this account (the registrar's own
+ *            word), or the IP is a dedicated/assigned IP of its active services (set by provisioning, not typed by the
+ *            customer). The domain of a hosting order is NOT proof: the customer types it;
  *  - parent: a parent domain of this asset is verified on the same account (a verified domain covers subdomains).
  * Network checks (the «بررسی کن» button, rate limited, and the worker every few minutes while pending):
  *  - dns:  TXT record "mcsec-verify=<token>" on _mcsec-verify.<domain> (its own name, so an SPF record on @ is never
  *          touched by mistake) or on <domain> itself;
- *  - file: http(s)://<host>/.well-known/mcsec-verify.txt contains the proof;
- *  - meta: <meta name="mcsec-verification" content="<token>"> on the home page;
- *  - ptr:  an IP whose reverse DNS is a host inside a verified domain of the account, and that host resolves back.
+ *  - file: http(s)://<host>/.well-known/mcsec-verify.txt IS the proof (the whole file, as text; no redirect followed);
+ *  - meta: <meta name="mcsec-verification" content="<token>"> in the <head> of the home page, outside any script,
+ *          style, comment or text block (user content echoed into a page must never count);
+ *  - ptr:  an IP whose reverse DNS is a host inside a domain this account proved at the DNS level, resolving back.
+ * A proof that rests on the database (whmcs, parent) is looked at again every time a scan is queued (holds()).
  * Verified assets are re-checked every verify_recheck_days; three failures in a row → lapsed (schedules pause).
  */
 final class Verify
@@ -142,7 +145,7 @@ final class Verify
             if ($r === null) {
                 continue;
             }
-            if ($r['status'] === 200 && str_contains($r['body'], $proof)) {
+            if ($r['status'] === 200 && self::fileIsProof((string) $r['body'], $proof)) {
                 return ['ok' => true, 'note' => ''];
             }
             if ($r['status'] === 200) {
@@ -152,6 +155,33 @@ final class Verify
         return ['ok' => false, 'note' => Lang::t('فایل تأیید روی سایت پیدا نشد.')];
     }
 
+    /**
+     * The file must BE the proof: one line with exactly the code (a byte-order mark and blank space around it are
+     * fine). A page that merely contains the code somewhere (an error page, a search page, a listing) is not it.
+     */
+    public static function fileIsProof(string $body, string $proof): bool
+    {
+        $body = trim(preg_replace('~^\xEF\xBB\xBF~', '', $body) ?? '');
+        return $proof !== '' && strlen($body) <= 200 && hash_equals($proof, $body);
+    }
+
+    /**
+     * The part of a page where only its owner writes: the <head>, without scripts, styles, comments, templates and
+     * text blocks. Sites often echo what visitors typed into the body or into a JSON blob inside a script; a meta
+     * tag found there proves nothing.
+     */
+    public static function headOnly(string $html): string
+    {
+        $html = preg_replace('~<!--.*?(-->|$)~s', '', $html) ?? '';
+        foreach (['script', 'style', 'noscript', 'template', 'textarea', 'title', 'svg', 'xmp', 'iframe'] as $tag) {
+            $html = preg_replace('~<' . $tag . '\b.*?(</' . $tag . '\s*>|$)~is', '', $html) ?? '';
+        }
+        if (!preg_match('~<head\b[^>]*>(.*?)(</head\s*>|<body\b|$)~is', $html, $m)) {
+            return '';
+        }
+        return $m[1];
+    }
+
     public static function tryMeta(string $domain, string $proof, string $token): array
     {
         foreach (['https', 'http'] as $scheme) {
@@ -159,7 +189,7 @@ final class Verify
             if ($r === null || $r['status'] !== 200) {
                 continue;
             }
-            if (preg_match_all('~<meta\s[^>]*name\s*=\s*["\']mcsec-verification["\'][^>]*>~i', $r['body'], $mm)) {
+            if (preg_match_all('~<meta\s[^>]*name\s*=\s*["\']mcsec-verification["\'][^>]*>~i', self::headOnly((string) $r['body']), $mm)) {
                 foreach ($mm[0] as $tag) {
                     if (preg_match('~content\s*=\s*["\']([^"\']+)["\']~i', $tag, $c) && (hash_equals($token, trim($c[1])) || hash_equals($proof, trim($c[1])))) {
                         return ['ok' => true, 'note' => ''];
@@ -167,7 +197,7 @@ final class Verify
                 }
                 return ['ok' => false, 'note' => Lang::t('تگ متا هست ولی مقدارش درست نیست.')];
             }
-            return ['ok' => false, 'note' => Lang::t('تگ متا در صفحه‌ی اصلی پیدا نشد.')];
+            return ['ok' => false, 'note' => Lang::t('تگ متا در بخش head صفحه‌ی اصلی پیدا نشد.')];
         }
         return ['ok' => false, 'note' => Lang::t('صفحه‌ی اصلی سایت باز نشد.')];
     }
@@ -178,14 +208,15 @@ final class Verify
         if ($host === '') {
             return ['ok' => false, 'note' => Lang::t('DNS معکوس (PTR) برای این IP تعریف نشده است.')];
         }
-        $domains = Db::table('mod_mcsec_assets')->where('client_id', $asset->client_id)->where('status', 'verified')->where('kind', 'domain')->pluck('value');
+        // only a domain proved at the DNS level: a file or meta tag proves one website, not who names hosts under it
+        $domains = Db::table('mod_mcsec_assets')->where('client_id', $asset->client_id)->where('status', 'verified')->where('kind', 'domain')->whereIn('method', self::ZONE_METHODS)->pluck('value');
         $domains = is_array($domains) ? $domains : $domains->all();
         foreach ($domains as $d) {
             if (Net::within($host, (string) $d) && in_array((string) $asset->value, Net::ips($host), true)) {
                 return ['ok' => true, 'note' => ''];
             }
         }
-        return ['ok' => false, 'note' => Lang::t('DNS معکوس این IP ({host}) زیر هیچ دامنه‌ی تأییدشده‌ی شما نیست.', ['host' => $host])];
+        return ['ok' => false, 'note' => Lang::t('DNS معکوس این IP ({host}) زیر هیچ دامنه‌ای که با رکورد DNS تأیید کرده‌اید نیست.', ['host' => $host])];
     }
 
     /** A GET to the customer's own host, pinned to a public IP (no SSRF into our network). */
@@ -245,6 +276,35 @@ final class Verify
         }
     }
 
+    /**
+     * Whether a verified asset's proof still stands, looked at when a scan is queued. A proof that rests on the
+     * database (a registered domain, a server IP, a verified parent) can stop being true between two re-checks: the
+     * domain leaves the account, the parent lapses. Then the asset lapses here, at once, and nothing is scanned.
+     * Proofs on the network (dns, file, meta, ptr) and an admin's approval keep their own re-check (due()).
+     */
+    public static function holds(object $asset): bool
+    {
+        if ($asset->status !== 'verified') {
+            return false;
+        }
+        if (!in_array((string) $asset->method, ['whmcs', 'parent'], true) || self::instantMethod($asset) !== '') {
+            return true;
+        }
+        self::lapse($asset);
+        return false;
+    }
+
+    private static function lapse(object $a): void
+    {
+        $now = Clock::now();
+        if (Db::table('mod_mcsec_assets')->where('id', $a->id)->where('status', 'verified')->update(['status' => 'lapsed', 'fails' => 3, 'checked_at' => $now, 'next_check_at' => $now + 300]) !== 1) {
+            return;
+        }
+        Db::table('mod_mcsec_schedules')->where('asset_id', $a->id)->where('status', 'active')->update(['status' => 'paused', 'pause_reason' => 'verify']);
+        Audit::log((int) $a->client_id, 'asset_lapsed', (string) $a->value);
+        Notify::event((int) $a->client_id, 'asset_lapsed', ['asset' => (string) $a->value, 'asset_id' => (int) $a->id], 'lapsed:' . $a->id . ':' . $now);
+    }
+
     /** Admin approval for what cannot be proven automatically (a CIDR, a server without web). */
     public static function adminApprove(int $assetId, string $note): bool
     {
@@ -289,6 +349,13 @@ final class Verify
             $out['checked']++;
             if (in_array($a->method, ['whmcs', 'parent'], true)) {
                 $ok = self::instantMethod($a) !== '';
+                if (!$ok && !self::check($a)['ok']) {
+                    // the basis of the proof is gone and nothing on the network replaces it
+                    self::lapse($a);
+                    $out['lapsed']++;
+                    continue;
+                }
+                $ok = true;
             } elseif ($a->method === 'admin') {
                 $ok = true;
             } else {
