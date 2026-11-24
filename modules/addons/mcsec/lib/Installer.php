@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.14.0';
+    public const SCHEMA = '0.15.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -485,6 +485,37 @@ final class Installer
             $t->string('sha', 40)->default('');
             $t->longText('bytes');                   // base64
             $t->integer('updated_at')->default(0);
+        });
+
+        // 0.15.0 requests for a person's work: a question, a paid fix, a manual test with the team's price
+        $make('mod_mcsec_requests', function ($t) {
+            $t->increments('id');
+            $t->integer('client_id')->index();
+            $t->integer('user_id')->default(0);
+            $t->string('kind', 12);                   // help | fix | manual
+            $t->string('topic', 16)->default('');
+            $t->string('status', 12)->index();        // new | quoted | paying | invoiced | accepted | working | done | declined | cancelled
+            $t->integer('asset_id')->default(0);
+            $t->integer('scan_id')->default(0);
+            $t->integer('finding_id')->default(0);
+            $t->text('text');
+            $t->integer('ticket_id')->default(0);
+            $t->string('ticket_tid', 32)->default('');
+            $t->string('ticket_c', 32)->default('');
+            $t->integer('credits')->default(0);       // the price in credits (fix: fixed; manual: the team's)
+            $t->decimal('amount', 16, 2)->default(0); // manual: the invoice amount when the wallet is short
+            $t->text('quote_note')->nullable();       // what the price covers, for the customer
+            $t->integer('quoted_by')->default(0);
+            $t->integer('quoted_at')->default(0);
+            $t->integer('accepted_at')->default(0);
+            $t->integer('accepted_by')->default(0);
+            $t->string('paid_with', 8)->default('');  // credits | invoice
+            $t->integer('invoice_id')->default(0);
+            $t->integer('refunded')->default(0);
+            $t->text('admin_note')->nullable();
+            $t->integer('created_at')->default(0);
+            $t->integer('updated_at')->default(0);
+            $t->integer('closed_at')->default(0);
         });
 
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)

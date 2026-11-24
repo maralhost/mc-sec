@@ -42,11 +42,11 @@ final class Controller
     public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'assistant', 'support', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send', 'request_accept'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
-    private const BUYER_ACTIONS = ['buy_pack', 'code_redeem', 'auto_save'];
+    private const BUYER_ACTIONS = ['buy_pack', 'code_redeem', 'auto_save', 'request_accept', 'request_decline'];
 
     public static function handle(): array
     {
@@ -430,8 +430,27 @@ final class Controller
                 return ['redirect' => 'index.php?m=mcsec&p=assistant'];
             case 'support_send':
                 // the customer's own request for a person to look: WHMCS opens the ticket, code writes the context
-                $r = \McSec\Support::open($who, ['topic' => $in('topic'), 'text' => $in('text'), 'asset' => $int('asset'), 'scan' => $int('scan'), 'finding' => $int('finding')]);
-                return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=support&sent=' . rawurlencode((string) $r['tid'])] : ['flash' => 'err:' . $r['error']];
+                $r = \McSec\Requests::create($who, ['kind' => $in('kind') !== '' ? $in('kind') : 'help', 'topic' => $in('topic'), 'text' => $in('text'), 'asset' => $int('asset'), 'scan' => $int('scan'), 'finding' => $int('finding')]);
+                return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=support&sent=' . (int) $r['id']] : ['flash' => 'err:' . Lang::t((string) $r['error'])];
+            case 'request_accept':
+                // the customer's yes to the team's price: credits when the wallet has them, otherwise an invoice
+                if (!$ctx['buy']) {
+                    return ['flash' => 'err:' . Lang::t('تأیید قیمت فقط با مالک حساب یا کاربری که مجوز «فاکتورها» دارد ممکن است.')];
+                }
+                if (($_POST['agree'] ?? '') !== '1') {
+                    return ['flash' => 'err:' . Lang::t('برای تأیید، تیک «قیمت را می‌پذیرم» را بزنید.')];
+                }
+                $r = \McSec\Requests::accept($who, $int('id'));
+                if (!$r['ok']) {
+                    return ['flash' => 'err:' . Lang::t((string) $r['error'])];
+                }
+                return !empty($r['invoice_id']) ? ['redirect' => 'viewinvoice.php?id=' . (int) $r['invoice_id']] : ['redirect' => 'index.php?m=mcsec&p=support&accepted=' . $int('id')];
+            case 'request_decline':
+                if (!$ctx['buy']) {
+                    return ['flash' => 'err:' . Lang::t('تأیید قیمت فقط با مالک حساب یا کاربری که مجوز «فاکتورها» دارد ممکن است.')];
+                }
+                $r = \McSec\Requests::decline($who, $int('id'));
+                return ['flash' => $r['ok'] ? 'ok:' . Lang::t('قیمت پذیرفته نشد و چیزی کم نشد. اگر نظرتان عوض شد، در تیکت همین درخواست بنویسید.') : 'err:' . Lang::t((string) $r['error'])];
             case 'recipe_remove':
                 $r = \McSec\Recipes::remove($who, $int('id'));
                 return ['flash' => $r['ok'] ? 'ok:' . Lang::t('اسکن سفارشی حذف شد. اسکن‌های قبلی و یافته‌هایش می‌مانند؛ زمان‌بندی‌هایش متوقف می‌شوند.') : 'err:' . $r['error']];

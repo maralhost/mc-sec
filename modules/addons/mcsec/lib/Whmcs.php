@@ -7,7 +7,8 @@ namespace McSec;
 /**
  * The only place that reads WHMCS's own tables (tbl*) and calls localAPI. Reads are batched (about 13k client
  * accounts). Writes to WHMCS data happen only through localAPI and only through the calls listed in CLAUDE.md:
- * SendEmail (custom 'general' message), CreateInvoice (credit packs) and OpenTicket (the customer's own «درخواست بررسی
+ * SendEmail (custom 'general' message), CreateInvoice (credit packs, and a manual test whose price the customer
+ * accepted without enough credits: Requests::accept) and OpenTicket (the customer's own «درخواست بررسی
  * کارشناس», Support::open). `noemail` is never sent.
  */
 final class Whmcs
@@ -196,7 +197,7 @@ final class Whmcs
         return self::api('SendEmail', ['id' => $clientId, 'customtype' => 'general', 'customsubject' => $subject, 'custommessage' => $html]);
     }
 
-    /** An unpaid invoice for a credit pack; returns ['ok', 'invoice_id', 'error']. */
+    /** An unpaid invoice (a credit pack, or an accepted manual test); returns ['ok', 'invoice_id', 'error']. */
     public static function createInvoice(int $clientId, string $description, float $amount, int $dueDays): array
     {
         $due = date('Y-m-d', Clock::now() + max(0, $dueDays) * 86400);

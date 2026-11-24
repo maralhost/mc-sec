@@ -69,6 +69,7 @@ final class Worker
             'snapshot' => fn () => Score::snapshot(),
             'low_credit' => fn () => Credits::lowAlerts(),
             'gifts' => fn () => Codes::returnGifts(),
+            'requests' => fn () => Requests::reconcile(),
             'domains' => fn () => Watch::domains(),
             'threats' => fn () => Intel::threatAlerts(),
             'log' => fn () => Trace::purge(),

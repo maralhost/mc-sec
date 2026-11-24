@@ -62,7 +62,7 @@ final class Views
     /** Pages grouped the way MC-Care groups its tabs: a few tabs in the dark bar, the pages of the open tab under it. */
     private const GROUPS = [
         'نمای کلی' => ['overview'],
-        'عملیات' => ['assets', 'scans'],
+        'عملیات' => ['assets', 'scans', 'requests'],
         'فروش و اعتبار' => ['pricing', 'credits', 'codes'],
         'راه‌اندازی' => ['setup', 'report', 'settings'],
         'سامانه' => ['log', 'changelog'],
@@ -70,7 +70,7 @@ final class Views
 
     private const SUBS = ['overview' => 'شمار کلی استفاده، سلامت موتورها و پرمصرف‌ترین حساب‌ها.', 'setup' => 'اتصال به موتور اسکن، هوش مصنوعی و ربات‌های اعلان.', 'pricing' => 'نوع‌های اسکن، هزینه‌ی هر کدام، بسته‌های اعتبار و پلن‌ها.',
         'credits' => 'قیمت ویژه‌ی یک گروه یا یک حساب، اعطای دستی اعتبار و دفتر تراکنش‌ها.', 'codes' => 'کدهای اعتبار و تخفیف، هدیه، دعوت و شارژ خودکار.', 'assets' => 'دارایی‌های مشتریان و تأیید دستی مالکیت.',
-        'scans' => 'اسکن‌های در صف، در حال اجرا و تمام‌شده.', 'report' => 'ظاهر گزارش PDF: لوگو، نام، رنگ، فونت و بخش‌ها.', 'settings' => 'هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است.', 'log' => 'خطاها و هشدارهای سامانه با کد پیگیری.', 'changelog' => 'هر نسخه چه چیزی را عوض کرده است.'];
+        'scans' => 'اسکن‌های در صف، در حال اجرا و تمام‌شده.', 'requests' => 'درخواست‌های مشتریان از کارشناس: پرسش، بررسی و رفع عیب، و تست دستی با اعلام قیمت.', 'report' => 'ظاهر گزارش PDF: لوگو، نام، رنگ، فونت و بخش‌ها.', 'settings' => 'هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است.', 'log' => 'خطاها و هشدارهای سامانه با کد پیگیری.', 'changelog' => 'هر نسخه چه چیزی را عوض کرده است.'];
 
     /**
      * The shell shared with MC-Care (its «style B»): a dark bar with the brand and the tabs, the pages of the open tab
@@ -81,11 +81,12 @@ final class Views
     {
         $tabs = '';
         $pills = '';
-        $hot = Settings::bool('ops_alerts') ? count(\McSec\ScanLog::attention(1, 50)) : 0;
+        $waiting = \McSec\Requests::waiting();
+        $hot = (Settings::bool('ops_alerts') ? count(\McSec\ScanLog::attention(1, 50)) : 0) + $waiting;
         foreach (self::GROUPS as $label => $pages) {
             $on = in_array($page, $pages, true);
-            $badge = $hot > 0 && in_array('scans', $pages, true) ? ' <span class="mcsa-count" title="اسکن‌های ۲۴ ساعت اخیر که نیاز به بررسی دارند">' . self::e(Text::fa($hot)) . '</span>' : '';
-            $tabs .= '<li' . ($on ? ' class="active"' : '') . '><a href="' . self::e(self::url(in_array('scans', $pages, true) && $hot > 0 ? 'scans' : $pages[0])) . '"' . ($on ? ' aria-current="true"' : '') . '>' . self::e($label) . $badge . '</a></li>';
+            $badge = $hot > 0 && in_array('scans', $pages, true) ? ' <span class="mcsa-count" title="اسکن‌های ۲۴ ساعت اخیر که نیاز به بررسی دارند و درخواست‌های منتظر تیم">' . self::e(Text::fa($hot)) . '</span>' : '';
+            $tabs .= '<li' . ($on ? ' class="active"' : '') . '><a href="' . self::e(self::url(in_array('scans', $pages, true) && $hot > 0 ? ($waiting > 0 ? 'requests' : 'scans') : $pages[0])) . '"' . ($on ? ' aria-current="true"' : '') . '>' . self::e($label) . $badge . '</a></li>';
             if ($on && count($pages) > 1) {
                 foreach ($pages as $p) {
                     $pills .= '<li' . ($p === $page ? ' class="active"' : '') . '><a href="' . self::e(self::url($p)) . '"' . ($p === $page ? ' aria-current="page"' : '') . '>' . self::e(Controller::PAGES[$p]) . '</a></li>';
@@ -102,6 +103,7 @@ final class Views
             'scans' => self::scans(),
             'settings' => self::settings(),
             'report' => self::report(),
+            'requests' => self::requests(),
             'log' => self::log(),
             'changelog' => self::changelog(),
             default => self::overview(),
@@ -483,6 +485,74 @@ final class Views
             $out .= self::box($label . ' (' . Text::fa(count($list)) . ')', $rows !== '' ? '<table class="table"><thead><tr><th>#</th><th>حساب</th><th>دارایی</th><th>اسکن</th><th>وضعیت</th><th>زمان</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">چیزی نیست.</p>');
         }
         return $out;
+    }
+
+    /**
+     * «درخواست‌های کارشناس»: every request a customer sent (question, paid fix, manual test) with its ticket. Anyone
+     * who can open the panel sees them; the ops tier writes a price, moves the state and cancels (credits go back).
+     */
+    private static function requests(): string
+    {
+        $filter = in_array($_GET['show'] ?? '', ['open', 'closed', 'all'], true) ? (string) $_GET['show'] : 'open';
+        $list = \McSec\Requests::all($filter, 150);
+        $names = Whmcs::clientNames(array_map(fn ($r) => (int) $r->client_id, $list));
+        $assets = [];
+        foreach (array_chunk(array_values(array_unique(array_filter(array_map(fn ($r) => (int) $r->asset_id, $list)))), 500) as $chunk) {
+            foreach (Db::rows(Db::table('mod_mcsec_assets')->whereIn('id', $chunk)->select(['id', 'value'])) as $a) {
+                $assets[(int) $a->id] = (string) $a->value;
+            }
+        }
+        $can = Auth::adminCan('ops');
+        $tone = ['new' => 'fix', 'quoted' => 'chg', 'paying' => 'chg', 'invoiced' => 'chg', 'accepted' => 'fix', 'working' => 'ops', 'done' => 'ok'];
+        $rows = '';
+        foreach ($list as $r) {
+            $id = (int) $r->id;
+            $st = (string) $r->status;
+            $cur = Whmcs::currency((int) (Whmcs::client((int) $r->client_id)->currency ?? 0));
+            $money = (float) $r->amount > 0 ? Text::money((float) $r->amount, $cur) : '';
+            $price = (int) $r->credits > 0 ? Text::fa((int) $r->credits) . ' اعتبار' . ($money !== '' ? ' / ' . $money : '') : ($r->kind === 'manual' ? 'اعلام نشده' : 'رایگان');
+            $paid = match ((string) $r->paid_with) {
+                'credits' => 'از اعتبار' . ((int) $r->refunded > 0 ? ' (' . Text::fa((int) $r->refunded) . ' برگشت)' : ''),
+                'invoice' => 'با فاکتور',
+                default => $st === 'invoiced' ? 'منتظر فاکتور' : '—',
+            };
+            $acts = '';
+            if ($can) {
+                if ($r->kind === 'manual' && in_array($st, ['new', 'quoted'], true)) {
+                    $acts .= self::form('requests', 'request_quote', '<input type="hidden" name="id" value="' . $id . '"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:0 16px">'
+                        . '<div class="mcsa-field"><label for="mcsa-qc-' . $id . '">قیمت (اعتبار)</label><input class="form-control" id="mcsa-qc-' . $id . '" name="credits" dir="ltr" inputmode="numeric" value="' . ((int) $r->credits ?: '') . '" required><small>اگر مشتری این‌قدر اعتبار داشته باشد، با تأییدش کم می‌شود.</small></div>'
+                        . '<div class="mcsa-field"><label for="mcsa-qa-' . $id . '">مبلغ فاکتور (' . self::e((string) ($cur->code ?? '')) . ')</label><input class="form-control" id="mcsa-qa-' . $id . '" name="amount" dir="ltr" inputmode="decimal" value="' . ((float) $r->amount > 0 ? self::e(rtrim(rtrim(number_format((float) $r->amount, 2, '.', ''), '0'), '.')) : '') . '"><small>اگر اعتبار مشتری کافی نباشد، با تأییدش فاکتوری به این مبلغ ساخته می‌شود. خالی یا ۰: فقط با اعتبار.</small></div></div>'
+                        . '<div class="mcsa-field"><label for="mcsa-qn-' . $id . '">این قیمت چه چیزی را پوشش می‌دهد؟ (مشتری می‌بیند)</label><textarea class="form-control" id="mcsa-qn-' . $id . '" name="note" rows="3" dir="auto">' . self::e((string) $r->quote_note) . '</textarea></div>'
+                        . '<button class="btn btn-primary">' . ($st === 'quoted' ? 'اعلام دوباره‌ی قیمت' : 'اعلام قیمت به مشتری') . '</button>');
+                }
+                $btn = fn (string $to, string $label, string $confirm = '') => self::form('requests', 'request_status', '<input type="hidden" name="id" value="' . $id . '"><input type="hidden" name="to" value="' . $to . '"><button class="btn btn-default btn-sm">' . self::e($label) . '</button>', $confirm);
+                $started = $r->kind === 'manual' ? in_array($st, ['accepted'], true) : in_array($st, ['new', 'accepted'], true);
+                $acts .= '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">' . ($started ? $btn('working', 'شروع کار') : '')
+                    . ($started || $st === 'working' ? $btn('done', 'انجام شد') : '')
+                    . (in_array($st, ['new', 'quoted', 'invoiced', 'accepted', 'working'], true) ? $btn('cancelled', 'لغو', 'این درخواست لغو شود؟' . ((string) $r->paid_with === 'credits' ? ' اعتبار مشتری برمی‌گردد.' : ((string) $r->paid_with === 'invoice' ? ' مبلغ فاکتور خودکار برنمی‌گردد؛ در WHMCS رسیدگی کنید.' : ''))) : '') . '</div>';
+            }
+            $ticket = (int) $r->ticket_id > 0 ? '<a href="supporttickets.php?action=view&amp;id=' . (int) $r->ticket_id . '" target="_blank" rel="noopener" dir="ltr">#' . self::e((string) $r->ticket_tid) . '</a>' : '—';
+            $rows .= '<tr><td>' . self::e(Text::fa($id)) . '</td><td>' . self::e(\McSec\Requests::KINDS[(string) $r->kind] ?? $r->kind) . '<br><small class="mcsa-muted">' . self::e(\McSec\Support::TOPICS[(string) $r->topic] ?? '') . '</small></td>'
+                . '<td><a href="clientssummary.php?userid=' . (int) $r->client_id . '">' . self::e($names[(int) $r->client_id] ?? '#' . (int) $r->client_id) . '</a>' . (isset($assets[(int) $r->asset_id]) ? '<br><small dir="ltr">' . self::e($assets[(int) $r->asset_id]) . '</small>' : '') . '</td>'
+                . '<td><span class="mcsa-tag' . (isset($tone[$st]) ? ' mcsa-tag-' . $tone[$st] : '') . '">' . self::e(\McSec\Requests::STATUS[$st === 'paying' ? 'quoted' : $st] ?? $st) . '</span></td><td>' . self::e($price) . '<br><small class="mcsa-muted">' . self::e($paid) . '</small></td>'
+                . '<td>' . $ticket . '</td><td>' . self::e(Text::date((int) $r->created_at)) . '</td></tr>'
+                . '<tr><td colspan="7"><details' . (in_array($st, ['new', 'accepted'], true) ? ' open' : '') . '><summary>متن درخواست و کارها</summary><p dir="auto" style="white-space:pre-wrap">' . self::e((string) $r->text) . '</p>'
+                . ((int) $r->scan_id > 0 ? '<p><a href="' . self::e(self::url('scans', '&scan=' . (int) $r->scan_id)) . '">لاگ اسکن ' . self::e(Text::fa((int) $r->scan_id)) . '</a></p>' : '')
+                . ((int) $r->invoice_id > 0 ? '<p><a href="invoices.php?action=edit&amp;id=' . (int) $r->invoice_id . '" target="_blank" rel="noopener">فاکتور ' . self::e(Text::fa((int) $r->invoice_id)) . '</a></p>' : '')
+                . (trim((string) $r->admin_note) !== '' ? '<p class="mcsa-muted" dir="auto">' . self::e((string) $r->admin_note) . '</p>' : '') . $acts . '</details></td></tr>';
+        }
+        $tabs = '';
+        foreach (['open' => 'باز', 'closed' => 'بسته', 'all' => 'همه'] as $k => $l) {
+            $tabs .= '<a class="btn btn-' . ($k === $filter ? 'primary' : 'default') . ' btn-sm" href="' . self::e(self::url('requests', '&show=' . $k)) . '">' . $l . '</a> ';
+        }
+        $on = array_filter(['پرسش رایگان' => Settings::bool('support_requests'), 'بررسی و رفع عیب (' . Text::fa(Settings::int('expert_fix_cost')) . ' اعتبار)' => Settings::bool('support_requests') && Settings::bool('expert_fix'), 'تست دستی با اعلام قیمت' => Settings::bool('support_requests') && Settings::bool('expert_manual')]);
+        return self::guide('<p>هر درخواستی که مشتری از صفحه‌ی «کمک کارشناس» می‌فرستد این‌جا می‌آید و یک تیکت WHMCS هم برایش ساخته می‌شود؛ گفت‌وگو با مشتری در همان تیکت است و وضعیت و پول این‌جا.</p>'
+                . '<ul><li><strong>پرسش و راهنمایی:</strong> رایگان. پس از پاسخ در تیکت، «انجام شد» را بزنید.</li>'
+                . '<li><strong>بررسی و رفع عیب:</strong> هزینه‌ی ثابت هنگام ثبت از اعتبار مشتری کم شده است. اگر نمی‌شود انجامش داد «لغو» بزنید تا اعتبار برگردد.</li>'
+                . '<li><strong>تست دستی:</strong> اول قیمت را اعلام کنید (اعتبار، و مبلغ فاکتور برای مشتری‌ای که اعتبار کافی ندارد). مشتری در پنل خودش تأیید یا رد می‌کند. با تأیید، اعتبار کم یا فاکتور ساخته می‌شود؛ پس از پرداخت، وضعیت «تأیید و پرداخت شد» می‌شود و می‌توانید «شروع کار» بزنید.</li></ul>'
+                . '<p>دیدن این صفحه برای هر مدیری که پنل MC-Sec را می‌بیند ممکن است؛ اعلام قیمت، تغییر وضعیت و لغو سطح «ops» می‌خواهد (تنظیم «سطح نقش‌های مدیر»). روشن و خاموش کردن هر نوع درخواست و هزینه‌ی رفع عیب در «تنظیمات» ← «پشتیبانی» است.</p>')
+            . '<p class="mcsa-muted">' . ($on ? 'روشن برای مشتری: ' . self::e(implode('، ', array_keys($on))) . '.' : 'درخواست کارشناس برای مشتری خاموش است.') . (!$can ? ' نقش شما فقط اجازه‌ی دیدن دارد.' : '') . '</p><p>' . $tabs . '</p>'
+            . self::box('درخواست‌ها', $rows !== '' ? '<table class="table"><thead><tr><th>#</th><th>نوع</th><th>حساب و دارایی</th><th>وضعیت</th><th>قیمت و پرداخت</th><th>تیکت</th><th>زمان</th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">درخواستی در این فهرست نیست.</p>');
     }
 
     /** «قالب گزارش»: the look of the PDF report (logo, name, colours, font, parts), with a sample to look at. */

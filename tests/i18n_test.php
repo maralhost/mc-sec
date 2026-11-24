@@ -125,7 +125,7 @@ ok(!$fa(flash_of($r)) && flash_of($r) !== '', 'a refused request is explained in
 $r = client_post('support_send', ['topic' => 'finding', 'finding' => $fid, 'text' => 'Please check this finding, I fixed it already.'], ['p' => 'support']);
 $t = as_whmcs(fn () => Capsule::table('tbltickets')->orderByDesc('id')->first());
 ok($t !== null && str_starts_with($t->title, '[امنیت سایبری]') && str_contains($t->message, 'یافته شماره‌ی') && str_contains($t->message, 'Please check this finding'), 'the ticket itself is Persian for the support team, with the customer\'s own words as written');
-ok(!$left(html(client_get(['p' => 'support', 'sent' => $t->tid]))), 'the confirmation is English');
+ok(!$left(html(client_get(['p' => 'support', 'sent' => (string) Db::table('mod_mcsec_requests')->max('id')]))), 'the confirmation is English');
 $pub = html(client_get(['p' => 'scanner']));
 ok(str_contains($pub, 'dir="ltr"') && !$left($pub), 'the public scanner page is English');
 

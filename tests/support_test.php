@@ -50,7 +50,8 @@ ok(!str_contains($h, 'راز حساب دیگر') && !str_contains($h, 'secret-ot
 section('sending');
 $n0 = count($GLOBALS['__localapi']);
 $r = client_post('support_send', ['topic' => 'finding', 'finding' => $f1, 'text' => 'این مورد را رفع کردم ولی هنوز دیده می‌شود <b>x</b>.'], ['p' => 'support']);
-ok(str_contains((string) ($r['redirect'] ?? ''), 'p=support&sent=100000'), 'redirects to the confirmation with the ticket number');
+$req1 = (int) Db::table('mod_mcsec_requests')->where('client_id', 1)->max('id');
+ok($req1 > 0 && str_contains((string) ($r['redirect'] ?? ''), 'p=support&sent=' . $req1), 'redirects to the confirmation of the new request');
 $t = $tickets();
 ok(count($t) === 1 && (int) $t[0]->userid === 1, 'one ticket, in the customer\'s name');
 ok((int) $t[0]->did === 2, 'no department chosen: the first one customers can see (hidden one skipped)');
@@ -60,8 +61,8 @@ $call = $GLOBALS['__localapi'][count($GLOBALS['__localapi']) - 1];
 ok($call[0] === 'OpenTicket' && $call[1]['markdown'] === false && !isset($call[1]['noemail']) && !isset($call[1]['admin']), 'OpenTicket: plain text, no noemail, not as an admin');
 ok((int) ($call[1]['serviceid'] ?? 0) > 0 && (int) $t[0]->service > 0, 'the plan service is attached, so the ticket is filed under the security product');
 ok(Db::table('mod_mcsec_audit')->where('client_id', 1)->where('action', 'support')->where('target', '#100000')->exists(), 'request is in the activity log');
-$h = html(client_get(['p' => 'support', 'sent' => '100000']));
-ok(str_contains($h, 'درخواست شما ثبت شد') && str_contains($h, 'viewticket.php?tid=100000&amp;c=Ab12Cd34') && str_contains($h, 'درخواست‌های اخیر شما'), 'confirmation links to the ticket; recent requests listed');
+$h = html(client_get(['p' => 'support', 'sent' => (string) $req1]));
+ok(str_contains($h, 'درخواست شما ثبت شد') && str_contains($h, 'viewticket.php?tid=100000&amp;c=Ab12Cd34') && str_contains($h, 'درخواست‌های شما') && str_contains($h, '#100000'), 'confirmation links to the ticket; recent requests listed');
 $h = html(client_get(['p' => 'support', 'sent' => '"><script>alert(9)</script>']));
 ok(!str_contains($h, '<script>alert(9)</script>') && !str_contains($h, 'درخواست شما ثبت شد'), 'a forged sent= shows nothing');
 

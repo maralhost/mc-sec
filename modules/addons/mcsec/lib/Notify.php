@@ -25,6 +25,7 @@ final class Notify
         'credits_low' => ['کم شدن اعتبار', ['email']],
         'credits_added' => ['افزوده شدن اعتبار', ['email']],
         'report_ready' => ['آماده شدن گزارش', []],
+        'request_update' => ['درخواست‌های کارشناس', ['email', 'telegram', 'bale']],
         'digest' => ['گزارش دوره‌ای', ['email', 'telegram', 'bale']],
         'kev_alert' => ['آسیب‌پذیری در حال بهره‌برداری (KEV)', ['email', 'telegram', 'bale', 'webhook']],
         'site_down' => ['از دسترس خارج شدن سایت', ['email', 'telegram', 'bale', 'webhook']],
@@ -211,6 +212,23 @@ final class Notify
                 return ['title' => Lang::t('اعتبار اسکن شما رو به پایان است'), 'lines' => [Lang::t('مانده: {n} اعتبار. زمان‌بندی‌ها بدون اعتبار متوقف می‌شوند.', ['n' => Text::fa((int) ($d['total'] ?? 0))])], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'warn'];
             case 'credits_added':
                 return ['title' => Lang::t('{n} اعتبار اسکن افزوده شد', ['n' => Text::fa((int) ($d['credits'] ?? 0))]), 'lines' => !empty($d['note']) ? [(string) $d['note']] : [Lang::t('ممنون از خریدتان.')], 'link' => 'index.php?m=mcsec&p=credits', 'tone' => 'ok'];
+            case 'request_update':
+                $id = Text::fa((int) ($d['id'] ?? 0));
+                $link = 'index.php?m=mcsec&p=support';
+                switch ((string) ($d['what'] ?? '')) {
+                    case 'quoted':
+                        return ['title' => Lang::t('قیمت تست دستی شما اعلام شد (درخواست {id})', ['id' => $id]), 'lines' => [Lang::t('قیمت: {n} اعتبار. آن را در صفحه‌ی «کمک کارشناس» ببینید و تأیید یا رد کنید؛ تا تأیید نکنید چیزی کم نمی‌شود.', ['n' => Text::fa((int) ($d['credits'] ?? 0))])], 'link' => $link, 'tone' => 'warn'];
+                    case 'paid':
+                        return ['title' => Lang::t('پرداخت درخواست {id} رسید', ['id' => $id]), 'lines' => [Lang::t('کارشناس کار را شروع می‌کند و در تیکت خبرتان می‌کند.')], 'link' => $link, 'tone' => 'ok'];
+                    case 'working':
+                        return ['title' => Lang::t('کارشناس روی درخواست {id} کار می‌کند', ['id' => $id]), 'lines' => [], 'link' => $link, 'tone' => 'info'];
+                    case 'done':
+                        return ['title' => Lang::t('درخواست {id} انجام شد', ['id' => $id]), 'lines' => [Lang::t('نتیجه را در تیکت همین درخواست ببینید.')], 'link' => $link, 'tone' => 'ok'];
+                    case 'cancelled':
+                        return ['title' => Lang::t('درخواست {id} لغو شد', ['id' => $id]), 'lines' => array_values(array_filter([(int) ($d['refunded'] ?? 0) > 0 ? Lang::t('{n} اعتبار به حسابتان برگشت.', ['n' => Text::fa((int) $d['refunded'])]) : '',
+                            (int) ($d['invoice'] ?? 0) > 0 ? Lang::t('برای بازگشت مبلغ فاکتور، پشتیبانی با شما هماهنگ می‌کند.') : ''])), 'link' => $link, 'tone' => 'info'];
+                }
+                return null;
             case 'report_ready':
                 return ['title' => Lang::t('گزارش «{title}» آماده است', ['title' => $d['title'] ?? '']), 'lines' => [], 'link' => 'index.php?m=mcsec&p=report&id=' . (int) ($d['report_id'] ?? 0), 'tone' => 'info'];
             case 'kev_alert':

@@ -30,12 +30,12 @@ use McSec\Worker;
 final class Controller
 {
     public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'قاعده‌ها و اعطا', 'codes' => 'کدها', 'assets' => 'دارایی‌ها و تأیید',
-        'scans' => 'صف اسکن', 'report' => 'قالب گزارش', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
+        'scans' => 'صف اسکن', 'requests' => 'درخواست‌های کارشناس', 'report' => 'قالب گزارش', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
 
     private const ACTIONS = [
         'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_rule' => 'settings', 'disable_rule' => 'settings', 'save_code' => 'settings', 'disable_code' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
         'upload_blob' => 'settings', 'remove_blob' => 'settings',
-        'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
+        'request_quote' => 'ops', 'request_status' => 'ops', 'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
     ];
 
     /** Tests and the preview: keep a file answer in $raw instead of sending it. */
@@ -160,6 +160,16 @@ final class Controller
                     }
                     Audit::log(0, 'settings', $act, ['count' => $n]);
                     return 'ok:تنظیمات ذخیره شد.';
+                case 'request_quote':
+                    // the team's price for a manual test; the customer still has to accept it
+                    $r = \McSec\Requests::quote($int('id'), $int('credits'), (float) Text::toAscii($in('amount')), $in('note'));
+                    return $r['ok'] ? 'ok:قیمت اعلام شد و به مشتری خبر داده شد. تا مشتری تأیید نکند چیزی از او کم نمی‌شود.' : 'err:' . $r['error'];
+                case 'request_status':
+                    $r = \McSec\Requests::setStatus($int('id'), $in('to'), $in('note'));
+                    if (!$r['ok']) {
+                        return 'err:' . $r['error'];
+                    }
+                    return 'ok:وضعیت درخواست ذخیره شد و به مشتری خبر داده شد.' . (!empty($r['refunded']) ? ' ' . Text::fa((int) $r['refunded']) . ' اعتبار به حساب مشتری برگشت.' : '');
                 case 'upload_blob':
                     // the logo or a font of the report template: what it is, is decided from its bytes (Blobs::put)
                     $key = (string) ($_POST['blob'] ?? '');

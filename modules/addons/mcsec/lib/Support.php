@@ -14,7 +14,8 @@ namespace McSec;
  *
  * - Every id from the browser is read through the account's own getters (Assets::get, Scans::get, Findings::get).
  * - The customer's words are sent as plain text; WHMCS escapes them where it shows the ticket.
- * - A daily cap per account; each request is in the activity log with the ticket's number.
+ * - A daily cap per account; each request is a row of Requests (0.15.0) and a line in the activity log.
+ * This class makes the ticket; Requests keeps the request, its price and its state.
  */
 final class Support
 {
@@ -76,43 +77,42 @@ final class Support
         // i18n-skip-end
     }
 
-    /**
-     * Opens the ticket. @param array{topic:string,text:string,asset:int,scan:int,finding:int} $in
-     * @return array{ok:bool,error?:string,tid?:string,id?:int,url?:string}
-     */
-    public static function open(array $who, array $in): array
+    /** The customer's words, cleaned and measured. @return array{ok:bool,error?:string,text?:string} */
+    public static function check(int $clientId, string $text): array
     {
-        $cid = (int) $who['client_id'];
         if (!self::enabled()) {
             return ['ok' => false, 'error' => 'درخواست بررسی کارشناس فعلاً در دسترس نیست. از بخش پشتیبانی تیکت بزنید.'];
         }
-        $topic = isset(self::TOPICS[$in['topic']]) ? $in['topic'] : 'other';
-        $text = trim(preg_replace('~[^\P{C}\n\t\x{200C}]+~u', '', (string) $in['text']) ?? '');
+        $text = trim(preg_replace('~[^\P{C}\n\t\x{200C}]+~u', '', $text) ?? '');
         if (mb_strlen($text) < 10) {
             return ['ok' => false, 'error' => 'در یکی دو جمله بنویسید چه کمکی می‌خواهید (دست‌کم ۱۰ نویسه).'];
         }
         if (mb_strlen($text) > 4000) {
             return ['ok' => false, 'error' => 'متن بلند است؛ آن را به ۴۰۰۰ نویسه برسانید. جزئیات فنی را خودمان پیوست می‌کنیم.'];
         }
-        if (!RateLimit::hit('support:' . $cid, self::DAILY, 86400)) {
-            return ['ok' => false, 'error' => 'امروز چند درخواست فرستاده‌اید. ادامه‌ی گفت‌وگو را در همان تیکت‌ها بنویسید یا فردا درخواست تازه بدهید.'];
-        }
-        $refs = self::refs($cid, (int) $in['asset'], (int) $in['scan'], (int) $in['finding']);
+        return ['ok' => true, 'text' => $text];
+    }
+
+    /**
+     * Opens the ticket of a request (Requests::create). $subject and $lines are written by code in Persian; $text is
+     * the customer's own. @return array{ok:bool,error:string,id:int,tid:string,c:string}
+     */
+    public static function open(array $who, string $subject, string $text, array $refs, array $lines = []): array
+    {
+        $cid = (int) $who['client_id'];
         $about = $refs['finding'] ? mb_substr((string) $refs['finding']->title, 0, 90) : ($refs['asset'] ? (string) $refs['asset']->value : '');
         // the ticket is read by Maral Cloud's support staff: its subject and context are always Persian
-        $subject = Lang::with('fa', fn () => '[' . Settings::menuLabel() . '] ' . self::TOPICS[$topic] . ($about !== '' ? ': ' . $about : ''));
+        $subject = Lang::with('fa', fn () => '[' . Settings::menuLabel() . '] ' . $subject . ($about !== '' ? ': ' . $about : ''));
         $dept = Whmcs::supportDept(Settings::int('support_dept'));
         if ($dept <= 0) {
-            return ['ok' => false, 'error' => 'دپارتمان پشتیبانی پیدا نشد. از بخش پشتیبانی تیکت بزنید و این را هم بگویید.'];
+            return ['ok' => false, 'error' => Lang::t('دپارتمان پشتیبانی پیدا نشد. از بخش پشتیبانی تیکت بزنید و این را هم بگویید.'), 'id' => 0, 'tid' => '', 'c' => ''];
         }
-        $r = Whmcs::openTicket($cid, $dept, mb_substr($subject, 0, 200), $text . "\n\n----------\n" . self::context($cid, $refs), Whmcs::planService($cid));
+        $r = Whmcs::openTicket($cid, $dept, mb_substr($subject, 0, 200), $text . "\n\n----------\n" . ($lines ? implode("\n", $lines) . "\n" : '') . self::context($cid, $refs), Whmcs::planService($cid));
         if (!$r['ok']) {
-            $ref = Trace::error('whmcs', 'support.open', (string) $r['error'], ['topic' => $topic], ['client_id' => $cid]);
-            return ['ok' => false, 'error' => Lang::t('تیکت ساخته نشد. کمی بعد دوباره امتحان کنید یا از بخش پشتیبانی تیکت بزنید. کد پیگیری: {ref}', ['ref' => $ref])];
+            $ref = Trace::error('whmcs', 'support.open', (string) $r['error'], [], ['client_id' => $cid]);
+            return ['ok' => false, 'error' => Lang::t('تیکت ساخته نشد. کمی بعد دوباره امتحان کنید یا از بخش پشتیبانی تیکت بزنید. کد پیگیری: {ref}', ['ref' => $ref]), 'id' => 0, 'tid' => '', 'c' => ''];
         }
-        Audit::log($cid, 'support', '#' . $r['tid'], ['topic' => $topic, 'ticket' => (int) $r['id'], 'asset' => (int) ($refs['asset']->id ?? 0), 'scan' => (int) ($refs['scan']->id ?? 0),
-            'finding' => (int) ($refs['finding']->id ?? 0), 'c' => (string) $r['c']], (int) $who['user_id']);
-        return ['ok' => true, 'tid' => (string) $r['tid'], 'id' => (int) $r['id'], 'url' => self::url((string) $r['tid'], (string) $r['c'])];
+        return ['ok' => true, 'error' => '', 'id' => (int) $r['id'], 'tid' => (string) $r['tid'], 'c' => (string) $r['c']];
     }
 
     public static function url(string $tid, string $c): string
@@ -120,15 +120,4 @@ final class Support
         return preg_match('~^[A-Za-z0-9-]{1,32}$~', $tid) && preg_match('~^[A-Za-z0-9]{1,32}$~', $c) ? 'viewticket.php?tid=' . $tid . '&c=' . $c : 'supporttickets.php';
     }
 
-    /** The account's own requests, newest first (from the activity log). @return array<int,array{tid:string,topic:string,at:int,url:string}> */
-    public static function recent(int $clientId, int $limit = 8): array
-    {
-        $out = [];
-        foreach (Db::rows(Db::table('mod_mcsec_audit')->where('client_id', $clientId)->where('action', 'support')->orderByDesc('id')->limit($limit)) as $r) {
-            $d = Db::decode((string) $r->detail, []);
-            $tid = ltrim((string) $r->target, '#');
-            $out[] = ['tid' => $tid, 'topic' => self::TOPICS[(string) ($d['topic'] ?? '')] ?? self::TOPICS['other'], 'at' => (int) $r->created_at, 'url' => self::url($tid, (string) ($d['c'] ?? ''))];
-        }
-        return $out;
-    }
 }

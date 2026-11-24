@@ -58,6 +58,9 @@ add_hook('InvoicePaid', 1, function ($vars) {
         if ($id > 0 && \McSec\Db::table('mod_mcsec_topups')->where('invoice_id', $id)->where('status', 'pending')->exists()) {
             \McSec\Credits::invoicePaid($id);
         }
+        if ($id > 0 && \McSec\Db::table('mod_mcsec_requests')->where('invoice_id', $id)->where('status', 'invoiced')->exists()) {
+            \McSec\Requests::invoicePaid($id); // a manual test the customer accepted without enough credits
+        }
     } catch (\Throwable $e) {
         \McSec\Trace::error('hook', 'InvoicePaid', $e->getMessage(), \McSec\Trace::exception($e));
     }
