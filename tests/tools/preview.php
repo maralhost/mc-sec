@@ -20,6 +20,9 @@ if ($fresh) {
 }
 putenv('SQLITE_FILE=' . $dbFile);
 ob_start();
+if (is_file(dirname(__DIR__) . '/tmp/tcpdf/tcpdf.php')) {
+    require_once dirname(__DIR__) . '/tmp/tcpdf/tcpdf.php';
+}
 require dirname(__DIR__) . '/bootstrap.php';
 require __DIR__ . '/demo.php';
 ob_end_clean();
@@ -53,7 +56,14 @@ $keep = fn (string $u) => $u . (str_contains($u, '?') ? '&' : '?') . http_build_
 
 if ($path === '/addonmodules.php') {
     admin((string) ($_GET['tier'] ?? 'settings'));
+    \McSec\Admin\Controller::$testMode = true;
     $body = \McSec\Admin\Controller::handle('addonmodules.php?module=mcsec');
+    if (\McSec\Admin\Controller::$raw !== null) {
+        ob_end_clean();
+        header('Content-Type: ' . \McSec\Admin\Controller::$raw['mime']);
+        echo \McSec\Admin\Controller::$raw['bytes'];
+        exit;
+    }
     $title = 'MC-Sec admin';
 } else {
     $_GET['m'] = 'mcsec';

@@ -30,17 +30,55 @@ use McSec\Worker;
 final class Controller
 {
     public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'قاعده‌ها و اعطا', 'codes' => 'کدها', 'assets' => 'دارایی‌ها و تأیید',
-        'scans' => 'صف اسکن', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
+        'scans' => 'صف اسکن', 'report' => 'قالب گزارش', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
 
     private const ACTIONS = [
         'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_rule' => 'settings', 'disable_rule' => 'settings', 'save_code' => 'settings', 'disable_code' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
+        'upload_blob' => 'settings', 'remove_blob' => 'settings',
         'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
     ];
+
+    /** Tests and the preview: keep a file answer in $raw instead of sending it. */
+    public static bool $testMode = false;
+    public static ?array $raw = null;
+
+    /**
+     * The sample report as a PDF with the saved template (GET, reads only): mcsa=report&sample=fa|en.
+     * The only answer of the panel that is not a page; any admin who can open the panel may look at it.
+     */
+    private static function sample(string $lang): void
+    {
+        $bytes = \McSec\Lang::with($lang === 'en' ? 'en' : 'fa', fn () => \McSec\Pdf::render(\McSec\Pdf::sample()));
+        if ($bytes === '') {
+            return;
+        }
+        $file = ['mime' => 'application/pdf', 'bytes' => $bytes, 'name' => 'mcsec-sample-' . ($lang === 'en' ? 'en' : 'fa') . '.pdf'];
+        if (self::$testMode) {
+            self::$raw = $file;
+            return;
+        }
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        header('Content-Type: application/pdf');
+        header('Content-Length: ' . strlen($bytes));
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: private, no-store');
+        header('Content-Disposition: inline; filename="' . $file['name'] . '"');
+        echo $bytes;
+        exit;
+    }
 
     public static function handle(string $link): string
     {
         \McSec\Lang::set('fa'); // the panel is Persian
-        $page = (string) ($_GET['mcsa'] ?? 'overview');
+        self::$raw = null;
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && ($_GET['mcsa'] ?? '') === 'report' && isset($_GET['sample']) && Auth::adminCan('view')) {
+            self::sample((string) $_GET['sample']);
+            if (self::$raw !== null) {
+                return '';
+            }
+        }        $page = (string) ($_GET['mcsa'] ?? 'overview');
         if (!isset(self::PAGES[$page])) {
             $page = 'overview';
         }
@@ -88,7 +126,11 @@ final class Controller
                             }
                             Settings::setSecret($k, ($_POST['clear_' . $k] ?? '') === '1' ? '' : $v);
                         } elseif ($type === 'int') {
-                            Settings::set($k, (string) max(0, (int) Text::toAscii($in('set_' . $k))));
+                            $num = max(0, (int) Text::toAscii($in('set_' . $k)));
+                            if ($k === 'pdf_size' && ($num < 8 || $num > 12)) {
+                                return 'err:اندازه‌ی متن گزارش باید از ۸ تا ۱۲ باشد.';
+                            }
+                            Settings::set($k, (string) $num);
                         } elseif ($type === 'json') {
                             $j = json_decode($in('set_' . $k), true);
                             if (!is_array($j)) {
@@ -97,6 +139,18 @@ final class Controller
                             Settings::set($k, (string) json_encode($j, JSON_UNESCAPED_UNICODE));
                         } else {
                             $v = $in('set_' . $k);
+                            if (in_array($k, ['pdf_color', 'pdf_accent'], true)) {
+                                $v = strtolower($v);
+                                if (!preg_match('~^#[0-9a-f]{6}$~', $v)) {
+                                    return 'err:«' . Settings::DEFS[$k][3] . '» باید به شکل #rrggbb باشد، مثل #0b1f3a.';
+                                }
+                            }
+                            if ($k === 'pdf_page' && !in_array($v = strtoupper($v), \McSec\Pdf::PAGES, true)) {
+                                return 'err:اندازه‌ی کاغذ باید A4 یا LETTER باشد.';
+                            }
+                            if ($k === 'pdf_font' && !in_array($v = strtolower($v), ['auto', 'dejavusans', 'freesans'], true)) {
+                                return 'err:فونت باید auto، dejavusans یا freesans باشد.';
+                            }
                             if (in_array($k, ['oasm_url', 'osm_url', 'ai_base_url'], true) && $v !== '' && !preg_match('~^https?://[^\s]+$~i', $v)) {
                                 return 'err:نشانی «' . Settings::DEFS[$k][3] . '» باید با http:// یا https:// شروع شود.';
                             }
@@ -106,6 +160,41 @@ final class Controller
                     }
                     Audit::log(0, 'settings', $act, ['count' => $n]);
                     return 'ok:تنظیمات ذخیره شد.';
+                case 'upload_blob':
+                    // the logo or a font of the report template: what it is, is decided from its bytes (Blobs::put)
+                    $key = (string) ($_POST['blob'] ?? '');
+                    $up = $_FILES['file'] ?? null;
+                    if (!isset(\McSec\Blobs::KINDS[$key]) || !is_array($up) || (int) ($up['error'] ?? 1) !== UPLOAD_ERR_OK || !is_string($up['tmp_name'] ?? null)
+                        || (!self::$testMode && !is_uploaded_file($up['tmp_name']))) {
+                        return 'err:فایل نرسید. فایل را انتخاب کنید و دوباره بفرستید؛ اگر بزرگ است، سقف بارگذاری PHP سرور را ببینید.';
+                    }
+                    if ((int) @filesize($up['tmp_name']) > \McSec\Blobs::KINDS[$key][1]) {
+                        return 'err:فایل بزرگ است؛ حداکثر ' . Text::fa((int) round(\McSec\Blobs::KINDS[$key][1] / 1024)) . ' کیلوبایت پذیرفته می‌شود.';
+                    }
+                    $r = \McSec\Blobs::put($key, (string) file_get_contents($up['tmp_name']));
+                    if (!$r['ok']) {
+                        return 'err:' . $r['error'];
+                    }
+                    if ($key !== 'pdf_logo') {
+                        $f = \McSec\Pdf::customFont();
+                        if ($f['error'] !== '') {
+                            \McSec\Blobs::remove($key);
+                            return 'err:' . $f['error'];
+                        }
+                    }
+                    Audit::log(0, 'settings', 'report file ' . $key, ['mime' => $r['mime']]);
+                    return 'ok:فایل ذخیره شد. با «نمونه‌ی PDF» نتیجه را ببینید.';
+                case 'remove_blob':
+                    $key = (string) ($_POST['blob'] ?? '');
+                    if (!isset(\McSec\Blobs::KINDS[$key])) {
+                        return 'err:این فایل شناخته نشد.';
+                    }
+                    \McSec\Blobs::remove($key);
+                    if ($key === 'pdf_font') {
+                        \McSec\Blobs::remove('pdf_font_bold'); // a bold face without its regular one is never used
+                    }
+                    Audit::log(0, 'settings', 'report file removed ' . $key, []);
+                    return 'ok:فایل برداشته شد.';
                 case 'save_profiles':
                     $over = [];
                     foreach (Catalog::DEFAULTS + Catalog::custom() as $k => $p) {

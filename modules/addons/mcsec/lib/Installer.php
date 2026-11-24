@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.13.0';
+    public const SCHEMA = '0.14.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -475,6 +475,16 @@ final class Installer
             $t->text('detail')->nullable();         // json: calls [{m,path,status,ms}], ids, counts
             $t->integer('created_at')->default(0);
             $t->index(['step', 'level']);
+        });
+
+        // 0.14.0 small files of the report template (logo, an uploaded font), kept out of the module's folder
+        $make('mod_mcsec_blobs', function ($t) {
+            $t->string('k', 48)->primary();
+            $t->string('mime', 40)->default('');
+            $t->integer('size')->default(0);
+            $t->string('sha', 40)->default('');
+            $t->longText('bytes');                   // base64
+            $t->integer('updated_at')->default(0);
         });
 
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)

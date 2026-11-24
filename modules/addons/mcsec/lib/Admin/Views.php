@@ -64,13 +64,13 @@ final class Views
         'نمای کلی' => ['overview'],
         'عملیات' => ['assets', 'scans'],
         'فروش و اعتبار' => ['pricing', 'credits', 'codes'],
-        'راه‌اندازی' => ['setup', 'settings'],
+        'راه‌اندازی' => ['setup', 'report', 'settings'],
         'سامانه' => ['log', 'changelog'],
     ];
 
     private const SUBS = ['overview' => 'شمار کلی استفاده، سلامت موتورها و پرمصرف‌ترین حساب‌ها.', 'setup' => 'اتصال به موتور اسکن، هوش مصنوعی و ربات‌های اعلان.', 'pricing' => 'نوع‌های اسکن، هزینه‌ی هر کدام، بسته‌های اعتبار و پلن‌ها.',
         'credits' => 'قیمت ویژه‌ی یک گروه یا یک حساب، اعطای دستی اعتبار و دفتر تراکنش‌ها.', 'codes' => 'کدهای اعتبار و تخفیف، هدیه، دعوت و شارژ خودکار.', 'assets' => 'دارایی‌های مشتریان و تأیید دستی مالکیت.',
-        'scans' => 'اسکن‌های در صف، در حال اجرا و تمام‌شده.', 'settings' => 'هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است.', 'log' => 'خطاها و هشدارهای سامانه با کد پیگیری.', 'changelog' => 'هر نسخه چه چیزی را عوض کرده است.'];
+        'scans' => 'اسکن‌های در صف، در حال اجرا و تمام‌شده.', 'report' => 'ظاهر گزارش PDF: لوگو، نام، رنگ، فونت و بخش‌ها.', 'settings' => 'هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است.', 'log' => 'خطاها و هشدارهای سامانه با کد پیگیری.', 'changelog' => 'هر نسخه چه چیزی را عوض کرده است.'];
 
     /**
      * The shell shared with MC-Care (its «style B»): a dark bar with the brand and the tabs, the pages of the open tab
@@ -101,6 +101,7 @@ final class Views
             'assets' => self::assets(),
             'scans' => self::scans(),
             'settings' => self::settings(),
+            'report' => self::report(),
             'log' => self::log(),
             'changelog' => self::changelog(),
             default => self::overview(),
@@ -170,7 +171,7 @@ final class Views
                 'secret' => '<input class="form-control" type="password" autocomplete="new-password" id="' . $id . '" name="set_' . $k . '" placeholder="' . ($val !== '' ? '•••••• (ذخیره شده؛ خالی بگذارید تا بماند)' : 'تنظیم نشده') . '" dir="ltr">'
                     . ($val !== '' ? '<label class="mcsa-inline"><input type="checkbox" name="clear_' . $k . '" value="1"> پاک شود</label>' : ''),
                 'text', 'json' => '<textarea class="form-control" id="' . $id . '" name="set_' . $k . '" rows="' . ($type === 'json' ? 5 : (in_array($k, self::LTR_LISTS, true) ? 8 : 3)) . '" dir="' . ($type === 'json' || in_array($k, self::LTR_LISTS, true) ? 'ltr' : 'auto') . '">' . self::e($val) . '</textarea>',
-                default => '<input class="form-control" id="' . $id . '" name="set_' . $k . '" value="' . self::e($val) . '" dir="' . (in_array($type, ['int', 'csv'], true) || str_ends_with($k, '_url') || str_contains($k, 'email') || str_contains($k, 'model') ? 'ltr' : 'auto') . '">',
+                default => '<input class="form-control" id="' . $id . '" name="set_' . $k . '" value="' . self::e($val) . '" dir="' . (in_array($type, ['int', 'csv'], true) || str_ends_with($k, '_url') || str_contains($k, 'email') || str_contains($k, 'model') || in_array($k, ['pdf_color', 'pdf_accent', 'pdf_font', 'pdf_page'], true) ? 'ltr' : 'auto') . '">',
             };
             $h .= '<div class="mcsa-field"><label for="' . $id . '">' . self::e($label) . ' <span class="mcsa-i" tabindex="0" role="note" title="' . self::e($help . ($type !== 'secret' && $def !== '' && strlen($def) < 60 ? ' پیش‌فرض: ' . $def : '')) . '">?</span></label>' . $control
                 . ($help !== '' ? '<small>' . self::e($help) . '</small>' : '') . '</div>';
@@ -482,6 +483,36 @@ final class Views
             $out .= self::box($label . ' (' . Text::fa(count($list)) . ')', $rows !== '' ? '<table class="table"><thead><tr><th>#</th><th>حساب</th><th>دارایی</th><th>اسکن</th><th>وضعیت</th><th>زمان</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">چیزی نیست.</p>');
         }
         return $out;
+    }
+
+    /** «قالب گزارش»: the look of the PDF report (logo, name, colours, font, parts), with a sample to look at. */
+    private static function report(): string
+    {
+        $upload = function (string $key, string $label, string $accept, string $help): string {
+            $info = \McSec\Blobs::info($key);
+            $has = $info ? '<p class="mcsa-muted">ذخیره‌شده: ' . self::e(Text::fa((int) ceil($info['size'] / 1024)) . ' کیلوبایت، ' . Text::date($info['updated_at'])) . '</p>' : '<p class="mcsa-muted">چیزی بارگذاری نشده است.</p>';
+            $form = '<form method="post" enctype="multipart/form-data" action="' . self::e(self::url('report')) . '"><input type="hidden" name="mcsa_csrf" value="' . self::e(Auth::csrf()) . '"><input type="hidden" name="mcsa_act" value="upload_blob">'
+                . '<input type="hidden" name="blob" value="' . self::e($key) . '"><div class="mcsa-field"><label for="mcsa-up-' . self::e($key) . '">' . self::e($label) . '</label>'
+                . '<div class="mcsa-search"><input class="form-control" type="file" id="mcsa-up-' . self::e($key) . '" name="file" accept="' . self::e($accept) . '" required><button class="btn btn-default">بارگذاری</button></div><small>' . self::e($help) . '</small></div></form>';
+            return $form . $has . ($info ? self::form('report', 'remove_blob', '<input type="hidden" name="blob" value="' . self::e($key) . '"><button class="btn btn-default btn-sm">برداشتن</button>', 'این فایل برداشته شود؟') : '');
+        };
+        $can = \McSec\Pdf::available();
+        $logo = \McSec\Blobs::get('pdf_logo');
+        $font = \McSec\Pdf::customFont();
+        $using = \McSec\Pdf::font();
+        $state = !$can ? '<div class="alert alert-info">روی این سرور کتابخانه‌ی TCPDF یا فونت مناسب پیدا نشد؛ PDF ساخته نمی‌شود و مشتری فقط دکمه‌ی «چاپ» مرورگر را دارد. (WHMCS معمولاً هر دو را دارد.)</div>'
+            : '<p><a class="btn btn-primary" target="_blank" rel="noopener" href="' . self::e(self::url('report', '&sample=fa')) . '">نمونه‌ی PDF (فارسی)</a> <a class="btn btn-default" target="_blank" rel="noopener" href="' . self::e(self::url('report', '&sample=en')) . '">نمونه‌ی PDF (انگلیسی)</a></p>'
+                . '<p class="mcsa-muted">نمونه با داده‌ی ساختگی و همین تنظیم‌های ذخیره‌شده ساخته می‌شود. فونت فعلی: <span dir="ltr">' . self::e($using === 'mcsfont' ? 'فونت بارگذاری‌شده' : $using) . '</span></p>';
+        return self::guide('<p>ظاهر فایل PDF گزارش‌ها این‌جا تنظیم می‌شود و روی همه‌ی گزارش‌ها (پایه، هوش مصنوعی و دوره‌ای) اثر دارد. گزارش‌های قبلی هم با قالب تازه دانلود می‌شوند، چون PDF هنگام دانلود ساخته می‌شود.</p>'
+                . '<ol><li>لوگو را بارگذاری کنید (PNG با زمینه‌ی شفاف بهتر است؛ روی جلدِ تیره می‌نشیند، پس لوگوی روشن یا سفید انتخاب کنید).</li><li>نام، رنگ‌ها و بخش‌ها را تنظیم و ذخیره کنید.</li><li>با «نمونه‌ی PDF» نتیجه را ببینید.</li></ol>'
+                . '<p>فونت: پیش‌فرض DejaVu Sans خود WHMCS است. اگر فونت دیگری می‌خواهید، فایل TTF آن را بارگذاری کنید. فایل در پایگاه داده می‌ماند، نه در پوشه‌ی ماژول و نه در بسته‌ی نصب. فونت باید «شکل‌های چسبان» حروف فارسی را داشته باشد؛ اگر نداشته باشد پذیرفته نمی‌شود.</p>')
+            . self::box('نمونه', $state)
+            . self::box('لوگو', ($logo ? '<p><img alt="لوگوی فعلی" style="max-height:64px;max-width:260px;background:#0b1f3a;padding:8px;border-radius:6px" src="data:' . self::e($logo['mime']) . ';base64,' . base64_encode($logo['bytes']) . '"></p>' : '')
+                . $upload('pdf_logo', 'فایل لوگو', 'image/png,image/jpeg', 'PNG یا JPEG، حداکثر ۴۰۰ کیلوبایت. روی جلد و گوشه‌ی سربرگ هر صفحه می‌آید. بدون لوگو، «نام روی گزارش» نوشته می‌شود.'))
+            . self::box('نام، رنگ و بخش‌ها', self::form('report', 'save_settings', self::fields('report') . '<button class="btn btn-primary">ذخیره</button>'))
+            . self::box('فونت دلخواه', ($font['error'] !== '' ? '<div class="alert alert-danger">' . self::e($font['error']) . '</div>' : '')
+                . $upload('pdf_font', 'فونت متن (TTF)', '.ttf,font/ttf', 'فایل TTF، حداکثر ۳ مگابایت. پس از بارگذاری، اگر «فونت» روی auto باشد همین فونت به کار می‌رود.')
+                . '<hr>' . $upload('pdf_font_bold', 'فونت ضخیم (TTF، اختیاری)', '.ttf,font/ttf', 'وزن Bold همان فونت برای عنوان‌ها. بدون آن، عنوان‌ها با همان وزن معمولی نوشته می‌شوند.'));
     }
 
     private static function settings(): string

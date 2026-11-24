@@ -19,7 +19,7 @@ declare(strict_types=1);
 
 $root = dirname(__DIR__);
 $mod = $root . '/modules/addons/mcsec/';
-const SKIP = ['lib/Admin/', 'lib/Installer.php', 'lib/Settings.php', 'lib/Trace.php', 'lib/ScanLog.php', 'lib/Lang.php', 'changelog.php', 'lang/'];
+const SKIP = ['lib/Admin/', 'lib/Installer.php', 'lib/Settings.php', 'lib/Trace.php', 'lib/ScanLog.php', 'lib/Blobs.php', 'lib/Lang.php', 'changelog.php', 'lang/'];
 
 $dict = [];
 $problems = [];
