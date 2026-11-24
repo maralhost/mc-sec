@@ -56,10 +56,7 @@ function mcsecplan_apply(array $params, string $status): string
         return 'افزونه‌ی MC-Sec (modules/addons/mcsec) نصب نیست.';
     }
     try {
-        if (\McSec\Settings::get('schema_version') !== MCSEC_VERSION) {
-            \McSec\Installer::install();
-            \McSec\Settings::set('schema_version', MCSEC_VERSION);
-        }
+        \McSec\Installer::ensure();
         $serviceId = (int) ($params['serviceid'] ?? 0);
         if ($status === 'active') {
             $name = (string) ($params['model']->product->name ?? $params['configoptions']['name'] ?? ('Plan #' . (int) ($params['pid'] ?? 0)));

@@ -14,6 +14,21 @@ use WHMCS\Database\Capsule;
  */
 final class Installer
 {
+    /**
+     * The schema this very file builds. It lives HERE, not next to MCSEC_VERSION: after an update a PHP opcode cache can
+     * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
+     * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
+     */
+    public const SCHEMA = '0.11.1';
+
+    /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
+    public static function ensure(): void
+    {
+        if (Settings::get('schema_version') !== self::SCHEMA) {
+            self::install();
+        }
+    }
+
     public static function install(): void
     {
         $s = Capsule::schema();
@@ -451,10 +466,23 @@ final class Installer
 
         // columns added after a table first shipped (additive only; each one also bumps MCSEC_VERSION)
         $col = function (string $table, string $column, callable $def) use ($s): void {
-            if ($s->hasTable($table) && !$s->hasColumn($table, $column)) {
+            if (!$s->hasTable($table)) {
+                return;
+            }
+            // the listing can be stale or wrong on some servers: a column counts as there only if it can be read
+            $has = $s->hasColumn($table, $column);
+            if ($has) {
+                try {
+                    Capsule::table($table)->select($column)->limit(1)->get();
+                } catch (\Throwable $e) {
+                    $has = false;
+                }
+            }
+            if (!$has) {
                 $s->table($table, function ($t) use ($def) {
                     $def($t);
                 });
+                Capsule::table($table)->select($column)->limit(1)->get(); // throws when the column still is not there: never report a schema that was not built
             }
         };
         // 0.1.1: CDN detection and the origin server behind it
@@ -503,5 +531,7 @@ final class Installer
         if (!Db::table('mod_mcsec_settings')->where('k', 'installed_at')->exists()) {
             Db::table('mod_mcsec_settings')->insert(['k' => 'installed_at', 'v' => (string) Clock::now()]);
         }
+        // only now, with every table and column in place, is this schema marked as built
+        Settings::set('schema_version', self::SCHEMA);
     }
 }

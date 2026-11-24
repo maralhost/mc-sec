@@ -102,4 +102,18 @@ foreach (glob(dirname(__DIR__) . '/modules/addons/mcsec/{,lib/,lib/*/}*.php', GL
 }
 ok(!preg_match('~->drop\(|dropIfExists|dropColumn|DROP TABLE|TRUNCATE~i', $src), 'no DROP/TRUNCATE anywhere in the module');
 ok(!preg_match('~noemail~', $src), 'noemail never sent');
+section('schema: an update never leaves a column behind');
+ok(\McSec\Installer::SCHEMA === MCSEC_VERSION && \McSec\Settings::get('schema_version') === MCSEC_VERSION, 'the installer\'s own schema mark equals the module version, and install() sets it itself');
+// what a stale cached Installer.php of an older version leaves after an update: its old mark, and no new column
+\WHMCS\Database\Capsule::statement('ALTER TABLE mod_mcsec_accounts DROP COLUMN invited_at');
+\McSec\Settings::set('schema_version', '0.11.0');
+$has = fn () => \WHMCS\Database\Capsule::schema()->hasColumn('mod_mcsec_accounts', 'invited_at');
+$broken = !$has();
+\McSec\Installer::ensure();
+ok($broken && $has() && \McSec\Settings::get('schema_version') === \McSec\Installer::SCHEMA, 'the next page or cron pass sees the older mark, adds the missing column and only then marks the schema');
+$n = count(\WHMCS\Database\Capsule::select("select name from sqlite_master where type='table' and name like 'mod_mcsec_%'"));
+\McSec\Installer::install();
+\McSec\Installer::install();
+ok(count(\WHMCS\Database\Capsule::select("select name from sqlite_master where type='table' and name like 'mod_mcsec_%'")) === $n, 'running it again changes nothing');
+
 done();

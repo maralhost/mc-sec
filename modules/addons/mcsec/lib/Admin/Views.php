@@ -59,13 +59,37 @@ final class Views
         return '<div class="alert alert-' . ($k === 'ok' ? 'success' : 'danger') . '">' . nl2br(self::e($m), false) . '</div>';
     }
 
+    /** Pages grouped the way MC-Care groups its tabs: a few tabs in the dark bar, the pages of the open tab under it. */
+    private const GROUPS = [
+        'نمای کلی' => ['overview'],
+        'عملیات' => ['assets', 'scans'],
+        'فروش و اعتبار' => ['pricing', 'credits', 'codes'],
+        'راه‌اندازی' => ['setup', 'settings'],
+        'سامانه' => ['log', 'changelog'],
+    ];
+
+    private const SUBS = ['overview' => 'شمار کلی استفاده، سلامت موتورها و پرمصرف‌ترین حساب‌ها.', 'setup' => 'اتصال به موتور اسکن، هوش مصنوعی و ربات‌های اعلان.', 'pricing' => 'نوع‌های اسکن، هزینه‌ی هر کدام، بسته‌های اعتبار و پلن‌ها.',
+        'credits' => 'قیمت ویژه‌ی یک گروه یا یک حساب، اعطای دستی اعتبار و دفتر تراکنش‌ها.', 'codes' => 'کدهای اعتبار و تخفیف، هدیه، دعوت و شارژ خودکار.', 'assets' => 'دارایی‌های مشتریان و تأیید دستی مالکیت.',
+        'scans' => 'اسکن‌های در صف، در حال اجرا و تمام‌شده.', 'settings' => 'هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است.', 'log' => 'خطاها و هشدارهای سامانه با کد پیگیری.', 'changelog' => 'هر نسخه چه چیزی را عوض کرده است.'];
+
+    /**
+     * The shell shared with MC-Care (its «style B»): a dark bar with the brand and the tabs, the pages of the open tab
+     * under it, a soft grey page, white cards with a grey header strip, dark primary buttons. Only CSS and markup
+     * under .mcsa; no script, no font file, nothing loaded from outside.
+     */
     public static function render(string $page, string $flash): string
     {
-        $nav = '<nav class="mcsa-nav">';
-        foreach (Controller::PAGES as $p => $l) {
-            $nav .= '<a href="' . self::e(self::url($p)) . '"' . ($p === $page ? ' class="active"' : '') . '>' . self::e($l) . '</a>';
+        $tabs = '';
+        $pills = '';
+        foreach (self::GROUPS as $label => $pages) {
+            $on = in_array($page, $pages, true);
+            $tabs .= '<li' . ($on ? ' class="active"' : '') . '><a href="' . self::e(self::url($pages[0])) . '"' . ($on ? ' aria-current="true"' : '') . '>' . self::e($label) . '</a></li>';
+            if ($on && count($pages) > 1) {
+                foreach ($pages as $p) {
+                    $pills .= '<li' . ($p === $page ? ' class="active"' : '') . '><a href="' . self::e(self::url($p)) . '"' . ($p === $page ? ' aria-current="page"' : '') . '>' . self::e(Controller::PAGES[$p]) . '</a></li>';
+                }
+            }
         }
-        $nav .= '</nav>';
         $tier = Auth::adminTier();
         $body = match ($page) {
             'setup' => self::setup(),
@@ -80,8 +104,14 @@ final class Views
             default => self::overview(),
         };
         $warn = !Settings::bool('enabled') ? '<div class="alert alert-info">MC-Sec برای مشتری‌ها خاموش است. پس از راه‌اندازی موتورها و آزمودن روی چند حساب آزمایشی، در «تنظیمات» روشنش کنید.</div>' : '';
-        return '<div class="mcsa" dir="rtl" lang="fa"><style>' . self::css() . '</style><header class="mcsa-head"><h2>MC-Sec — امنیت سایبری <small>نسخه‌ی ' . self::e(MCSEC_VERSION) . ' · سطح شما: ' . self::e($tier) . '</small></h2></header>'
-            . $nav . $warn . self::flash($flash) . $body . '</div>';
+        $notes = $warn . self::flash($flash);
+        $title = Controller::PAGES[$page] ?? Controller::PAGES['overview'];
+        return '<div class="mcsa" id="mcsa-root" dir="rtl" lang="fa"><style>' . self::css() . '</style>'
+            . '<div class="mcsa-shell"><div class="mcsa-topbar"><a class="mcsa-brand" href="' . self::e(self::url('overview')) . '"><span class="mcsa-logo" aria-hidden="true">MC</span><b>MC-Sec</b></a>'
+            . '<ul class="mcsa-tabs">' . $tabs . '</ul><span class="mcsa-ver">نسخه‌ی <bdi dir="ltr">' . self::e(MCSEC_VERSION) . '</bdi> · سطح شما: ' . self::e($tier) . '</span></div>'
+            . ($pills !== '' ? '<ul class="mcsa-pills">' . $pills . '</ul>' : '') . '</div>'
+            . ($notes !== '' ? '<div class="mcsa-flashwrap">' . $notes . '</div>' : '')
+            . '<div class="mcsa-body"><div class="mcsa-head"><h2>' . self::e($title) . '</h2><div class="sub">' . self::e(self::SUBS[$page] ?? '') . '</div></div>' . $body . '</div></div>';
     }
 
     private static function overview(): string
@@ -140,7 +170,7 @@ final class Views
                 'text', 'json' => '<textarea class="form-control" id="' . $id . '" name="set_' . $k . '" rows="' . ($type === 'json' ? 5 : (in_array($k, self::LTR_LISTS, true) ? 8 : 3)) . '" dir="' . ($type === 'json' || in_array($k, self::LTR_LISTS, true) ? 'ltr' : 'auto') . '">' . self::e($val) . '</textarea>',
                 default => '<input class="form-control" id="' . $id . '" name="set_' . $k . '" value="' . self::e($val) . '" dir="' . (in_array($type, ['int', 'csv'], true) || str_ends_with($k, '_url') || str_contains($k, 'email') || str_contains($k, 'model') ? 'ltr' : 'auto') . '">',
             };
-            $h .= '<div class="mcsa-field"><label for="' . $id . '">' . self::e($label) . ' <span class="mcsa-i" title="' . self::e($help . ($type !== 'secret' && $def !== '' && strlen($def) < 60 ? ' پیش‌فرض: ' . $def : '')) . '">ⓘ</span></label>' . $control
+            $h .= '<div class="mcsa-field"><label for="' . $id . '">' . self::e($label) . ' <span class="mcsa-i" tabindex="0" role="note" title="' . self::e($help . ($type !== 'secret' && $def !== '' && strlen($def) < 60 ? ' پیش‌فرض: ' . $def : '')) . '">?</span></label>' . $control
                 . ($help !== '' ? '<small>' . self::e($help) . '</small>' : '') . '</div>';
         }
         return $h;
@@ -243,12 +273,12 @@ final class Views
         $add = self::form('credits', 'save_rule', '<div class="mcsa-row">'
             . '<div class="mcsa-field"><label for="mcsa-rl-g">گروه مشتری</label><select class="form-control" id="mcsa-rl-g" name="rl_group">' . $opts . '</select></div>'
             . '<div class="mcsa-field"><label for="mcsa-rl-c">یا شماره‌ی حساب</label><input class="form-control" id="mcsa-rl-c" name="rl_client" dir="ltr"><small>اگر پر شود، قاعده فقط برای همین حساب است.</small></div>'
-            . '<div class="mcsa-field"><label for="mcsa-rl-m">اعتبار ماهانه‌ی رایگان <span class="mcsa-i" title="اول هر ماه شمسی پر می‌شود و به ماه بعد نمی‌رود. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-m" name="rl_monthly" dir="ltr" value="0"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-rl-a">سقف دارایی <span class="mcsa-i" title="۰ یعنی همان سقف پلن یا سقف بی‌پلن. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-a" name="rl_assets" dir="ltr" value="0"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-rl-d">تخفیف بسته‌ها (٪) <span class="mcsa-i" title="۰ تا ۹۰. با کد تخفیف جمع نمی‌شود: مشتری بهترینِ یکی را می‌گیرد. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-d" name="rl_discount" dir="ltr" value="0"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-rl-p">هزینه‌ی اسکن (٪ قیمت عادی) <span class="mcsa-i" title="۱۰۰ یعنی قیمت عادی، ۵۰ یعنی نصف، ۰ یعنی رایگان. فقط کم می‌کند. پیش‌فرض: ۱۰۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-p" name="rl_spend" dir="ltr" value="100"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-rl-o">نوع‌های اسکن باز بی‌پلن <span class="mcsa-i" title="کلید نوع‌های اسکن با ویرگول، مثل vuln,web. کلیدها در «قیمت و پلن» هستند. پیش‌فرض: هیچ.">ⓘ</span></label><input class="form-control" id="mcsa-rl-o" name="rl_profiles" dir="ltr" placeholder="vuln,web"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-rl-t">مدت (روز) <span class="mcsa-i" title="پس از این چند روز قاعده خودکار تمام می‌شود. ۰ یعنی بی‌پایان. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-rl-t" name="rl_days" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-m">اعتبار ماهانه‌ی رایگان <span class="mcsa-i" tabindex="0" role="note" title="اول هر ماه شمسی پر می‌شود و به ماه بعد نمی‌رود. پیش‌فرض: ۰.">?</span></label><input class="form-control" id="mcsa-rl-m" name="rl_monthly" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-a">سقف دارایی <span class="mcsa-i" tabindex="0" role="note" title="۰ یعنی همان سقف پلن یا سقف بی‌پلن. پیش‌فرض: ۰.">?</span></label><input class="form-control" id="mcsa-rl-a" name="rl_assets" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-d">تخفیف بسته‌ها (٪) <span class="mcsa-i" tabindex="0" role="note" title="۰ تا ۹۰. با کد تخفیف جمع نمی‌شود: مشتری بهترینِ یکی را می‌گیرد. پیش‌فرض: ۰.">?</span></label><input class="form-control" id="mcsa-rl-d" name="rl_discount" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-p">هزینه‌ی اسکن (٪ قیمت عادی) <span class="mcsa-i" tabindex="0" role="note" title="۱۰۰ یعنی قیمت عادی، ۵۰ یعنی نصف، ۰ یعنی رایگان. فقط کم می‌کند. پیش‌فرض: ۱۰۰.">?</span></label><input class="form-control" id="mcsa-rl-p" name="rl_spend" dir="ltr" value="100"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-o">نوع‌های اسکن باز بی‌پلن <span class="mcsa-i" tabindex="0" role="note" title="کلید نوع‌های اسکن با ویرگول، مثل vuln,web. کلیدها در «قیمت و پلن» هستند. پیش‌فرض: هیچ.">?</span></label><input class="form-control" id="mcsa-rl-o" name="rl_profiles" dir="ltr" placeholder="vuln,web"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-rl-t">مدت (روز) <span class="mcsa-i" tabindex="0" role="note" title="پس از این چند روز قاعده خودکار تمام می‌شود. ۰ یعنی بی‌پایان. پیش‌فرض: ۰.">?</span></label><input class="form-control" id="mcsa-rl-t" name="rl_days" dir="ltr" value="0"></div>'
             . '<div class="mcsa-field"><label for="mcsa-rl-n">یادداشت (فقط مدیر می‌بیند)</label><input class="form-control" id="mcsa-rl-n" name="rl_note" maxlength="160"></div>'
             . '</div><button class="btn btn-primary">ذخیره‌ی قاعده</button>');
         $grant = self::form('credits', 'grant', '<div class="mcsa-row"><div class="mcsa-field"><label>شماره‌ی حساب مشتری</label><input class="form-control" name="grant_client" dir="ltr" required></div>'
@@ -294,11 +324,11 @@ final class Views
         }
         $add = self::form('codes', 'save_code', '<div class="mcsa-row">'
             . '<div class="mcsa-field"><label for="mcsa-cd-k">نوع</label><select class="form-control" id="mcsa-cd-k" name="cd_kind"><option value="bonus">اعتبار بیشتر روی بسته (٪) — درآمد کم نمی‌شود</option><option value="discount">تخفیف بسته (٪)</option><option value="credit">اعتبار رایگان (تعداد)</option></select></div>'
-            . '<div class="mcsa-field"><label for="mcsa-cd-v">مقدار <span class="mcsa-i" title="برای اعتبار رایگان: تعداد اعتبار. برای تخفیف: درصد (۱ تا ۹۰). برای اعتبار بیشتر: درصد (۱ تا ۳۰۰).">ⓘ</span></label><input class="form-control" id="mcsa-cd-v" name="cd_value" dir="ltr" required></div>'
-            . '<div class="mcsa-field"><label for="mcsa-cd-c">کد <span class="mcsa-i" title="حروف لاتین بزرگ، رقم و خط تیره، مثل YALDA1405. خالی: خودکار ساخته می‌شود.">ⓘ</span></label><input class="form-control" id="mcsa-cd-c" name="cd_code" dir="ltr" maxlength="24" placeholder="YALDA1405"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-cd-b">اعتبار رایگان تا کی؟ <span class="mcsa-i" title="فقط برای نوع «اعتبار رایگان». پیش‌فرض: بی‌انقضا.">ⓘ</span></label><select class="form-control" id="mcsa-cd-b" name="cd_bucket"><option value="paid">بی‌انقضا</option><option value="monthly">تا پایان همان ماه شمسی</option></select></div>'
-            . '<div class="mcsa-field"><label for="mcsa-cd-m">سقف تعداد استفاده <span class="mcsa-i" title="چند حساب می‌توانند از این کد استفاده کنند. ۰ یعنی بی‌سقف. هر حساب فقط یک بار. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-cd-m" name="cd_max" dir="ltr" value="0"></div>'
-            . '<div class="mcsa-field"><label for="mcsa-cd-d">مهلت (روز) <span class="mcsa-i" title="پس از این چند روز کد دیگر پذیرفته نمی‌شود. ۰ یعنی بی‌پایان. پیش‌فرض: ۰.">ⓘ</span></label><input class="form-control" id="mcsa-cd-d" name="cd_days" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-v">مقدار <span class="mcsa-i" tabindex="0" role="note" title="برای اعتبار رایگان: تعداد اعتبار. برای تخفیف: درصد (۱ تا ۹۰). برای اعتبار بیشتر: درصد (۱ تا ۳۰۰).">?</span></label><input class="form-control" id="mcsa-cd-v" name="cd_value" dir="ltr" required></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-c">کد <span class="mcsa-i" tabindex="0" role="note" title="حروف لاتین بزرگ، رقم و خط تیره، مثل YALDA1405. خالی: خودکار ساخته می‌شود.">?</span></label><input class="form-control" id="mcsa-cd-c" name="cd_code" dir="ltr" maxlength="24" placeholder="YALDA1405"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-b">اعتبار رایگان تا کی؟ <span class="mcsa-i" tabindex="0" role="note" title="فقط برای نوع «اعتبار رایگان». پیش‌فرض: بی‌انقضا.">?</span></label><select class="form-control" id="mcsa-cd-b" name="cd_bucket"><option value="paid">بی‌انقضا</option><option value="monthly">تا پایان همان ماه شمسی</option></select></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-m">سقف تعداد استفاده <span class="mcsa-i" tabindex="0" role="note" title="چند حساب می‌توانند از این کد استفاده کنند. ۰ یعنی بی‌سقف. هر حساب فقط یک بار. پیش‌فرض: ۰.">?</span></label><input class="form-control" id="mcsa-cd-m" name="cd_max" dir="ltr" value="0"></div>'
+            . '<div class="mcsa-field"><label for="mcsa-cd-d">مهلت (روز) <span class="mcsa-i" tabindex="0" role="note" title="پس از این چند روز کد دیگر پذیرفته نمی‌شود. ۰ یعنی بی‌پایان. پیش‌فرض: ۰.">?</span></label><input class="form-control" id="mcsa-cd-d" name="cd_days" dir="ltr" value="0"></div>'
             . '<div class="mcsa-field"><label for="mcsa-cd-g">فقط برای گروه</label><select class="form-control" id="mcsa-cd-g" name="cd_group">' . $opts . '</select></div>'
             . '<div class="mcsa-field"><label for="mcsa-cd-u">فقط برای حساب شماره‌ی</label><input class="form-control" id="mcsa-cd-u" name="cd_client" dir="ltr" placeholder="خالی = همه"></div>'
             . '<div class="mcsa-field"><label for="mcsa-cd-n">یادداشت (فقط مدیر می‌بیند)</label><input class="form-control" id="mcsa-cd-n" name="cd_note" maxlength="160" placeholder="مثلاً کمپین یلدا"></div>'
@@ -443,17 +473,50 @@ final class Views
 
     private static function css(): string
     {
-        return '.mcsa-changes{list-style:none;padding:0;margin:0}.mcsa-changes li{padding:.3rem 0;border-bottom:1px dashed #e2e8f0}.mcsa-changes li:last-child{border:0}'
-            . '.mcsa-tag{display:inline-block;min-width:4.6rem;text-align:center;font-size:.75rem;font-weight:700;border-radius:999px;padding:.05rem .5rem;margin-inline-end:.4rem;background:#e2e8f0;color:#334155}'
-            . '.mcsa-tag-ok{background:#dcfce7;color:#166534}.mcsa-tag-fix{background:#fee2e2;color:#991b1b}.mcsa-tag-chg{background:#e0f2fe;color:#075985}.mcsa-tag-ops{background:#fef3c7;color:#92400e}'
-            . '.mcsa{font-family:Tahoma,var(--font-family-base,sans-serif);line-height:1.8;max-width:1300px}.mcsa *{box-sizing:border-box}.mcsa-head h2{margin:0 0 .5rem;font-size:1.35rem}.mcsa-head small{font-size:.8rem;color:#64748b;font-weight:400}'
-            . '.mcsa-nav{display:flex;flex-wrap:wrap;gap:.25rem;margin:0 0 1rem;padding:.3rem;background:#f1f5f9;border-radius:10px}.mcsa-nav a{padding:.35rem .8rem;border-radius:8px;color:#334155;text-decoration:none}.mcsa-nav a.active{background:#fff;font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.1)}'
-            . '.mcsa-box{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:1rem 1.2rem;margin:0 0 1rem}.mcsa-box h3{margin:0 0 .75rem;font-size:1.05rem}.mcsa-help,.mcsa-muted{color:#64748b}'
-            . '.mcsa-guide{background:#e0f2fe;border-radius:10px;padding:.5rem 1rem;margin:0 0 1rem}.mcsa-guide summary{cursor:pointer;font-weight:700;color:#075985}'
-            . '.mcsa-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:.6rem;margin:0 0 1rem}.mcsa-kpis div{background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:.7rem 1rem}.mcsa-kpis span{display:block;color:#64748b;font-size:.85rem}.mcsa-kpis strong{font-size:1.35rem}'
-            . '.mcsa-field{margin:0 0 .8rem}.mcsa-field label{display:block;font-weight:700;margin:0 0 .2rem}.mcsa-field small{display:block;color:#64748b;font-size:.8rem}.mcsa-i{cursor:help;color:#2563eb}.mcsa-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem}'
-            . '.mcsa-switch,.mcsa-inline{font-weight:400!important;display:inline-flex!important;gap:.35rem;align-items:center;margin-inline-start:.5rem}.mcsa .ok{color:#15803d}.mcsa .err{color:#b91c1c}.mcsa-health{list-style:none;padding:0}.mcsa-health li{padding:.25rem 0}'
-            . '.mcsa-search{display:flex;gap:.5rem;margin:0 0 1rem;max-width:520px}.mcsa table td,.mcsa table th{text-align:right;vertical-align:middle}.mcsa-log pre{max-height:240px;overflow:auto;font-size:.75rem;text-align:left}.mcsa-log tr.lvl-error td:first-child{border-inline-start:3px solid #b91c1c}'
-            . '.mcsa form{margin:0 0 .5rem}.mcsa textarea[dir=ltr],.mcsa input[dir=ltr]{text-align:left;font-family:monospace}';
+        // the look of MC-Care's admin pages (style B), on MC-Sec's own class names
+        return '.mcsa{--ink:#101828;--mu:#475467;--ln:#E4E7EC;--hd:#F2F4F7;--p:#101828;--g:#137A43;--y:#8A5A00;--r:#B42318;'
+            . 'font-family:"Vazirmatn FD",Vazirmatn,Tahoma,"Segoe UI",sans-serif;color:var(--ink);font-size:13.5px;line-height:1.75;background:#F6F7F9;border-radius:10px;padding:0 0 28px}'
+            . '.mcsa *{box-sizing:border-box}.mcsa [hidden]{display:none!important}.mcsa code,.mcsa kbd,.mcsa [dir=ltr]{font-family:Tahoma,"Segoe UI",Consolas,sans-serif}'
+            . '.mcsa a{color:#0B5FDB;text-decoration:none}.mcsa a:hover,.mcsa a:focus{color:#0847A6}'
+            . '.mcsa h2{font-size:19px;font-weight:700;margin:0;line-height:1.5}.mcsa h3{font-size:13.5px;font-weight:700}.mcsa h4{font-size:14px;font-weight:600}'
+            . '.mcsa-topbar{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:8px 20px;background:#101828;color:#fff;border-radius:10px 10px 0 0}'
+            . '.mcsa a.mcsa-brand,.mcsa a.mcsa-brand:hover,.mcsa a.mcsa-brand:focus{display:inline-flex;align-items:center;gap:8px;color:#fff;font-size:15px}'
+            . '.mcsa-logo{display:inline-flex;width:28px;height:28px;border-radius:7px;background:#fff;color:#101828;align-items:center;justify-content:center;font-size:11px;font-weight:700}'
+            . '.mcsa-tabs{display:flex;flex-wrap:wrap;gap:2px;list-style:none;margin:0;padding:0;flex:1 1 auto}'
+            . '.mcsa .mcsa-tabs a,.mcsa .mcsa-tabs a:hover,.mcsa .mcsa-tabs a:focus{display:inline-flex;align-items:center;min-height:38px;padding:0 12px;border-radius:8px;color:#D0D5DD;background:transparent}'
+            . '.mcsa .mcsa-tabs a:hover{background:#1D2939;color:#fff}.mcsa .mcsa-tabs li.active a,.mcsa .mcsa-tabs li.active a:hover{background:#344054;color:#fff;font-weight:600}'
+            . '.mcsa-ver{color:#98A2B3;font-size:12px;white-space:nowrap}'
+            . '.mcsa-pills{display:flex;flex-wrap:wrap;gap:0 20px;list-style:none;margin:0;padding:0 20px;background:#fff;border-bottom:1px solid var(--ln)}'
+            . '.mcsa .mcsa-pills a,.mcsa .mcsa-pills a:hover,.mcsa .mcsa-pills a:focus{display:inline-block;padding:9px 0;border-bottom:2px solid transparent;color:var(--mu)}'
+            . '.mcsa .mcsa-pills a:hover{color:var(--ink)}.mcsa .mcsa-pills li.active a{border-bottom-color:var(--ink);color:var(--ink);font-weight:600}'
+            . '.mcsa-flashwrap{padding:12px 20px 0}.mcsa-flashwrap>*{margin-bottom:8px}.mcsa-flashwrap>*:last-child{margin-bottom:0}'
+            . '.mcsa-body{padding:14px 20px 0}.mcsa-head{margin:0 0 12px}.mcsa-head .sub{color:var(--mu);font-size:13px;max-width:860px}'
+            . '.mcsa-box{background:#fff;border:1px solid var(--ln);border-radius:10px;padding:12px 14px;margin:0 0 14px}'
+            . '.mcsa-box>h3{margin:-12px -14px 12px;padding:8px 14px;background:var(--hd);border-bottom:1px solid var(--ln);border-radius:9px 9px 0 0;line-height:1.75}'
+            . '.mcsa-help,.mcsa-muted{color:var(--mu);font-size:12.5px}'
+            . '.mcsa-guide{background:#E8F0FE;color:#0847A6;border-radius:8px;padding:8px 14px;margin:0 0 14px}.mcsa-guide summary{cursor:pointer;font-weight:600}.mcsa-guide>div{color:var(--ink);margin-top:6px}'
+            . '.mcsa-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:0;background:#fff;border:1px solid var(--ln);border-radius:10px;overflow:hidden;margin:0 0 14px}'
+            . '.mcsa-kpis div{padding:10px 16px;box-shadow:-1px 0 0 var(--ln),0 1px 0 var(--ln)}.mcsa-kpis span{display:block;color:var(--mu);font-size:12.5px}.mcsa-kpis strong{font-size:21px;line-height:1.5;font-weight:700}'
+            . '.mcsa-field{margin:0 0 12px}.mcsa-field label{display:block;font-weight:600;margin:0 0 5px;font-size:13.5px}.mcsa-field small{display:block;color:var(--mu);font-size:12.5px;margin-top:3px}'
+            . '.mcsa-i{display:inline-flex;width:18px;height:18px;border-radius:50%;background:#E3E8F0;color:#3A4456;font-size:11.5px;font-weight:700;align-items:center;justify-content:center;cursor:help;margin:0 4px;vertical-align:middle;line-height:1}'
+            . '.mcsa-i:hover,.mcsa-i:focus{background:var(--p);color:#fff;outline:none}.mcsa-i:focus-visible{box-shadow:0 0 0 3px #9CC0FA}'
+            . '.mcsa-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:4px 12px}'
+            . '.mcsa-switch,.mcsa-inline{font-weight:400!important;display:inline-flex!important;gap:6px;align-items:center;margin-inline-start:8px}'
+            . '.mcsa .ok{color:var(--g)}.mcsa .err{color:var(--r)}.mcsa-health{list-style:none;padding:0;margin:0 0 8px}.mcsa-health li{padding:5px 0;border-bottom:1px solid var(--hd)}.mcsa-health li:last-child{border-bottom:0}'
+            . '.mcsa-search{display:flex;gap:6px;margin:0 0 12px;max-width:520px}'
+            . '.mcsa .form-control{border:1px solid #D0D5DD;border-radius:8px;box-shadow:none;min-height:36px;font-family:inherit;color:var(--ink)}.mcsa .form-control:focus{border-color:var(--p);box-shadow:0 0 0 3px #E4E7EC}.mcsa textarea.form-control{line-height:1.85}'
+            . '.mcsa .btn{border-radius:8px;min-height:34px;font-family:inherit;display:inline-flex;align-items:center;gap:5px;justify-content:center}.mcsa .btn.btn-sm{min-height:32px;padding:4px 12px;font-size:13px}'
+            . '.mcsa .btn-default{background:#fff;border-color:#D0D5DD;color:var(--ink)}.mcsa .btn-default:hover,.mcsa .btn-default:focus{border-color:var(--p);color:var(--ink);background:#fff}'
+            . '.mcsa .btn-primary{background:var(--p);border-color:var(--p);color:#fff}.mcsa .btn-primary:hover,.mcsa .btn-primary:focus{background:#344054;border-color:#344054;color:#fff}'
+            . '.mcsa .btn:focus-visible,.mcsa a:focus-visible{outline:3px solid #9CC0FA;outline-offset:1px}'
+            . '.mcsa .alert{border:0;border-radius:8px;padding:8px 14px;margin:0 0 14px}.mcsa .alert-success{background:#E6F4EC;color:#137A43}.mcsa .alert-danger{background:#FDECEA;color:#B42318}.mcsa .alert-info{background:#E8F0FE;color:#0847A6}.mcsa .alert-warning{background:#FFF4DC;color:#8A5A00}'
+            . '.mcsa .table{background:#fff;margin-bottom:0;width:100%}.mcsa table td,.mcsa table th{text-align:right;vertical-align:middle}'
+            . '.mcsa .table>thead>tr>th{background:var(--hd);color:#344054;font-weight:600;font-size:12px;padding:7px 10px;border-bottom:0}.mcsa .table>tbody>tr>td{padding:7px 10px;border-top:1px solid var(--hd)}.mcsa .table>tbody>tr:hover{background:#F9FAFB}'
+            . '.mcsa-log pre{max-height:240px;overflow:auto;font-size:12px;text-align:left;border-radius:8px}.mcsa-log tr.lvl-error td:first-child{border-inline-start:3px solid var(--r)}'
+            . '.mcsa form{margin:0 0 8px}.mcsa textarea[dir=ltr],.mcsa input[dir=ltr]{text-align:left;font-family:Consolas,monospace}.mcsa hr{border:0;border-top:1px solid var(--ln);margin:12px 0}'
+            . '.mcsa-changes{list-style:none;padding:0;margin:0}.mcsa-changes li{padding:6px 0;border-bottom:1px solid var(--hd)}.mcsa-changes li:last-child{border:0}'
+            . '.mcsa-tag{display:inline-block;min-width:4.6rem;text-align:center;font-size:11.5px;font-weight:600;border-radius:6px;padding:1px 9px;margin-inline-end:6px;background:#EEF1F6;color:#4A5466}'
+            . '.mcsa-tag-ok{background:#E6F4EC;color:#137A43}.mcsa-tag-fix{background:#FDECEA;color:#B42318}.mcsa-tag-chg{background:#E8F0FE;color:#0847A6}.mcsa-tag-ops{background:#FFF4DC;color:#8A5A00}'
+            . '@media(max-width:700px){.mcsa-topbar,.mcsa-pills,.mcsa-body,.mcsa-flashwrap{padding-inline:12px}.mcsa-ver{display:none}}';
     }
 }

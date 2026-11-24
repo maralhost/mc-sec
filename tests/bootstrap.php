@@ -149,7 +149,6 @@ require_once $ROOT . '/modules/addons/mcsec/mcsec.php';
 require_once $ROOT . '/modules/addons/mcsec/hooks.php';
 require_once $ROOT . '/modules/servers/mcsecplan/mcsecplan.php';
 \McSec\Installer::install();
-\McSec\Settings::set('schema_version', MCSEC_VERSION);
 if (session_status() !== PHP_SESSION_ACTIVE) {
     $_SESSION = [];
 }

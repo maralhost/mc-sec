@@ -30,7 +30,6 @@ function mcsec_activate(): array
 {
     try {
         \McSec\Installer::install();
-        \McSec\Settings::set('schema_version', MCSEC_VERSION);
         return ['status' => 'success', 'description' => 'MC-Sec نصب شد. برای راه‌اندازی، صفحه‌ی ماژول را باز کنید. قابلیت برای مشتری‌ها تا روشن کردن در تنظیمات خاموش است.'];
     } catch (\Throwable $e) {
         return ['status' => 'error', 'description' => 'نصب MC-Sec انجام نشد: ' . $e->getMessage()];
@@ -47,16 +46,12 @@ function mcsec_deactivate(): array
 function mcsec_upgrade($vars): void
 {
     \McSec\Installer::install();
-    \McSec\Settings::set('schema_version', MCSEC_VERSION);
 }
 
 function mcsec_output($vars): void
 {
     try {
-        if (\McSec\Settings::get('schema_version') !== MCSEC_VERSION) {
-            \McSec\Installer::install();
-            \McSec\Settings::set('schema_version', MCSEC_VERSION);
-        }
+        \McSec\Installer::ensure();
         echo \McSec\Admin\Controller::handle((string) ($vars['modulelink'] ?? 'addonmodules.php?module=mcsec'));
     } catch (\Throwable $e) {
         \McSec\Trace::error('admin', 'page', $e->getMessage(), \McSec\Trace::exception($e));

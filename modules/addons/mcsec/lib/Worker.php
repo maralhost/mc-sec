@@ -15,10 +15,7 @@ final class Worker
     /** @return array<string,mixed>|null null when another pass holds the lock */
     public static function run(int $budgetSeconds = 45): ?array
     {
-        if (Settings::get('schema_version') !== MCSEC_VERSION) {
-            Installer::install();
-            Settings::set('schema_version', MCSEC_VERSION);
-        }
+        Installer::ensure();
         return Lock::with('mcsec_worker', function () use ($budgetSeconds) {
             @set_time_limit($budgetSeconds + 120);
             $deadline = microtime(true) + $budgetSeconds;
