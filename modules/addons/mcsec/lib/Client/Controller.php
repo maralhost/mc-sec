@@ -57,6 +57,16 @@ final class Controller
             return ['pagetitle' => $label, 'breadcrumb' => ['index.php?m=mcsec&p=scanner' => $label], 'templatefile' => 'templates/page', 'requirelogin' => false, 'forcessl' => true,
                 'vars' => ['mcsec_html' => Views::scanner()]];
         }
+        if (($_GET['p'] ?? '') === 'check') {
+            // public DNS records of a typed domain, read on an explicit POST: nothing is sent to that domain's server, nothing is stored
+            $res = null;
+            if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+                $res = \McSec\PublicCheck::run((string) ($_POST['domain'] ?? ''), (string) ($_SERVER['REMOTE_ADDR'] ?? ''));
+            }
+            $label = Lang::t('بررسی رایگان DNS');
+            return ['pagetitle' => $label, 'breadcrumb' => ['index.php?m=mcsec&p=check' => $label], 'templatefile' => 'templates/page', 'requirelogin' => false, 'forcessl' => true,
+                'vars' => ['mcsec_html' => Views::bare(Views::check($res, (string) ($_POST['domain'] ?? '')))]];
+        }
         if (($_GET['p'] ?? '') === 'badge' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
             // the picture a customer put on their own site: fixed words and one date, made here; no login, nothing changes
             $svg = \McSec\Shares::badgeSvg((string) ($_GET['t'] ?? ''), (string) ($_GET['l'] ?? 'fa'));

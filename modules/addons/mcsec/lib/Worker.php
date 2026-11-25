@@ -35,6 +35,7 @@ final class Worker
                 'digests' => fn () => self::every('digests', 1800) ? Notify::digests($deadline) : 'skip',
                 'deliver' => fn () => Notify::deliver($deadline + 10),
                 'ops' => fn () => ScanLog::deliverAlerts(),
+                'req_alerts' => fn () => Requests::deliverAlerts(),
                 'bots' => fn () => self::every('bots', 120) ? Notify::linkBots() : 'skip',
             ];
             foreach ($steps as $name => $fn) {

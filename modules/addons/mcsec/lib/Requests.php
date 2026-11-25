@@ -278,4 +278,39 @@ final class Requests
             return 0;
         }
     }
+
+    /**
+     * Worker: tells the admin's Bale / Telegram chat (the same one as the scan alerts) about requests made in the
+     * last six hours that were not announced yet. The message carries the kind and the account number only, never
+     * the customer's own words. Each request once: it is marked before anything is sent. @return int messages sent
+     */
+    public static function deliverAlerts(): int
+    {
+        $rows = Db::rows(Db::table('mod_mcsec_requests')->where('alerted_at', 0)->where('created_at', '>', Clock::now() - 6 * 3600)->orderBy('id')->limit(10));
+        if (!$rows) {
+            return 0;
+        }
+        $chats = array_filter(['bale' => trim(Settings::get('ops_alert_bale')), 'telegram' => trim(Settings::get('ops_alert_telegram'))], fn ($c) => preg_match('~^-?\d{3,20}$~', $c) === 1);
+        $names = Whmcs::clientNames(array_map(fn ($x) => (int) $x->client_id, $rows));
+        $sent = 0;
+        foreach ($rows as $x) {
+            if (Db::table('mod_mcsec_requests')->where('id', (int) $x->id)->where('alerted_at', 0)->update(['alerted_at' => Clock::now()]) !== 1) {
+                continue;
+            }
+            if (!$chats || !Settings::bool('request_alerts')) {
+                continue;
+            }
+            // i18n-skip-begin (for the admin's own chat, always Persian)
+            $text = 'MC-Sec | درخواست تازه‌ی کارشناس (شماره‌ی ' . (int) $x->id . ")\n" . 'نوع: ' . (self::KINDS[(string) $x->kind] ?? (string) $x->kind) . "\n"
+                . 'حساب #' . (int) $x->client_id . ' ' . ($names[(int) $x->client_id] ?? '') . ((int) $x->credits > 0 ? "\n" . 'اعتبار: ' . (int) $x->credits : '')
+                . "\n\n" . 'رسیدگی: پنل مدیر ← MC-Sec ← عملیات ← درخواست‌های کارشناس';
+            // i18n-skip-end
+            foreach ($chats as $which => $chat) {
+                if (Notify::bot($which, 'sendMessage', ['chat_id' => $chat, 'text' => $text])['ok']) {
+                    $sent++;
+                }
+            }
+        }
+        return $sent;
+    }
 }

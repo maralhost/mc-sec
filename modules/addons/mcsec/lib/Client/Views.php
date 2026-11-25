@@ -210,6 +210,34 @@ final class Views
         return self::root($body, false);
     }
 
+    /** «بررسی رایگان DNS» (no login): a one-field form, and what the public DNS records of that domain say. */
+    public static function check(?array $res, string $typed): string
+    {
+        if (!\McSec\PublicCheck::enabled()) {
+            return Ui::card(Ui::emptyState('lock', 'این صفحه در دسترس نیست', Lang::t('بررسی رایگان DNS فعلاً روشن نیست.')));
+        }
+        $out = '<div class="mcs-pagehead"><div><h2>' . Lang::t('بررسی رایگان DNS دامنه') . '</h2><p>' . Lang::t('نام دامنه را بنویسید تا ببینید رکوردهای عمومی DNS آن درباره‌ی جعل ایمیل و صدور گواهی چه می‌گویند. فقط DNS خوانده می‌شود؛ هیچ درخواستی به سرور سایت فرستاده نمی‌شود.') . '</p></div></div>';
+        $out .= Ui::card('<form method="post" action="index.php?m=mcsec&amp;p=check" class="mcs-filters" novalidate><label class="mcs-sr" for="mcs-cd">' . Lang::t('دامنه') . '</label>'
+            . '<input class="form-control" id="mcs-cd" name="domain" maxlength="253" dir="ltr" inputmode="url" autocomplete="off" placeholder="example.com" value="' . self::e(mb_substr($typed, 0, 253)) . '" required>'
+            . '<button type="submit" class="btn btn-primary">' . Ui::ico('search') . Lang::t('بررسی کن') . '</button></form>');
+        if ($res === null) {
+            return $out;
+        }
+        if (!$res['ok']) {
+            return $out . Ui::alert('warning', self::e(Lang::t((string) $res['error'])), 'alert');
+        }
+        $tone = ['ok' => ['ok', 'خوب'], 'warn' => ['warn', 'نیاز به توجه'], 'bad' => ['err', 'مشکل'], 'info' => ['muted', 'برای اطلاع']];
+        $rows = '';
+        $todo = 0;
+        foreach ((array) $res['rows'] as [$label, $state, $text]) {
+            $todo += in_array($state, ['bad', 'warn'], true) ? 1 : 0;
+            $rows .= '<tr>' . Ui::td('رکورد', '<strong dir="auto">' . self::e($label) . '</strong>') . Ui::td('وضعیت', Ui::chip($tone[$state][1], $tone[$state][0])) . Ui::td('توضیح', self::e($text)) . '</tr>';
+        }
+        return $out . Ui::card(Ui::table(['رکورد', 'وضعیت', 'توضیح'], $rows), Lang::t('رکوردهای DNS {domain}', ['domain' => Ui::ltr((string) $res['domain'])]), 'globe')
+            . Ui::card('<p>' . ($todo > 0 ? self::e(Lang::t('{n} مورد نیاز به توجه دارد.', ['n' => Text::fa($todo)])) . ' ' : '') . Lang::t('این فقط آن چیزی است که از DNS عمومی دیده می‌شود. گواهی SSL، سرآیندهای امنیتی، درگاه‌های باز و آسیب‌پذیری‌های سایت فقط پس از ورود و تأیید مالکیت دامنه بررسی می‌شوند.') . '</p>'
+                . '<a class="btn btn-primary" href="index.php?m=mcsec">' . Ui::ico('shield-check') . Lang::t('بررسی کامل سایت من') . '</a>', 'قدم بعدی', 'sparkle');
+    }
+
     /** A page for a visitor without a login (a shared report): the module's look, no menu, no script. */
     public static function bare(string $body): string
     {

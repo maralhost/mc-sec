@@ -63,12 +63,12 @@ final class Views
     private const GROUPS = [
         'نمای کلی' => ['overview'],
         'عملیات' => ['assets', 'scans', 'requests'],
-        'فروش و اعتبار' => ['pricing', 'credits', 'codes'],
+        'فروش و اعتبار' => ['pricing', 'credits', 'codes', 'revenue'],
         'راه‌اندازی' => ['setup', 'report', 'settings'],
         'سامانه' => ['log', 'changelog'],
     ];
 
-    private const SUBS = ['overview' => 'شمار کلی استفاده، سلامت موتورها و پرمصرف‌ترین حساب‌ها.', 'setup' => 'اتصال به موتور اسکن، هوش مصنوعی و ربات‌های اعلان.', 'pricing' => 'نوع‌های اسکن، هزینه‌ی هر کدام، بسته‌های اعتبار و پلن‌ها.',
+    private const SUBS = ['revenue' => 'فروش بسته‌ها، اعتبار فروخته و مصرف‌شده، و پرخریدترین حساب‌ها.', 'overview' => 'شمار کلی استفاده، سلامت موتورها و پرمصرف‌ترین حساب‌ها.', 'setup' => 'اتصال به موتور اسکن، هوش مصنوعی و ربات‌های اعلان.', 'pricing' => 'نوع‌های اسکن، هزینه‌ی هر کدام، بسته‌های اعتبار و پلن‌ها.',
         'credits' => 'قیمت ویژه‌ی یک گروه یا یک حساب، اعطای دستی اعتبار و دفتر تراکنش‌ها.', 'codes' => 'کدهای اعتبار و تخفیف، هدیه، دعوت و شارژ خودکار.', 'assets' => 'دارایی‌های مشتریان و تأیید دستی مالکیت.',
         'scans' => 'اسکن‌های در صف، در حال اجرا و تمام‌شده.', 'requests' => 'درخواست‌های مشتریان از کارشناس: پرسش، بررسی و رفع عیب، و تست دستی با اعلام قیمت.', 'report' => 'ظاهر گزارش PDF: لوگو، نام، رنگ، فونت و بخش‌ها.', 'settings' => 'هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است.', 'log' => 'خطاها و هشدارهای سامانه با کد پیگیری.', 'changelog' => 'هر نسخه چه چیزی را عوض کرده است.'];
 
@@ -99,6 +99,7 @@ final class Views
             'pricing' => self::pricing(),
             'credits' => self::credits(),
             'codes' => self::codes(),
+            'revenue' => self::revenue(),
             'assets' => self::assets(),
             'scans' => self::scans(),
             'settings' => self::settings(),
@@ -359,6 +360,58 @@ final class Views
             . $kpis . self::box('کد تازه', $add)
             . self::box('کدهای کمپین', $rows !== '' ? '<table class="table"><thead><tr><th>کد</th><th>اثر</th><th>برای</th><th>استفاده</th><th>مهلت</th><th></th></tr></thead><tbody>' . $rows . '</tbody></table>' : '<p class="mcsa-muted">هنوز کدی نساخته‌اید.</p>')
             . self::box('هدیه، دعوت و شارژ خودکار', self::form('codes', 'save_settings', self::fields('billing') . '<button class="btn btn-primary">ذخیره</button>'));
+    }
+
+    /** «درآمد و مصرف»: what was sold and what was used, in 30-day steps. Reading only; every number is a sum from our own tables. */
+    private static function revenue(): string
+    {
+        $now = Clock::now();
+        $step = 30 * 86400;
+        $period = function (int $i) use ($now, $step): array {
+            [$from, $to] = [$now - ($i + 1) * $step, $now - $i * $step];
+            $paid = Db::table('mod_mcsec_topups')->where('status', 'paid')->where('paid_at', '>', $from)->where('paid_at', '<=', $to);
+            $led = fn (string $kind) => (int) Db::table('mod_mcsec_ledger')->where('kind', $kind)->where('created_at', '>', $from)->where('created_at', '<=', $to)->sum('delta');
+            $manual = Db::table('mod_mcsec_requests')->where('kind', 'manual')->where('accepted_at', '>', $from)->where('accepted_at', '<=', $to);
+            return ['from' => $from, 'to' => $to, 'invoices' => (int) (clone $paid)->count(), 'amount' => (float) (clone $paid)->sum('amount'), 'sold' => (int) (clone $paid)->sum('credits'),
+                'spent' => -$led('spend'), 'refunded' => $led('refund'), 'manual' => (int) (clone $manual)->count(), 'manual_amount' => (float) (clone $manual)->sum('amount')];
+        };
+        $p = array_map($period, range(0, 5));
+        $delta = $p[1]['amount'] > 0 ? (int) round(100 * ($p[0]['amount'] - $p[1]['amount']) / $p[1]['amount']) : null;
+        $pending = Db::table('mod_mcsec_topups')->where('status', 'pending')->where('created_at', '>', $now - $step);
+        $k = [
+            'فروش بسته، ۳۰ روز' => Text::money($p[0]['amount']) . ($delta !== null ? ' (' . ($delta >= 0 ? '+' : '') . Text::fa($delta) . '٪)' : ''),
+            'فاکتور پرداخت‌شده، ۳۰ روز' => Text::fa($p[0]['invoices']),
+            'اعتبار فروخته / مصرف‌شده' => Text::fa($p[0]['sold']) . ' / ' . Text::fa($p[0]['spent']),
+            'اعتبار برگشتی، ۳۰ روز' => Text::fa($p[0]['refunded']),
+            'فاکتور باز بسته‌ها' => Text::fa((int) (clone $pending)->count()) . ' — ' . Text::money((float) (clone $pending)->sum('amount')),
+            'اعتبار خریده‌ی مصرف‌نشده' => Text::fa((int) Db::table('mod_mcsec_wallets')->sum('paid')),
+        ];
+        $kpis = '<div class="mcsa-kpis">';
+        foreach ($k as $l => $v) {
+            $kpis .= '<div><span>' . self::e($l) . '</span><strong>' . self::e($v) . '</strong></div>';
+        }
+        $kpis .= '</div>';
+        $rows = '';
+        foreach ($p as $x) {
+            $rows .= '<tr><td>' . self::e(Text::date($x['from'], false)) . ' تا ' . self::e(Text::date($x['to'], false)) . '</td><td>' . self::e(Text::fa($x['invoices'])) . '</td><td>' . self::e(Text::money($x['amount'])) . '</td><td>' . self::e(Text::fa($x['sold']))
+                . '</td><td>' . self::e(Text::fa($x['spent'])) . '</td><td>' . self::e(Text::fa($x['refunded'])) . '</td><td>' . self::e(Text::fa($x['manual'])) . ($x['manual_amount'] > 0 ? ' — ' . self::e(Text::money($x['manual_amount'])) : '') . '</td></tr>';
+        }
+        $types = '';
+        foreach (Db::rows(Db::table('mod_mcsec_scans')->where('queued_at', '>', $now - $step)->selectRaw('profile, COUNT(*) AS n, SUM(credits) AS c')->groupBy('profile')->orderByDesc('c')->limit(15)) as $t) {
+            $types .= '<tr><td>' . self::e(\McSec\Catalog::label((string) $t->profile)) . '</td><td>' . self::e(Text::fa((int) $t->n)) . '</td><td>' . self::e(Text::fa((int) $t->c)) . '</td></tr>';
+        }
+        $top = Db::rows(Db::table('mod_mcsec_topups')->where('status', 'paid')->where('paid_at', '>', $now - 3 * $step)->selectRaw('client_id, COUNT(*) AS n, SUM(amount) AS a, SUM(credits) AS c')->groupBy('client_id')->orderByDesc('a')->limit(10));
+        $names = Whmcs::clientNames(array_map(fn ($x) => (int) $x->client_id, $top));
+        $buyers = '';
+        foreach ($top as $x) {
+            $buyers .= '<tr><td><a href="clientssummary.php?userid=' . (int) $x->client_id . '">#' . (int) $x->client_id . ' ' . self::e($names[(int) $x->client_id] ?? '') . '</a></td><td>' . self::e(Text::fa((int) $x->n)) . '</td><td>' . self::e(Text::money((float) $x->a)) . '</td><td>' . self::e(Text::fa((int) $x->c)) . '</td></tr>';
+        }
+        $none = '<p class="mcsa-muted">در این بازه چیزی نیست.</p>';
+        return self::guide('<p>این صفحه فقط می‌خواند: فروش بسته‌های اعتبار (فاکتورهای پرداخت‌شده‌ی WHMCS که این ماژول ساخته)، اعتباری که فروخته و مصرف شده، و تست‌های دستی پذیرفته‌شده. هر ردیف جدول یک بازه‌ی ۳۰ روزه است، از تازه‌ترین.</p>'
+            . '<ul><li><strong>اعتبار خریده‌ی مصرف‌نشده</strong> بدهی شماست: اعتباری که پولش گرفته شده و هنوز اسکنی با آن اجرا نشده.</li><li>درآمد پلن‌ها (محصول‌های WHMCS) این‌جا نیست؛ آن را در گزارش‌های خود WHMCS ببینید.</li><li>مبلغ‌ها به ارز پیش‌فرض WHMCS است.</li></ul>')
+            . $kpis . self::box('شش بازه‌ی ۳۰ روزه', '<table class="table"><thead><tr><th>بازه</th><th>فاکتور پرداخت‌شده</th><th>مبلغ</th><th>اعتبار فروخته</th><th>اعتبار مصرف‌شده</th><th>اعتبار برگشتی</th><th>تست دستی پذیرفته</th></tr></thead><tbody>' . $rows . '</tbody></table>')
+            . self::box('مصرف بر اساس نوع اسکن (۳۰ روز)', $types !== '' ? '<table class="table"><thead><tr><th>نوع اسکن</th><th>اسکن</th><th>اعتبار</th></tr></thead><tbody>' . $types . '</tbody></table>' : $none)
+            . self::box('پرخریدترین حساب‌ها (۹۰ روز)', $buyers !== '' ? '<table class="table"><thead><tr><th>حساب</th><th>خرید</th><th>مبلغ</th><th>اعتبار</th></tr></thead><tbody>' . $buyers . '</tbody></table>' : $none);
     }
 
     private static function assets(): string

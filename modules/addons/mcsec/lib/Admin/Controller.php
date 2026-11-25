@@ -29,7 +29,7 @@ use McSec\Worker;
  */
 final class Controller
 {
-    public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'قاعده‌ها و اعطا', 'codes' => 'کدها', 'assets' => 'دارایی‌ها و تأیید',
+    public const PAGES = ['overview' => 'نمای کلی', 'setup' => 'راه‌اندازی موتورها', 'pricing' => 'قیمت و پلن', 'credits' => 'قاعده‌ها و اعطا', 'codes' => 'کدها', 'revenue' => 'درآمد و مصرف', 'assets' => 'دارایی‌ها و تأیید',
         'scans' => 'صف اسکن', 'requests' => 'درخواست‌های کارشناس', 'report' => 'قالب گزارش', 'settings' => 'تنظیمات', 'log' => 'گزارش فنی', 'changelog' => 'تغییرات نسخه‌ها'];
 
     private const ACTIONS = [

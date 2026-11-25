@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.21.0';
+    public const SCHEMA = '0.22.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -559,6 +559,8 @@ final class Installer
         $col('mod_mcsec_assets', 'cdn', fn ($t) => $t->string('cdn', 40)->default(''));
         $col('mod_mcsec_assets', 'cdn_checked_at', fn ($t) => $t->integer('cdn_checked_at')->default(0));
         $col('mod_mcsec_assets', 'origin_id', fn ($t) => $t->integer('origin_id')->default(0));
+        // 0.22.0: when the admin's chat was told about a new request (0 = not yet)
+        $col('mod_mcsec_requests', 'alerted_at', fn ($t) => $t->integer('alerted_at')->default(0));
         // 0.21.0: the account's own name and contact line on its PDF reports (white label)
         $col('mod_mcsec_accounts', 'brand_name', fn ($t) => $t->string('brand_name', 60)->default(''));
         $col('mod_mcsec_accounts', 'brand_contact', fn ($t) => $t->string('brand_contact', 160)->default(''));
