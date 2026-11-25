@@ -54,8 +54,15 @@ final class Monitor
         if (!\McSec\Egress::alive()) {
             return ['checked' => 0, 'skip' => 'egress proxy down']; // never from this server's own address; no site is called down because of our proxy
         }
-        $res = self::probe($targets, 'https', min(10, max(3, (int) ($deadline - microtime(true)))));
-        $retry = array_filter($targets, fn ($t, $id) => !$res[$id]['ok'] && $t['ip'] !== '', ARRAY_FILTER_USE_BOTH);
+        // every location at once, when the admin asked for it and at least two can be believed
+        $locs = Settings::bool('monitor_locations') && \McSec\Egress::on() ? \McSec\Egress::healthy() : [];
+        if (count($locs) >= 2) {
+            $res = self::probeAll($targets, $locs, min(10, max(3, (int) ($deadline - microtime(true)))), $deadline);
+            $retry = [];
+        } else {
+            $res = self::probe($targets, 'https', min(10, max(3, (int) ($deadline - microtime(true)))));
+            $retry = array_filter($targets, fn ($t, $id) => !$res[$id]['ok'] && $t['ip'] !== '', ARRAY_FILTER_USE_BOTH);
+        }
         if ($retry && microtime(true) < $deadline) {
             foreach (self::probe($retry, 'http', 8) as $id => $x) {
                 if ($x['ok']) {
@@ -153,6 +160,75 @@ final class Monitor
         return $out + ($reqs ? Http::multi($reqs, $timeout, true) : []);
     }
 
+    /**
+     * Each site asked from every location at the same moment (https, then http for what did not answer). The site's
+     * result is its best one; 'loc' says from where it answered and from where it did not.
+     * @param array<int,array{row:object,ip:string}> $targets
+     */
+    private static function probeAll(array $targets, array $locs, int $timeout, float $deadline): array
+    {
+        $out = [];
+        $by = [];
+        foreach (['https' => 443, 'http' => 80] as $scheme => $port) {
+            $reqs = [];
+            foreach ($targets as $id => $t) {
+                if ($t['ip'] === '') {
+                    $out[$id] = ['ok' => false, 'status' => 0, 'error' => 'نام دامنه به هیچ IPی اشاره نمی‌کند', 'ms' => 0];
+                    continue;
+                }
+                // http only for the pairs https did not settle
+                $todo = array_values(array_filter($locs, fn ($l) => !self::isUp($by[$id][$l['name']] ?? [])));
+                if ($scheme === 'https' || $todo) {
+                    $host = (string) $t['row']->value;
+                    $reqs[$id] = ['url' => $scheme . '://' . $host . '/', 'resolve' => $host . ':' . $port . ':' . (str_contains($t['ip'], ':') ? '[' . $t['ip'] . ']' : $t['ip'])];
+                }
+            }
+            if (!$reqs || ($scheme === 'http' && microtime(true) > $deadline)) {
+                continue;
+            }
+            foreach (Http::multiVia($reqs, $scheme === 'https' ? $timeout : 8, $locs) as $id => $per) {
+                foreach ($per as $name => $x) {
+                    if (!self::isUp($by[$id][$name] ?? [])) {
+                        $by[$id][$name] = $x;
+                    }
+                }
+            }
+        }
+        foreach ($by as $id => $per) {
+            $ok = array_keys(array_filter($per, fn ($x) => self::isUp($x)));
+            $bad = array_values(array_diff(array_keys($per), $ok));
+            $best = $ok ? $per[$ok[0]] : reset($per);
+            $out[$id] = $best + ['loc' => ['ok' => $ok, 'bad' => $bad]];
+        }
+        return $out;
+    }
+
+    /**
+     * A site that answers, but not from every location: after two passes in a row with the same picture the customer
+     * is told once from where it cannot be reached. Forgotten as soon as every location reaches it (or none does:
+     * that is an outage, with its own alert).
+     */
+    private static function where(object $r, array $x, int $now): void
+    {
+        $key = 'monloc:' . (int) $r->id;
+        $bad = array_values((array) ($x['loc']['bad'] ?? []));
+        if (!self::isUp($x) || !$bad) {
+            if (Kv::get($key) !== null) {
+                Kv::forget($key);
+            }
+            return;
+        }
+        $st = Kv::json($key);
+        $same = ($st['bad'] ?? null) === $bad;
+        $n = ($same ? (int) ($st['n'] ?? 0) : 0) + 1;
+        $told = $same && !empty($st['told']);
+        if ($n >= 2 && !$told) {
+            Notify::event((int) $r->client_id, 'site_partial', ['asset' => (string) $r->value, 'asset_id' => (int) $r->id, 'bad' => $bad, 'ok' => array_values((array) ($x['loc']['ok'] ?? []))], 'partial:' . $r->id . ':' . $now);
+            $told = true;
+        }
+        Kv::setJson($key, ['bad' => $bad, 'ok' => array_values((array) ($x['loc']['ok'] ?? [])), 'n' => $n, 'told' => $told, 'at' => $now], 3 * 86400);
+    }
+
     private static function isUp(array $x): bool
     {
         return !empty($x['ok']) && (int) ($x['status'] ?? 0) > 0 && (int) $x['status'] < 500;
@@ -162,6 +238,7 @@ final class Monitor
     private static function apply(object $r, array $x, int $now): string
     {
         $up = self::isUp($x);
+        self::where($r, $x, $now);
         if ($up) {
             $was = (string) $r->mon_status;
             Db::table('mod_mcsec_assets')->where('id', $r->id)->update(['mon_status' => 'up', 'mon_fails' => 0, 'mon_note' => '', 'mon_since' => $was === 'up' && (int) $r->mon_since > 0 ? (int) $r->mon_since : $now]);
@@ -230,6 +307,12 @@ final class Monitor
                 : Lang::t('از {since}', ['since' => Text::ago((int) $a->mon_since)]);
             $o = (int) ($a->origin_ok_at ?? 0) > 0 ? Kv::get('monorigin:' . (int) $a->id) : null;
             return ['از دسترس خارج', 'err', $base . ($o === 'up' ? ' — ' . Lang::t('سرور خودتان جواب می‌دهد؛ مشکل از CDN یا تنظیم آن است') : ($o === 'down' ? ' — ' . Lang::t('سرور خودتان هم جواب نمی‌دهد') : ''))];
+        }
+        if (Settings::bool('monitor_locations')) {
+            $w = Kv::json('monloc:' . (int) $a->id);
+            if (!empty($w['bad']) && (int) ($w['n'] ?? 0) >= 2) {
+                return ['در دسترس، نه از همه‌جا', 'warn', Lang::t('از {bad} در دسترس نیست؛ از {ok} هست', ['bad' => implode('، ', array_map('strval', (array) $w['bad'])), 'ok' => implode('، ', array_map('strval', (array) ($w['ok'] ?? [])))])];
+            }
         }
         return ['در دسترس', 'ok', Lang::t('آخرین بررسی {when}', ['when' => Text::ago((int) $a->mon_at)])];
     }

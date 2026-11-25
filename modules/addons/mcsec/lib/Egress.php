@@ -179,7 +179,16 @@ final class Egress
             return true;
         }
         if (self::$dial !== null) {
-            return self::route() !== [];
+            foreach (self::route() as $loc) {
+                $s = (self::$dial)($loc, '127.0.0.1', 1);
+                if (is_resource($s)) {
+                    fclose($s);
+                }
+                if ($s !== 'proxy_down') {
+                    return true;
+                }
+            }
+            return false;
         }
         $k = 'egress:alive';
         $c = Kv::get($k);
@@ -198,6 +207,33 @@ final class Egress
         }
         Kv::set($k, $ok ? '1' : '0', 30);
         return $ok;
+    }
+
+    /**
+     * Locations that can be believed right now: each reaches this WHMCS's own address (asked at most every five
+     * minutes). A location that cannot even reach us says nothing about a customer's site.
+     */
+    public static function healthy(): array
+    {
+        $host = (string) parse_url(Whmcs::systemUrl(), PHP_URL_HOST);
+        $ip = $host !== '' ? (filter_var($host, FILTER_VALIDATE_IP) ? $host : (Net::ips($host)[0] ?? '')) : '';
+        $out = [];
+        foreach (self::parse()['ok'] as $loc) {
+            $k = 'egress:ok:' . substr(sha1($loc['host'] . ':' . $loc['port'] . '|' . $ip), 0, 16);
+            $c = Kv::get($k);
+            if ($c === null) {
+                $s = $ip === '' ? false : (self::$dial !== null ? (self::$dial)($loc, $ip, 443) : self::socks($loc, $ip, 443, 5.0));
+                $c = is_resource($s) ? '1' : '0';
+                if (is_resource($s)) {
+                    fclose($s);
+                }
+                Kv::set($k, $c, 300);
+            }
+            if ($c === '1') {
+                $out[] = $loc;
+            }
+        }
+        return $out;
     }
 
     /**

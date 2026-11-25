@@ -30,6 +30,7 @@ final class Notify
         'kev_alert' => ['آسیب‌پذیری در حال بهره‌برداری (KEV)', ['email', 'telegram', 'bale', 'webhook']],
         'site_down' => ['از دسترس خارج شدن سایت', ['email', 'telegram', 'bale', 'webhook']],
         'site_up' => ['برگشتن سایت', ['email', 'telegram', 'bale', 'webhook']],
+        'site_partial' => ['در دسترس نبودن سایت از یک لوکیشن', ['email', 'telegram', 'bale', 'webhook']],
         'ssl_expiring' => ['نزدیک شدن انقضای گواهی SSL', ['email', 'telegram', 'bale', 'webhook']],
         'billing' => ['هدیه، دعوت و شارژ خودکار', ['email']],
         'domain_expiring' => ['نزدیک شدن انقضای دامنه', ['email', 'telegram', 'bale']],
@@ -248,6 +249,12 @@ final class Notify
                     'lines' => [!empty($d['note']) ? Lang::t('دو بررسی پشت سر هم پاسخی نگرفت: {note}.', ['note' => $d['note']]) : Lang::t('دو بررسی پشت سر هم پاسخی نگرفت.'), Lang::t('وقتی دوباره در دسترس شد خبر می‌دهیم.'),
                         ($d['origin'] ?? '') === 'up' ? Lang::t('سرور خودتان جواب می‌دهد؛ مشکل از CDN یا تنظیم آن است.') : (($d['origin'] ?? '') === 'down' ? Lang::t('سرور خودتان هم جواب نمی‌دهد.') : '')],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'err'];
+            case 'site_partial':
+                $names = fn ($v) => implode(Lang::fa() ? '، ' : ', ', array_map(fn ($s) => Text::name((string) $s, 24), array_slice((array) $v, 0, 5)));
+                return ['title' => Lang::t('{asset} از {bad} در دسترس نیست', ['asset' => $asset, 'bad' => $names($d['bad'] ?? [])]),
+                    'lines' => [Lang::t('دو بررسی پشت سر هم از این لوکیشن پاسخی نگرفت، ولی از {ok} در دسترس است.', ['ok' => $names($d['ok'] ?? [])]),
+                        Lang::t('اگر عمدی نیست، محدودیت جغرافیایی یا فایروال CDN و سرور را ببینید؛ شاید هم آن شبکه سایت را بسته باشد.')],
+                    'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'warn'];
             case 'site_up':
                 $m = intdiv(max(0, (int) ($d['down_for'] ?? 0)), 60);
                 return ['title' => Lang::t('{asset} دوباره در دسترس است', ['asset' => $asset]),

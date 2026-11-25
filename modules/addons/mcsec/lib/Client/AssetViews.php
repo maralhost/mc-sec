@@ -135,6 +135,9 @@ final class AssetViews
         if ($mon !== null && $mon[1] === 'err') {
             $out .= Ui::alert('danger', Ui::plain(Lang::t('این سایت از دسترس خارج است ({why}). وقتی برگردد خبرتان می‌کنیم.', ['why' => $mon[2]])), 'alert');
         }
+        if ($mon !== null && $mon[1] === 'warn') {
+            $out .= Ui::alert('warning', Ui::plain(Lang::t('این سایت در دسترس است، ولی نه از همه‌جا: {why}.', ['why' => $mon[2]])), 'globe');
+        }
         $out .= '<div class="mcs-grid2">' . Ui::card(Ui::gauge($score, $score < 0 ? Lang::t('هنوز اسکنی تمام نشده است.') : self::e(Lang::t('آخرین اسکن: {when}', ['when' => Views::when((int) $a->last_scan_at)])), $partial !== '')
                 . ($partial !== '' && $score >= 0 ? '<p class="mcs-small">' . Ui::plain($partial) . '</p>' : ''), 'امتیاز این دارایی', 'shield-check')
             . Ui::card(Ui::sevCounts($counts, 'index.php?m=mcsec&p=findings&asset=' . (int) $a->id) . Ui::facts([

@@ -240,6 +240,67 @@ final class Http
         return $out;
     }
 
+    /**
+     * The same small GETs from several egress locations at once (monitoring that wants to know from where a site
+     * answers). Never direct: every transfer carries one location's proxy.
+     * @param array<int|string,array{url:string,resolve?:string}> $reqs
+     * @param array<int,array{name:string,host:string,port:int,user:string,pass:string}> $locs
+     * @return array<int|string,array<string,array{ok:bool,status:int,error:string,ms:int}>> request key => location name => result
+     */
+    public static function multiVia(array $reqs, int $timeout, array $locs): array
+    {
+        $out = [];
+        if (!$locs) {
+            return $out;
+        }
+        if (self::$mock !== null || !function_exists('curl_multi_init')) {
+            foreach ($reqs as $k => $r) {
+                foreach ($locs as $loc) {
+                    $x = self::send('GET', $r['url'], ['Accept' => 'text/html,*/*;q=0.8'], null, ['timeout' => $timeout, 'connect' => min(5, $timeout), 'verify' => false, 'max_bytes' => 16384, 'resolve' => $r['resolve'] ?? '', 'egress' => true, 'proxy' => $loc]);
+                    $out[$k][$loc['name']] = ['ok' => $x['status'] > 0, 'status' => (int) $x['status'], 'error' => (string) $x['error'], 'ms' => (int) $x['ms']];
+                }
+            }
+            return $out;
+        }
+        $mh = curl_multi_init();
+        $handles = [];
+        foreach ($reqs as $k => $r) {
+            foreach ($locs as $loc) {
+                $ch = curl_init();
+                curl_setopt_array($ch, [
+                    CURLOPT_URL => $r['url'], CURLOPT_HTTPGET => true, CURLOPT_HTTPHEADER => ['Accept: text/html,*/*;q=0.8'], CURLOPT_FOLLOWLOCATION => false, CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_CONNECTTIMEOUT => min(5, $timeout), CURLOPT_TIMEOUT => $timeout, CURLOPT_SSL_VERIFYPEER => false, CURLOPT_SSL_VERIFYHOST => 0, CURLOPT_RANGE => '0-16383',
+                    CURLOPT_PROTOCOLS => CURLPROTO_HTTP | CURLPROTO_HTTPS, CURLOPT_USERAGENT => self::ua(), CURLOPT_ENCODING => '',
+                ] + Egress::curl($loc));
+                if (!empty($r['resolve'])) {
+                    curl_setopt($ch, CURLOPT_RESOLVE, [(string) $r['resolve']]);
+                }
+                curl_multi_add_handle($mh, $ch);
+                $handles[] = [$ch, $k, $loc['name']];
+            }
+        }
+        $running = 0;
+        do {
+            $st = curl_multi_exec($mh, $running);
+            if ($running > 0) {
+                curl_multi_select($mh, 1.0);
+            }
+        } while ($running > 0 && $st === CURLM_OK);
+        $codes = [];
+        while (($info = curl_multi_info_read($mh)) !== false) {
+            $codes[spl_object_id($info['handle'])] = (int) $info['result'];
+        }
+        foreach ($handles as [$ch, $k, $name]) {
+            $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            $code = $codes[spl_object_id($ch)] ?? 0;
+            $out[$k][$name] = ['ok' => $status > 0, 'status' => $status, 'error' => $status > 0 ? '' : ($code !== 0 ? curl_strerror($code) : 'no answer'), 'ms' => (int) round((float) curl_getinfo($ch, CURLINFO_TOTAL_TIME) * 1000)];
+            curl_multi_remove_handle($mh, $ch);
+            curl_close($ch);
+        }
+        curl_multi_close($mh);
+        return $out;
+    }
+
     /** Cookies set by a response, as "name=value; name2=value2" (engine sessions). */
     public static function cookies(array $resp): string
     {
