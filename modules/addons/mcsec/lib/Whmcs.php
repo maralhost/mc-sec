@@ -99,6 +99,23 @@ final class Whmcs
         return $out;
     }
 
+    /** The users linked to one account (owner first), for handing a finding to one of them. @return array<int,string> id => name */
+    public static function accountUsers(int $clientId): array
+    {
+        $ids = [];
+        foreach (Db::rows(Db::table('tblusers_clients')->where('client_id', $clientId)->orderByDesc('owner')->orderBy('auth_user_id')->limit(200)->select(['auth_user_id'])) as $r) {
+            $ids[] = (int) $r->auth_user_id;
+        }
+        $names = self::userNames($ids);
+        $out = [];
+        foreach ($ids as $id) {
+            if (isset($names[$id])) {
+                $out[$id] = $names[$id];
+            }
+        }
+        return $out;
+    }
+
     /** Services on the mcsec provisioning module (plans), for the admin's plan list. */
     public static function planProducts(): array
     {

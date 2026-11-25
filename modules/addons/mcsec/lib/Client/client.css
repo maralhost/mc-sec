@@ -700,3 +700,8 @@ body.lagom .mcs a.mcs-stat{border-color:transparent}html.lagom-dark-mode .mcs a.
 .mcs .mcs-setup-back{margin-block-end:var(--t-gap)}
 .mcs .mcs-linkbtn{display:inline-flex;align-items:center;gap:.4rem;border:0;background:none;padding:.2rem 0;color:var(--t-muted);font:inherit;font-size:.85rem;cursor:pointer}
 .mcs .mcs-linkbtn:hover,.mcs .mcs-linkbtn:focus-visible{color:var(--t-primary);text-decoration:underline}
+/* 0.20.0 */
+.mcs .mcs-pills{display:flex;flex-wrap:wrap;gap:.4rem;margin-block:.2rem var(--t-gap)}
+.mcs a.mcs-pill{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .7rem;border:1px solid var(--t-line);border-radius:999px;font-size:.85rem;color:var(--t-text);text-decoration:none;background:var(--t-bg)}
+.mcs a.mcs-pill:hover,.mcs a.mcs-pill:focus-visible{border-color:var(--t-primary);color:var(--t-primary)}
+.mcs a.mcs-pill.is-on{background:var(--t-primary);border-color:var(--t-primary);color:#fff}

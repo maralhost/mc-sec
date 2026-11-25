@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.19.0';
+    public const SCHEMA = '0.20.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -170,6 +170,7 @@ final class Installer
             $t->integer('last_seen_at')->default(0);
             $t->integer('fixed_at')->default(0);
             $t->integer('reopened')->default(0);
+            $t->integer('assignee')->default(0);     // user id of the account who takes care of it
             $t->unique(['client_id', 'fp']);
             $t->index(['client_id', 'status', 'severity']);
         });
@@ -543,6 +544,8 @@ final class Installer
         $col('mod_mcsec_assets', 'cdn', fn ($t) => $t->string('cdn', 40)->default(''));
         $col('mod_mcsec_assets', 'cdn_checked_at', fn ($t) => $t->integer('cdn_checked_at')->default(0));
         $col('mod_mcsec_assets', 'origin_id', fn ($t) => $t->integer('origin_id')->default(0));
+        // 0.20.0: the user of the account who takes care of a finding (0 = nobody)
+        $col('mod_mcsec_findings', 'assignee', fn ($t) => $t->integer('assignee')->default(0));
         // 0.18.0: the site was shown to be served by its origin server (requests may go straight there), and whether its certificate is ignored
         $col('mod_mcsec_assets', 'origin_ok_at', fn ($t) => $t->integer('origin_ok_at')->default(0));
         $col('mod_mcsec_assets', 'origin_tls_skip', fn ($t) => $t->integer('origin_tls_skip')->default(0));

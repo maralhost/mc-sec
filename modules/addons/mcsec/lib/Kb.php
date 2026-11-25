@@ -1393,6 +1393,12 @@ curl -s -o /dev/null -w "%{http_code}\n" https://example.com/path'],
         ['~disclos|error|exception|leak|verbose|sensitive|exposure~', 'info-disclosure'],
     ];
 
+    /** @return string[] every key the knowledge base has */
+    public static function keys(): array
+    {
+        return array_keys(self::ENTRIES);
+    }
+
     /** The entry for a kb key in the reader's language (English from lang/en/kb_*.php), or null when the key is unknown. */
     public static function get(string $key): ?array
     {

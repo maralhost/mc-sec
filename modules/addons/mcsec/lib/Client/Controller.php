@@ -400,6 +400,9 @@ final class Controller
             case 'finding_status':
                 $r = Findings::setStatus($who, $int('finding'), $in('status'), $in('note'));
                 return ['flash' => $r['ok'] ? 'ok:' . Lang::t('وضعیت یافته ذخیره شد.') : 'err:' . $r['error']];
+            case 'finding_assign':
+                $r = Findings::assign($who, $int('finding'), $int('user'));
+                return ['flash' => $r['ok'] ? 'ok:' . ($int('user') > 0 ? Lang::t('یافته واگذار شد.') : Lang::t('واگذاری برداشته شد.')) : 'err:' . Lang::t((string) $r['error'])];
             case 'finding_retest':
                 $r = Findings::retest($who, $int('finding'));
                 return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=scan&id=' . (int) $r['scan_id'] . '&started=1'] : ['flash' => 'err:' . $r['error']];

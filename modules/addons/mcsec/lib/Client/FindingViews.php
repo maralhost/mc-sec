@@ -37,13 +37,17 @@ final class FindingViews
             'status' => (string) ($_GET['status'] ?? 'open'), 'severity' => (string) ($_GET['severity'] ?? ''), 'asset' => (int) Text::toAscii((string) ($_GET['asset'] ?? '0')),
             'scan' => (int) Text::toAscii((string) ($_GET['scan'] ?? '0')), 'new' => (int) Text::toAscii((string) ($_GET['new'] ?? '0')),
             'q' => mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80), 'page' => (int) Text::toAscii((string) ($_GET['page'] ?? '1')),
+            'kb' => preg_match('~^[a-z0-9._-]{1,64}$~', (string) ($_GET['kb'] ?? '')) ? (string) $_GET['kb'] : '',
+            'mine' => Settings::bool('finding_assign') && !empty($_GET['mine']) ? (int) $ctx['who']['user_id'] : 0,
+            'overdue' => array_filter(Findings::deadlineDays()) && !empty($_GET['overdue']) ? 1 : 0,
         ];
+        $grouped = !empty($_GET['group']) && $f['status'] === 'open';
         $res = Findings::search($cid, $f);
         $any = Db::table('mod_mcsec_findings')->where('client_id', $cid)->exists();
         $out = Ui::guide(Lang::t('<p>هر مشکلی که اسکن‌ها پیدا کرده‌اند یک بار این‌جا می‌آید (اگر دوباره دیده شود تکرار نمی‌شود) و از مهم‌ترین مرتب است. روی هر کدام بزنید تا ببینید <strong>چرا مهم است و چطور رفعش کنید</strong>.</p>')
             . Lang::t('<ul><li><strong>رفع‌شده</strong> را فقط خود سامانه می‌زند: وقتی اسکن بعدی آن را دیگر نبیند. پس از رفع، «رفع کردم، دوباره بسنج» را بزنید.</li><li>اگر موردی برایتان پذیرفتنی است یا اشتباه است، با نوشتن دلیل «ریسک پذیرفته» یا «مثبت کاذب» کنید؛ از امتیاز و اعلان‌ها بیرون می‌رود.</li></ul>'), !$any);
         $base = 'index.php?m=mcsec&p=findings';
-        $keep = fn (array $over) => $base . '&' . http_build_query(array_filter(array_merge(['status' => $f['status'], 'severity' => $f['severity'], 'asset' => $f['asset'] ?: '', 'new' => $f['new'] ?: '', 'q' => $f['q'], 'scan' => $f['scan'] ?: ''], $over), fn ($v) => $v !== '' && $v !== null));
+        $keep = fn (array $over) => $base . '&' . http_build_query(array_filter(array_merge(['status' => $f['status'], 'severity' => $f['severity'], 'asset' => $f['asset'] ?: '', 'new' => $f['new'] ?: '', 'q' => $f['q'], 'scan' => $f['scan'] ?: '', 'kb' => $f['kb'], 'mine' => $f['mine'] ? '1' : '', 'overdue' => $f['overdue'] ?: ''], $over), fn ($v) => $v !== '' && $v !== null));
         $seg = [];
         foreach (['open' => 'باز', 'fixed' => 'رفع‌شده', 'accepted' => 'ریسک پذیرفته', 'false_positive' => 'مثبت کاذب', 'all' => 'همه'] as $k => $l) {
             $seg[$keep(['status' => $k, 'page' => ''])] = self::e($l);
@@ -62,8 +66,22 @@ final class FindingViews
             . '<label class="mcs-sr" for="mcs-fa">' . Lang::t('دارایی') . '</label>' . Ui::select('asset', $assets, (string) $f['asset'], 'mcs-fa')
             . ($f['new'] > 0 ? '<input type="hidden" name="new" value="' . (int) $f['new'] . '">' : '')
             . '<button type="submit" class="btn btn-default">' . Ui::ico('search') . Lang::t('اعمال') . '</button>'
-            . (($f['severity'] !== '' || $f['asset'] > 0 || $f['q'] !== '' || $f['new'] > 0 || $f['scan'] > 0) ? '<a class="btn btn-link" href="' . self::e($base . '&status=' . $f['status']) . '">' . Lang::t('پاک کردن فیلترها') . '</a>' : '') . '</form>';
+            . (($f['severity'] !== '' || $f['asset'] > 0 || $f['q'] !== '' || $f['new'] > 0 || $f['scan'] > 0 || $f['kb'] !== '' || $f['mine'] || $f['overdue']) ? '<a class="btn btn-link" href="' . self::e($base . '&status=' . $f['status']) . '">' . Lang::t('پاک کردن فیلترها') . '</a>' : '') . '</form>';
         $out .= Ui::seg($seg, $keep(['status' => $f['status'], 'page' => ''])) . $filters;
+        // quick views of the open list: by fix, mine, past the deadline
+        if ($f['status'] === 'open' && $any) {
+            $late = Findings::overdueCount($cid);
+            $pill = fn (string $href, string $icon, string $text, bool $on) => '<a class="mcs-pill' . ($on ? ' is-on' : '') . '" href="' . self::e($href) . '"' . ($on ? ' aria-current="true"' : '') . '>' . Ui::ico($icon) . self::e($text) . '</a>';
+            $out .= '<div class="mcs-pills">' . $pill($grouped ? $base . '&status=open' : $base . '&status=open&group=1', 'layers', Lang::t('بر اساس راه رفع'), $grouped)
+                . (Settings::bool('finding_assign') ? $pill($keep(['mine' => $f['mine'] ? '' : '1', 'page' => '']), 'check', Lang::t('کارهای من'), (bool) $f['mine']) : '')
+                . ($late > 0 || $f['overdue'] ? $pill($keep(['overdue' => $f['overdue'] ? '' : '1', 'page' => '']), 'clock', Lang::t('مهلت گذشته ({n})', ['n' => Text::fa($late)]), (bool) $f['overdue']) : '') . '</div>';
+        }
+        if ($f['kb'] !== '' && ($k = Kb::get($f['kb']))) {
+            $out .= Ui::alert('info', self::e(Lang::t('فقط یافته‌هایی که راه رفعشان «{title}» است.', ['title' => Lang::t((string) $k['title'])])), 'info');
+        }
+        if ($grouped) {
+            return $out . self::grouped($ctx, $cid);
+        }
         if ($f['new'] > 0) {
             $out .= Ui::alert('info', self::e(Lang::t('فقط یافته‌هایی که در {n} روز اخیر برای اولین بار دیده شدند.', ['n' => Text::fa($f['new'])])), 'info');
         }
@@ -72,13 +90,14 @@ final class FindingViews
                 : Ui::emptyState('shield-check', 'هنوز یافته‌ای نیست', Lang::t('پس از اولین اسکن، مشکل‌های پیدا شده این‌جا می‌آیند.'), $ctx['manage'] ? '<a class="btn btn-primary" href="index.php?m=mcsec&amp;p=scans">' . Lang::t('اسکن بگیرید') . '</a>' : ''));
         }
         $rows = '';
+        $names = Settings::bool('finding_assign') ? \McSec\Whmcs::userNames(array_map(fn ($r) => (int) ($r->assignee ?? 0), $res['rows'])) : [];
         foreach ($res['rows'] as $r) {
             $rows .= '<tr>' . Ui::td('شدت', Ui::sev((string) $r->severity))
                 . Ui::td('یافته', '<a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $r->id . '" class="mcs-finding-link">' . self::e($r->title) . '</a>'
                     . ((int) ($r->kev ?? 0) === 1 && $r->status === 'open' ? ' ' . Ui::chip('در حال بهره‌برداری', 'err') : '')
                     . ((int) $r->first_seen_at > \McSec\Clock::now() - 7 * 86400 && $r->status === 'open' ? ' ' . Ui::chip('تازه', 'warn') : ''))
                 . Ui::td('محل', Ui::ltr($r->location) . '<small class="mcs-muted">' . self::e($r->asset_label !== '' ? $r->asset_label : '') . '</small>')
-                . Ui::td('وضعیت', self::statusChip($r))
+                . Ui::td('وضعیت', self::statusChip($r) . self::dueChip($r, true) . ((int) ($r->assignee ?? 0) > 0 && isset($names[(int) $r->assignee]) ? '<small class="mcs-muted">' . self::e($names[(int) $r->assignee]) . '</small>' : ''))
                 . Ui::td('دیده‌شده', self::e(Views::when((int) $r->last_seen_at))) . '</tr>';
         }
         // one click for everything that is still open, instead of a click on every finding
@@ -87,6 +106,39 @@ final class FindingViews
         $csv = Settings::bool('export_csv') ? ' · <a href="' . self::e($keep(['page' => '', 'csv' => '1'])) . '" download>' . Ui::ico('file') . Lang::t('خروجی CSV') . '</a>' : '';
         return $out . Ui::card(Ui::table(['شدت', 'یافته', 'محل', 'وضعیت', 'آخرین بار'], $rows) . Ui::pager($keep(['page' => '']), $res['page'], $res['pages']),
             '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . Lang::t('{n} یافته', ['n' => self::e(Text::fa($res['total']))]) . $csv . '</p>' . ($again !== '' ? '<div class="mcs-actions">' . $again . '<span class="mcs-small mcs-muted">' . Lang::t('رایگان است؛ یافته‌ای که دیگر دیده نشود خودش «رفع‌شده» می‌شود.') . '</span></div>' : '');
+    }
+
+    /** «مهلت گذشته» or the days left, for an open finding with a deadline; '' otherwise. */
+    public static function dueChip(object $f, bool $lateOnly = false): string
+    {
+        $due = Findings::due($f);
+        if ($due === 0) {
+            return '';
+        }
+        $left = (int) ceil(($due - \McSec\Clock::now()) / 86400);
+        if ($left <= 0) {
+            return ' ' . Ui::chip('مهلت گذشته', 'err');
+        }
+        return $lateOnly && $left > 7 ? '' : ' ' . Ui::chip(Lang::t('{n} روز مهلت', ['n' => Text::fa($left)]), $left <= 7 ? 'warn' : 'muted');
+    }
+
+    /** Open findings as jobs: one row per fix, most severe first. */
+    private static function grouped(array $ctx, int $cid): string
+    {
+        $rows = '';
+        foreach (Findings::groups($cid) as $g) {
+            $kb = Kb::get($g['kb']) ?? [];
+            $rows .= '<tr>' . Ui::td('شدت', Ui::sev($g['severity']))
+                . Ui::td('راه رفع', '<a class="mcs-finding-link" href="index.php?m=mcsec&amp;p=findings&amp;status=open&amp;kb=' . self::e($g['kb']) . '">' . self::e(Lang::t((string) ($kb['title'] ?? 'راهنمای عمومی'))) . '</a>'
+                    . (!empty($kb['effort']) ? '<small class="mcs-muted">' . Ui::ico('clock') . self::e(Lang::t('زمان تقریبی: {time}', ['time' => (string) $kb['effort']])) . '</small>' : '') . self::offerLink($g['kb']))
+                . Ui::td('یافته', self::e(Lang::t('{n} یافته', ['n' => Text::fa($g['n'])])))
+                . Ui::td('دارایی', self::e(Lang::t('{n} دارایی', ['n' => Text::fa($g['assets'])]))) . '</tr>';
+        }
+        if ($rows === '') {
+            return Ui::card(Ui::emptyState('shield-check', 'یافته‌ی بازی نیست', Lang::t('یافته‌ی بازی با این شرایط ندارید.')));
+        }
+        return Ui::card(Ui::table(['شدت', 'راه رفع', 'یافته', 'دارایی'], $rows))
+            . '<p class="mcs-small mcs-muted">' . Lang::t('هر ردیف یک کار است: یک راه رفع که چند یافته را با هم می‌بندد. از بالا شروع کنید.') . '</p>';
     }
 
     public static function detail(array $ctx): string
@@ -118,6 +170,8 @@ final class FindingViews
             'اولویت' => (int) ($f->priority ?? 0) > 0 && $f->status === 'open' ? self::e(Lang::t('{n} از ۱۰۰', ['n' => Text::fa((int) $f->priority)])) . ' <small class="mcs-muted">' . Lang::t('از شدت، احتمال و بهره‌برداری فعال') . '</small>' : '',
             'پیدا شده با' => self::e(Catalog::label((string) ($f->profile))) . ' (' . self::e(Catalog::engineLabel((string) $f->engine)) . ')',
             'اولین بار' => self::e(Text::date((int) $f->first_seen_at)),
+            'مهلت رفع' => Findings::due($f) > 0 ? self::e(Text::date(Findings::due($f))) . self::dueChip($f) : '',
+            'مسئول' => Settings::bool('finding_assign') && (int) ($f->assignee ?? 0) > 0 ? self::e(\McSec\Whmcs::userNames([(int) $f->assignee])[(int) $f->assignee] ?? '') : '',
             'آخرین بار' => self::e(Text::date((int) $f->last_seen_at)) . ((int) $f->reopened > 0 ? ' — ' . Lang::t('{n} بار پس از رفع دوباره دیده شد', ['n' => self::e(Text::fa((int) $f->reopened))]) : ''),
         ]);
         $out .= Ui::card(Ui::para((string) $f->description) . $facts . (trim((string) $f->evidence) !== '' ? '<p class="mcs-small"><strong>' . Lang::t('شاهد (آنچه اسکنر دید):') . '</strong></p>' . Ui::code((string) $f->evidence, 'evidence') : ''), 'این یافته چیست؟', 'info');
@@ -190,6 +244,15 @@ final class FindingViews
             } elseif (in_array($f->status, ['accepted', 'false_positive'], true)) {
                 $acts .= Ui::form($ctx, 'finding', 'finding_status', '<input type="hidden" name="finding" value="' . (int) $f->id . '"><input type="hidden" name="status" value="open"><button type="submit" class="btn btn-default">' . Ui::ico('refresh') . Lang::t('دوباره باز شود') . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id);
             }
+            if (Settings::bool('finding_assign') && $f->status === 'open' && count($users = \McSec\Whmcs::accountUsers($cid)) > 1) {
+                $opts = ['0' => 'هیچ‌کس'];
+                foreach ($users as $uid => $name) {
+                    $opts[(string) $uid] = $name;
+                }
+                $acts .= Ui::form($ctx, 'finding', 'finding_assign', '<input type="hidden" name="finding" value="' . (int) $f->id . '">'
+                    . '<label for="mcs-fu">' . Lang::t('مسئول رفع') . '</label> ' . Ui::select('user', $opts, (string) (int) ($f->assignee ?? 0), 'mcs-fu')
+                    . ' <button type="submit" class="btn btn-default btn-sm">' . Lang::t('ثبت') . '</button>', '', 'mcs-inline', false, '&amp;id=' . (int) $f->id);
+            }
             if ($acts !== '') {
                 $out .= Ui::card($acts, 'کارها', 'list');
             }
@@ -203,14 +266,33 @@ final class FindingViews
      */
     public static function offer(string $kbKey): string
     {
+        $o = self::offerFor($kbKey);
+        return $o ? Ui::card('<p>' . self::e($o[0]) . '</p><a class="btn btn-default" href="' . self::e($o[1]) . '"' . ($o[2] ? ' target="_blank" rel="noopener"' : '') . '>' . Ui::ico($o[2] ? 'link' : 'plus') . Lang::t($o[2] ? 'دیدن' : 'افزودن به سبد خرید') . '</a>', 'راه آسان‌تر', 'sparkle') : '';
+    }
+
+    /** The same offer as one quiet link, for the list of fixes. */
+    public static function offerLink(string $kbKey): string
+    {
+        $o = self::offerFor($kbKey);
+        return $o ? '<small><a href="' . self::e($o[1]) . '"' . ($o[2] ? ' target="_blank" rel="noopener"' : '') . '>' . Ui::ico('sparkle') . self::e($o[0]) . '</a></small>' : '';
+    }
+
+    /** @return array{0:string,1:string,2:bool}|null text, link, external. The link is the admin's: a full URL, or pid:<n> for a product of this WHMCS. */
+    private static function offerFor(string $kbKey): ?array
+    {
         foreach (preg_split('~\r\n|\r|\n~', Settings::get('offers')) ?: [] as $line) {
             $p = array_map('trim', explode('|', $line));
-            if (count($p) < 3 || $p[0] === '' || strcasecmp($p[0], $kbKey) !== 0 || !preg_match('~^https?://[^\s"<>]+$~i', $p[2])) {
+            if (count($p) < 3 || $p[0] === '' || strcasecmp($p[0], $kbKey) !== 0) {
                 continue;
             }
-            return Ui::card('<p>' . self::e(Text::name($p[1], 200)) . '</p><a class="btn btn-default" href="' . self::e($p[2]) . '" target="_blank" rel="noopener">' . Ui::ico('link') . Lang::t('دیدن') . '</a>', 'راه آسان‌تر', 'sparkle');
+            if (preg_match('~^pid:(\d{1,9})$~i', $p[2], $m)) {
+                return [Text::name($p[1], 200), 'cart.php?a=add&pid=' . (int) $m[1], false];
+            }
+            if (preg_match('~^https?://[^\s"<>]+$~i', $p[2])) {
+                return [Text::name($p[1], 200), $p[2], true];
+            }
         }
-        return '';
+        return null;
     }
 
     /** «درخواست بررسی کارشناس» for this finding: the form of the support page, with the finding already chosen. */

@@ -214,6 +214,17 @@ final class Findings
         if ((int) ($f['new'] ?? 0) > 0) {
             $q->where('f.first_seen_at', '>=', Clock::now() - (int) $f['new'] * 86400);
         }
+        if ((string) ($f['kb'] ?? '') !== '') {
+            $kb = (string) $f['kb'];
+            // the general guidance also covers findings whose key the knowledge base does not know
+            $kb === 'generic' ? $q->whereNotIn('f.kb', array_values(array_diff(Kb::keys(), ['generic']))) : $q->where('f.kb', $kb);
+        }
+        if ((int) ($f['mine'] ?? 0) > 0) {
+            $q->where('f.assignee', (int) $f['mine']);
+        }
+        if (!empty($f['overdue'])) {
+            self::overdue($q, 'f.');
+        }
         $term = trim((string) ($f['q'] ?? ''));
         if ($term !== '') {
             $like = '%' . str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], mb_substr($term, 0, 80)) . '%';
@@ -249,6 +260,103 @@ final class Findings
                 $r->cve, (int) $r->priority, (int) $r->kev === 1 ? (Lang::fa() ? 'بله' : 'Yes') : '', date('Y-m-d', (int) $r->first_seen_at), date('Y-m-d', (int) $r->last_seen_at)])) . "\r\n"; // i18n-skip («بله» is also the messenger Bale in the dictionary, so "yes" is written here)
         }
         return $out;
+    }
+
+    /** Days allowed for a fix, per severity (0 = no deadline); all zero while the feature is off. @return array<string,int> */
+    public static function deadlineDays(): array
+    {
+        $on = Settings::bool('fix_deadlines');
+        $out = [];
+        foreach (['critical', 'high', 'medium', 'low'] as $s) {
+            $out[$s] = $on ? max(0, min(3650, Settings::int('sla_' . $s))) : 0;
+        }
+        return $out;
+    }
+
+    /** When an open finding should be fixed by (counted from the day it was first seen, or seen again after a fix); 0 = no deadline. */
+    public static function due(object $f): int
+    {
+        $days = self::deadlineDays()[(string) $f->severity] ?? 0;
+        if ($days <= 0 || (string) $f->status !== 'open') {
+            return 0;
+        }
+        return max((int) $f->first_seen_at, (int) $f->fixed_at) + $days * 86400;
+    }
+
+    /** Narrows a query to open findings whose deadline has passed (nothing when no severity has one). */
+    private static function overdue($q, string $p = ''): void
+    {
+        $days = array_filter(self::deadlineDays());
+        $now = Clock::now();
+        $q->where($p . 'status', 'open')->where(function ($w) use ($days, $now, $p) {
+            $w->whereRaw('1 = 0');
+            foreach ($days as $sev => $d) {
+                $w->orWhere(function ($x) use ($sev, $d, $now, $p) {
+                    $x->where($p . 'severity', $sev)->where($p . 'first_seen_at', '<', $now - $d * 86400)->where($p . 'fixed_at', '<', $now - $d * 86400);
+                });
+            }
+        });
+    }
+
+    public static function overdueCount(int $clientId): int
+    {
+        if (!array_filter(self::deadlineDays())) {
+            return 0;
+        }
+        $q = Db::table('mod_mcsec_findings')->where('client_id', $clientId)
+            ->whereIn('asset_id', Db::table('mod_mcsec_assets')->where('client_id', $clientId)->where('status', '!=', 'removed')->select('id'));
+        self::overdue($q);
+        return (int) $q->count();
+    }
+
+    /**
+     * Open findings grouped by their fix (the knowledge-base key): twenty findings with one fix are one job.
+     * Most severe first. @return array<int,array{kb:string,n:int,assets:int,severity:string,priority:int}>
+     */
+    public static function groups(int $clientId): array
+    {
+        $rank = "CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
+        $rows = Db::rows(Db::table('mod_mcsec_findings')->where('client_id', $clientId)->where('status', 'open')
+            ->whereIn('asset_id', Db::table('mod_mcsec_assets')->where('client_id', $clientId)->where('status', '!=', 'removed')->select('id'))
+            ->selectRaw("kb, COUNT(*) AS n, COUNT(DISTINCT asset_id) AS assets, MAX($rank) AS r, MAX(priority) AS p")->groupBy('kb'));
+        $by = [];
+        $sev = [];
+        foreach (self::SEVERITIES as $k => $v) {
+            $sev[$v['rank']] = $k;
+        }
+        foreach ($rows as $r) {
+            $kb = (string) $r->kb !== '' && Kb::get((string) $r->kb) ? (string) $r->kb : 'generic';
+            $g = $by[$kb] ?? ['kb' => $kb, 'n' => 0, 'assets' => 0, 'r' => 0, 'priority' => 0];
+            $g['n'] += (int) $r->n;
+            $g['assets'] = max($g['assets'], (int) $r->assets);
+            $g['r'] = max($g['r'], (int) $r->r);
+            $g['priority'] = max($g['priority'], (int) $r->p);
+            $by[$kb] = $g;
+        }
+        $out = array_values($by);
+        usort($out, fn ($a, $b) => [$b['r'], $b['priority'], $b['n']] <=> [$a['r'], $a['priority'], $a['n']]);
+        return array_map(fn ($g) => ['kb' => $g['kb'], 'n' => $g['n'], 'assets' => $g['assets'], 'severity' => (string) ($sev[$g['r']] ?? 'info'), 'priority' => $g['priority']], $out);
+    }
+
+    /** Hands an open finding to a user of the same account (0 = nobody). Only users linked to this account can be chosen. */
+    public static function assign(array $who, int $id, int $userId): array
+    {
+        if (!Settings::bool('finding_assign')) {
+            return ['ok' => false, 'error' => 'واگذاری یافته‌ها روشن نیست.'];
+        }
+        $f = self::get((int) $who['client_id'], $id);
+        if (!$f) {
+            return ['ok' => false, 'error' => 'این یافته پیدا نشد.'];
+        }
+        if ($userId !== 0 && Whmcs::link($userId, (int) $who['client_id']) === null) {
+            return ['ok' => false, 'error' => 'این کاربر عضو همین حساب نیست.'];
+        }
+        if ((int) ($f->assignee ?? 0) === $userId) {
+            return ['ok' => true];
+        }
+        Db::table('mod_mcsec_findings')->where('id', $f->id)->where('client_id', (int) $who['client_id'])->update(['assignee' => $userId]);
+        Audit::log((int) $who['client_id'], 'finding_assign', (string) $f->title, ['id' => (int) $f->id, 'to' => $userId], (int) $who['user_id']);
+        return ['ok' => true];
     }
 
     /** Customer changes: accepted / false_positive need a reason; open reopens. 'fixed' is the system's word only. */
