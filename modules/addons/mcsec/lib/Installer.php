@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.22.0';
+    public const SCHEMA = '0.22.1';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void

@@ -87,7 +87,31 @@ run_hook('ClientAreaPrimaryNavbar', ['primaryNavbar' => $nav]);
 foreach ($GLOBALS['__hooks']['ClientAreaPrimaryNavbar'] as $fn) {
     $fn($nav);
 }
-ok(isset($nav->children['mcsec']) && $nav->children['mcsec']['uri'] === 'index.php?m=mcsec', 'menu item added');
+ok(isset($nav->children['mcsec']) && $nav->children['mcsec']['uri'] === 'index.php?m=mcsec' && !isset($nav->children['mcsec']['badge']), 'a menu without «Services»: the item is added at the top, with no number');
+$svc = new class {
+    public array $children = [];
+    public function addChild($k, $v)
+    {
+        $this->children[$k] = $v;
+    }
+};
+$nav3 = new class {
+    public array $children = [];
+    public $svc;
+    public function addChild($k, $v)
+    {
+        $this->children[$k] = $v;
+    }
+    public function getChild($k)
+    {
+        return $k === 'Services' ? $this->svc : null;
+    }
+};
+$nav3->svc = $svc;
+foreach ($GLOBALS['__hooks']['ClientAreaPrimaryNavbar'] as $fn) {
+    $fn($nav3);
+}
+ok(isset($svc->children['mcsec']) && !isset($nav3->children['mcsec']) && !isset($svc->children['mcsec']['badge']), 'with «Services» the item goes under it, not beside it, and carries no number');
 $panels = new class {
     public array $children = [];
     public function addChild($k, $v)

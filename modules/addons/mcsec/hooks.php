@@ -66,21 +66,24 @@ add_hook('InvoicePaid', 1, function ($vars) {
     }
 });
 
-/** The menu item in the client area (Lagom2 reads WHMCS's primary navbar). */
+/**
+ * The menu item in the client area: one more entry under «سرویس‌ها», not a top-level menu of its own (Lagom2 reads
+ * WHMCS's primary navbar). No number beside it: the theme draws that badge its own way and it cannot be styled from
+ * here (rule 5); the count of unread notices is on the bell inside the section and on the home panel.
+ */
 add_hook('ClientAreaPrimaryNavbar', 1, function ($primaryNavbar) {
     try {
         if (!is_object($primaryNavbar) || mcsec_hook_client() === null) {
             return;
         }
         $label = \McSec\Settings::menuLabel();
-        $unread = \McSec\Notify::unread(mcsec_hook_client()['client_id']);
-        $primaryNavbar->addChild('mcsec', [
-            'label' => $label,
-            'uri' => 'index.php?m=mcsec',
-            'order' => 65,
-            'icon' => 'fa-shield-alt',
-            'badge' => $unread > 0 ? (string) $unread : '',
-        ]);
+        $item = ['label' => $label, 'uri' => 'index.php?m=mcsec', 'icon' => 'fa-shield-alt'];
+        $services = method_exists($primaryNavbar, 'getChild') ? $primaryNavbar->getChild('Services') : null;
+        if (is_object($services)) {
+            $services->addChild('mcsec', $item + ['order' => 25]);
+        } else {
+            $primaryNavbar->addChild('mcsec', $item + ['order' => 65]); // a menu without «سرویس‌ها»
+        }
     } catch (\Throwable $e) {
         \McSec\Db::log('navbar hook failed: ' . $e->getMessage());
     }
