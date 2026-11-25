@@ -8,7 +8,7 @@
 declare(strict_types=1);
 
 $path = (string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
-if ($path !== '/index.php' && $path !== '/addonmodules.php') {
+if ($path !== '/index.php' && $path !== '/addonmodules.php' && $path !== '/catalog.php') {
     header('Location: /index.php?m=mcsec');
     return true;
 }
@@ -54,7 +54,12 @@ login($who[0], $who[1]);
 \McSec\Client\Controller::$testMode = true;
 $keep = fn (string $u) => $u . (str_contains($u, '?') ? '&' : '?') . http_build_query(array_filter(['as' => $_GET['as'] ?? '', 'dark' => $dark ? '1' : '']));
 
-if ($path === '/addonmodules.php') {
+if ($path === '/catalog.php') {
+    // the component catalog: development only (tests/tools/catalog.php)
+    \McSec\Auth::$testClient = ['client_id' => 1, 'user_id' => 1, 'owner' => true, 'perms' => [], 'masq' => false];
+    $body = require __DIR__ . '/catalog.php';
+    $title = 'MC-Sec component catalog';
+} elseif ($path === '/addonmodules.php') {
     admin((string) ($_GET['tier'] ?? 'settings'));
     \McSec\Admin\Controller::$testMode = true;
     $body = \McSec\Admin\Controller::handle('addonmodules.php?module=mcsec');

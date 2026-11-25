@@ -32,3 +32,8 @@ site-assets/
 .DS_Store
 Thumbs.db
 .claude/settings.local.json
+
+# --- Development-only browser checks: pictures and reports stay local ---
+tests/browser/shots/
+tests/browser/test-results/
+tests/browser/playwright-report/
