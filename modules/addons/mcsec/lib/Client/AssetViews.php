@@ -241,7 +241,7 @@ final class AssetViews
                 : Ui::alert('warning', self::e(trim((string) ($a->origin_note ?? '')) !== '' ? (string) $a->origin_note : Lang::t('هنوز آزموده نشده است.'))
                     . ' <a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '&amp;vfile=1" download>' . Lang::t('دانلود فایل تأیید') . '</a>', 'alert');
             $body .= '<p class="mcs-small">' . ($origin->status === 'verified' ? Lang::t('کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی همین IP اجرا می‌شوند.')
-                : Lang::t('پس از تأیید مالکیت این IP (در صفحه‌ی خودش)، کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی آن اجرا می‌شوند.')) . '</p>';
+                : Lang::t('اختیاری: اگر مالکیت خود این IP را هم (در صفحه‌ی خودش) تأیید کنید، اسکن‌هایی که درگاه‌ها را می‌سنجند روی آن اجرا می‌شوند. برای بررسی‌های وب این دامنه لازم نیست.')) . '</p>';
             if ($ctx['manage']) {
                 $body .= $form('<input type="hidden" name="retest" value="1">' . $tick . '<button type="submit" class="btn btn-default btn-sm">' . Ui::ico('refresh') . Lang::t('دوباره بیازما') . '</button>')
                     . $form('<input type="hidden" name="origin" value=""><button type="submit" class="btn btn-default btn-sm">' . Lang::t('برداشتن پیوند') . '</button>', 'پیوند سرور اصلی برداشته شود؟ دارایی IP آن سر جایش می‌ماند.');
@@ -249,7 +249,7 @@ final class AssetViews
         } elseif ($ctx['manage']) {
             $body .= $form('<div class="mcs-form-row">' . Ui::field('mcs-origin', 'IP اصلی سرور', '<input class="form-control" id="mcs-origin" name="origin" maxlength="45" dir="ltr" inputmode="decimal" autocomplete="off" placeholder="203.0.113.10">',
                 Lang::t('IP سروری که سایت واقعاً روی آن است؛ در پنل CDN، بخش DNS، به نام «IP مبدأ» یا Origin. اگر از سرویس‌های مارال کلاد در همین حساب باشد خودکار تأیید می‌شود؛ وگرنه مالکیتش را مثل هر IP دیگر تأیید می‌کنید.'))
-                . '</div>' . $tick . '<p class="mcs-help">' . Lang::t('پس از ثبت، از خود همان سرور می‌پرسیم که این سایت رویش هست یا نه (با فایل تأیید همین حساب). تا این دیده نشود، هیچ درخواستی مستقیم به آن سرور فرستاده نمی‌شود.') . '</p>'
+                . '</div>' . $tick . '<p class="mcs-help">' . Lang::t('پس از ثبت، از خود همان سرور می‌پرسیم که این سایت رویش هست یا نه: اگر گواهی SSL معتبری برای همین نام داشته باشد خودکار پذیرفته می‌شود؛ وگرنه فایل تأیید همین حساب را روی آن می‌گذارید. تا این دیده نشود، هیچ بررسی دیگری مستقیم به آن سرور فرستاده نمی‌شود.') . '</p>'
                 . '<button type="submit" class="btn btn-primary">' . Lang::t('ثبت و آزمودن سرور') . '</button>');
         }
         return $behind ? Ui::card($body, 'این دامنه پشت CDN است', 'globe') : Ui::drawer(Lang::t('این سایت پشت CDN یا پروکسی است؟ (سرور اصلی)'), $body, (bool) $origin, 'globe', 'origin');

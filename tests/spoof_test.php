@@ -152,4 +152,37 @@ ok($st($sip)->status === 'verified' && $st($sip)->method === 'whmcs', 'a dedicat
 as_whmcs(fn () => Capsule::table('tblhosting')->where('dedicatedip', '203.0.113.5')->update(['domainstatus' => 'Terminated']));
 ok(!Scans::queue(1, $st($sip), 'hygiene', 0, 1)['ok'] && $st($sip)->status === 'lapsed', 'the service ended: the IP lapses at the next scan');
 
+section('the origin server: a certificate is proof only when it is public, for this name, on that server');
+// what a server shows in the handshake, by the IP the connection is pinned to. A real client (curl with
+// verification on) refuses anything but a certificate that a public authority issued for the name asked for.
+$servers = [
+    '93.184.216.70' => ['cert' => 'mine.example', 'public' => true],   // the customer's own server, a real certificate
+    '93.184.216.71' => ['cert' => 'victim.example', 'public' => true], // somebody else's server: a real certificate, for their name
+    '93.184.216.72' => ['cert' => 'mine.example', 'public' => false],  // anybody can self-sign a certificate for any name
+    '93.184.216.73' => ['cert' => '', 'public' => false],              // no TLS at all: plain HTTP only
+];
+$seen = [];
+http_mock(function ($method, $url, $headers, $body, $opt = []) use (&$servers, &$seen) {
+    $host = (string) parse_url($url, PHP_URL_HOST);
+    $https = str_starts_with($url, 'https://');
+    $ip = preg_match('~^' . preg_quote($host, '~') . ':(?:443|80):(.+)$~', (string) ($opt['resolve'] ?? ''), $m) ? $m[1] : '';
+    $seen[] = [$url, $ip, !empty($opt['verify']), !empty($opt['follow'])];
+    $s = $servers[$ip] ?? null;
+    if ($s === null || ($https && $s['cert'] === '')) {
+        return ['status' => 0, 'error' => 'connection refused', 'body' => ''];
+    }
+    if ($https && !empty($opt['verify']) && (!$s['public'] || $s['cert'] !== $host)) {
+        return ['status' => 0, 'error' => 'SSL certificate problem: unable to verify', 'body' => ''];
+    }
+    return ['status' => 200, 'body' => '<html><head></head><body>some site</body></html>'];
+});
+$on = fn (string $ip, bool $skip = false) => Verify::onServer('mine.example', $ip, $skip, $proof, $token);
+ok($on('93.184.216.70')['ok'] && $on('93.184.216.70')['how'] === 'cert', 'the server shows a public certificate for this very name: it is the site\'s server');
+ok(!$on('93.184.216.71')['ok'], 'a stranger\'s server has a valid certificate, but not for this name: nothing');
+ok(!$on('93.184.216.72')['ok'], 'a self-signed certificate for the name proves nothing');
+ok(!$on('93.184.216.72', true)['ok'] && !$on('93.184.216.70', true)['ok'], 'with «ignore SSL» the certificate is not looked at, so it cannot be the proof');
+ok(!$on('93.184.216.73')['ok'], 'an answer over plain HTTP proves nothing');
+ok(!array_filter($seen, fn ($c) => $c[1] === '' || $c[3]), 'every request of the test is pinned to the named IP and follows no redirect (a redirect to a real site cannot stand in)');
+ok(!$on('127.0.0.1')['ok'] && !$on('10.0.0.8')['ok'], 'a private address is never asked');
+
 done();

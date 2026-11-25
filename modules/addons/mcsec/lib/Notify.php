@@ -369,7 +369,7 @@ final class Notify
                 $body = Db::json(['text' => $text, 'event' => $event, 'title' => $msg['title'] ?? '', 'lines' => $msg['lines'] ?? [], 'link' => $url, 'data' => $data, 'client_id' => $clientId, 'sent_at' => gmdate('c', Clock::now())]);
                 $sig = hash_hmac('sha256', $body, Crypto::decrypt((string) $acc->webhook_secret));
                 $r = Http::request('POST', (string) $acc->webhook_url, ['Content-Type' => 'application/json', 'X-MCSec-Event' => $event, 'X-MCSec-Signature' => 'sha256=' . $sig], $body,
-                    ['timeout' => 10, 'connect' => 5, 'resolve' => $chk['resolve'], 'max_bytes' => 65536]);
+                    ['timeout' => 10, 'connect' => 5, 'resolve' => $chk['resolve'], 'max_bytes' => 65536, 'egress' => true]);
                 return ['ok' => $r['ok'], 'error' => $r['error'] !== '' ? $r['error'] : 'HTTP ' . $r['status'], 'final' => in_array($r['status'], [400, 401, 403, 404, 410], true)];
         }
         return ['ok' => false, 'error' => 'unknown channel', 'final' => true];

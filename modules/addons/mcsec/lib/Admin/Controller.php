@@ -35,7 +35,7 @@ final class Controller
     private const ACTIONS = [
         'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_rule' => 'settings', 'disable_rule' => 'settings', 'save_code' => 'settings', 'disable_code' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
         'upload_blob' => 'settings', 'remove_blob' => 'settings', 'advisor_ask' => 'settings', 'advisor_apply' => 'settings', 'advisor_clear' => 'settings',
-        'request_quote' => 'ops', 'request_status' => 'ops', 'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
+        'request_quote' => 'ops', 'request_status' => 'ops', 'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops', 'egress_test' => 'ops',
     ];
 
     /** Tests and the preview: keep a file answer in $raw instead of sending it. */
@@ -327,6 +327,22 @@ final class Controller
                     }
                     Scans::fail($s, 'به دست پشتیبانی متوقف شد.', true);
                     return 'ok:اسکن متوقف و اعتبارش برگشت داده شد.';
+                case 'egress_test':
+                    // through each location, one connection to this WHMCS's own address (never to a customer); changes nothing
+                    if (!\McSec\Egress::on()) {
+                        return 'ok:مسیر خروجی تنظیم نشده است؛ اتصال‌ها مستقیم از همین سرور انجام می‌شوند.';
+                    }
+                    $t = \McSec\Egress::test();
+                    $lines = [];
+                    $good = 0;
+                    foreach ($t['rows'] as $row) {
+                        $good += $row['ok'] ? 1 : 0;
+                        $lines[] = '«' . $row['name'] . '»: ' . ($row['ok'] ? 'کار می‌کند' : ($row['proxy'] ? 'پروکسی جواب داد ولی به ' . $t['target'] . ' نرسید' : 'پروکسی جواب نداد یا نام کاربری و رمز را نپذیرفت'));
+                    }
+                    if ($t['bad'] > 0) {
+                        $lines[] = Text::fa($t['bad']) . ' مورد خوانده نشد (قالب: نام=socks5://کاربر:رمز@نشانی:درگاه).';
+                    }
+                    return ($good > 0 && $t['bad'] === 0 ? 'ok:' : 'err:') . ($good > 0 ? '' : 'هیچ مسیری کار نمی‌کند؛ تا درست نشود هیچ بررسی‌ای به سایت مشتری‌ها فرستاده نمی‌شود. ') . implode(' — ', $lines);
                 case 'scope_test':
                     // read-only: what the scope rules say about a target right now (one DNS lookup)
                     $t = Net::parse($in('target'));

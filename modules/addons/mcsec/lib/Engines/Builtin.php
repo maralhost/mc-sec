@@ -121,6 +121,10 @@ final class Builtin implements Engine
      */
     public function run(string $kind, string $value, ?array $portScope = null, array $subdomains = [], ?array $direct = null): array
     {
+        if (!\McSec\Egress::alive()) {
+            // a way out is set and none of its proxies answers: the check does not run at all, rather than from this server's own address
+            throw new \RuntimeException('egress proxy is not reachable; the check was not run');
+        }
         $f = [];
         $s = [];
         $host = $value;
@@ -399,7 +403,7 @@ final class Builtin implements Engine
         if ($ip !== '' && !filter_var($host, FILTER_VALIDATE_IP)) {
             $opt['resolve'] = $host . ':' . $port . ':' . $ip;
         }
-        $r = Http::request('GET', $url, ['Accept' => 'text/html,*/*;q=0.8'], null, $opt);
+        $r = Http::request('GET', $url, ['Accept' => 'text/html,*/*;q=0.8'], null, $opt + ['egress' => true]);
         return $r['status'] > 0 ? $r : null;
     }
 
@@ -496,9 +500,25 @@ final class Builtin implements Engine
         if (self::$certProbe !== null) {
             return (self::$certProbe)($host);
         }
-        $ctx = stream_context_create(['ssl' => ['capture_peer_cert' => true, 'verify_peer' => false, 'verify_peer_name' => false, 'SNI_enabled' => true, 'peer_name' => $host]]);
-        $target = filter_var($connectTo, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $connectTo . ']' : $connectTo;
-        $fp = @stream_socket_client('ssl://' . $target . ':443', $errno, $errstr, 6, STREAM_CLIENT_CONNECT, $ctx);
+        $ssl = ['capture_peer_cert' => true, 'verify_peer' => false, 'verify_peer_name' => false, 'SNI_enabled' => true, 'peer_name' => $host];
+        if (\McSec\Egress::on()) {
+            // through the way out: a plain connection by the proxy, then the TLS handshake over it
+            $fp = \McSec\Egress::connect($connectTo, 443, 6.0);
+            if ($fp) {
+                foreach ($ssl as $k => $val) {
+                    stream_context_set_option($fp, 'ssl', $k, $val);
+                }
+                stream_set_timeout($fp, 6);
+                if (@stream_socket_enable_crypto($fp, true, STREAM_CRYPTO_METHOD_TLS_CLIENT) !== true) {
+                    fclose($fp);
+                    $fp = null;
+                }
+            }
+        } else {
+            $ctx = stream_context_create(['ssl' => $ssl]);
+            $target = filter_var($connectTo, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $connectTo . ']' : $connectTo;
+            $fp = @stream_socket_client('ssl://' . $target . ':443', $errno, $errstr, 6, STREAM_CLIENT_CONNECT, $ctx);
+        }
         if (!$fp) {
             return null;
         }
@@ -538,6 +558,23 @@ final class Builtin implements Engine
     {
         if (self::$portProbe !== null) {
             return (self::$portProbe)($ip, $ports);
+        }
+        if (\McSec\Egress::on()) {
+            // through the way out the ports are tried one after another, within a budget
+            $open = [];
+            $until = microtime(true) + 25.0;
+            foreach (array_unique($ports) as $p) {
+                if ($p <= 0 || $p > 65535 || microtime(true) > $until) {
+                    continue;
+                }
+                $s = \McSec\Egress::connect($ip, (int) $p, 2.0);
+                if ($s) {
+                    $open[] = (int) $p;
+                    fclose($s);
+                }
+            }
+            sort($open);
+            return $open;
         }
         $socks = [];
         $target = filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) ? '[' . $ip . ']' : $ip;

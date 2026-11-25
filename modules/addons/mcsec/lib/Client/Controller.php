@@ -356,9 +356,12 @@ final class Controller
                 if (!empty($r['unlinked'])) {
                     return ['flash' => 'ok:' . Lang::t('پیوند سرور اصلی برداشته شد. دارایی IP آن سر جایش ماند.')];
                 }
-                $msg = $r['verified'] ? Lang::t('سرور اصلی ثبت و تأیید شد. کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی {ip} اجرا می‌شوند.', ['ip' => $r['value']])
-                    : Lang::t('سرور اصلی ثبت شد. حالا مالکیت {ip} را در صفحه‌ی همان IP تأیید کنید؛ پس از آن اسکن‌ها روی آن اجرا می‌شوند.', ['ip' => $r['value']]);
-                return ['flash' => 'ok:' . $msg . "\n" . (!empty($r['direct']) ? Lang::t('این سایت روی همین سرور است. بررسی‌های وب از این پس مستقیم از سرور پرسیده می‌شوند.') : Lang::t('هنوز دیده نشد که این سایت روی همین سرور است: {note}', ['note' => (string) ($r['note'] ?? '')]))];
+                // first what the customer asked for (is the site on that server?); the IP's own ownership is a separate, optional step
+                $site = !empty($r['direct']) ? Lang::t('این سایت روی همین سرور است. بررسی‌های وب از این پس مستقیم از سرور پرسیده می‌شوند.')
+                    : Lang::t('سرور اصلی ثبت شد، ولی هنوز دیده نشد که این سایت روی همین سرور است: {note}', ['note' => (string) ($r['note'] ?? '')]);
+                $ports = $r['verified'] ? Lang::t('اسکن‌هایی که درگاه‌ها را می‌سنجند هم روی {ip} اجرا می‌شوند.', ['ip' => $r['value']])
+                    : Lang::t('اختیاری: اگر اسکن درگاه‌های خود این سرور را هم می‌خواهید، مالکیت {ip} را در صفحه‌ی همان IP تأیید کنید. برای بررسی‌های وب این دامنه لازم نیست.', ['ip' => $r['value']]);
+                return ['flash' => (!empty($r['direct']) ? 'ok:' : 'err:') . $site . "\n" . $ports];
             case 'setup_hide':
                 // a preference of this person: the start-up checklist is put away (and can be brought back)
                 \McSec\Kv::set('setup_hidden:' . $cid . ':' . (int) $who['user_id'], ($_POST['show'] ?? '') === '1' ? '0' : '1');

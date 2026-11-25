@@ -24,6 +24,24 @@ final class Http
      */
     public static function request(string $method, string $url, array $headers = [], $body = null, array $opt = []): array
     {
+        if (empty($opt['egress']) || !Egress::on()) {
+            return self::send($method, $url, $headers, $body, $opt);
+        }
+        // a request to a customer's own site while a way out is set: through the locations in turn, never directly
+        $last = null;
+        foreach (Egress::route((int) ($opt['skip'] ?? 0)) as $loc) {
+            $r = self::send($method, $url, $headers, $body, ['proxy' => $loc] + $opt);
+            $r['via'] = $loc['name'];
+            if ((int) $r['status'] > 0) {
+                return $r;
+            }
+            $last = $r;
+        }
+        return $last ?? self::fail($url, 'no usable egress proxy; nothing was sent directly', microtime(true)) + ['via' => ''];
+    }
+
+    private static function send(string $method, string $url, array $headers = [], $body = null, array $opt = []): array
+    {
         $start = microtime(true);
         if (is_array($body)) {
             $body = json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -87,6 +105,9 @@ final class Http
         if (!empty($opt['resolve'])) {
             curl_setopt($ch, CURLOPT_RESOLVE, [(string) $opt['resolve']]);
         }
+        if (!empty($opt['proxy'])) {
+            curl_setopt_array($ch, Egress::curl((array) $opt['proxy']));
+        }
         if (!empty($opt['cookie'])) {
             curl_setopt($ch, CURLOPT_COOKIE, (string) $opt['cookie']);
         }
@@ -138,11 +159,24 @@ final class Http
      * @param array<int|string,array{url:string,resolve?:string}> $reqs
      * @return array<int|string,array{ok:bool,status:int,error:string,ms:int}>
      */
-    public static function multi(array $reqs, int $timeout = 10): array
+    public static function multi(array $reqs, int $timeout = 10, bool $egress = false): array
     {
         $out = [];
+        $egress = $egress && Egress::on();
+        $first = $egress ? (Egress::route()[0] ?? null) : null;
+        if ($egress && $first === null) {
+            foreach ($reqs as $k => $r) {
+                $out[$k] = ['ok' => false, 'status' => 0, 'error' => 'no usable egress proxy; nothing was sent directly', 'ms' => 0];
+            }
+            return $out;
+        }
         if (self::$mock !== null || !function_exists('curl_multi_init')) {
             foreach ($reqs as $k => $r) {
+                if ($egress) {
+                    $x = self::request('GET', $r['url'], ['Accept' => 'text/html,*/*;q=0.8'], null, ['timeout' => $timeout, 'connect' => min(5, $timeout), 'verify' => false, 'max_bytes' => 16384, 'resolve' => $r['resolve'] ?? '', 'egress' => true]);
+                    $out[$k] = ['ok' => $x['status'] > 0, 'status' => (int) $x['status'], 'error' => (string) $x['error'], 'ms' => (int) $x['ms'], 'via' => (string) ($x['via'] ?? '')];
+                    continue;
+                }
                 $x = self::request('GET', $r['url'], ['Accept' => 'text/html,*/*;q=0.8'], null, ['timeout' => $timeout, 'connect' => min(5, $timeout), 'verify' => false, 'max_bytes' => 16384] + $r);
                 $out[$k] = ['ok' => $x['status'] > 0, 'status' => (int) $x['status'], 'error' => (string) $x['error'], 'ms' => (int) $x['ms']];
             }
@@ -164,6 +198,9 @@ final class Http
             ]);
             if (!empty($r['resolve'])) {
                 curl_setopt($ch, CURLOPT_RESOLVE, [(string) $r['resolve']]);
+            }
+            if ($first !== null) {
+                curl_setopt_array($ch, Egress::curl($first));
             }
             curl_multi_add_handle($mh, $ch);
             $handles[$k] = [$ch, microtime(true)];
@@ -189,6 +226,17 @@ final class Http
             curl_close($ch);
         }
         curl_multi_close($mh);
+        if ($first !== null && count(Egress::route()) > 1) {
+            // what the first location could not reach is asked from the others, one by one: unreachable only when none reaches it
+            foreach ($out as $k => $x) {
+                if (!$x['ok']) {
+                    $y = self::request('GET', $reqs[$k]['url'], ['Accept' => 'text/html,*/*;q=0.8'], null, ['timeout' => $timeout, 'connect' => min(5, $timeout), 'verify' => false, 'max_bytes' => 16384, 'resolve' => $reqs[$k]['resolve'] ?? '', 'egress' => true, 'skip' => 1]);
+                    if ((int) $y['status'] > 0) {
+                        $out[$k] = ['ok' => true, 'status' => (int) $y['status'], 'error' => '', 'ms' => (int) $y['ms'], 'via' => (string) ($y['via'] ?? '')];
+                    }
+                }
+            }
+        }
         return $out;
     }
 

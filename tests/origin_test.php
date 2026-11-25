@@ -42,7 +42,7 @@ http_mock(function ($method, $url, $headers, $body, $opt = []) use (&$srv, &$cal
     if ($pin !== $host . ':' . ($https ? 443 : 80) . ':' . $ORIGIN || !$srv['up'] || (!$https && !$srv['http'])) {
         return ['status' => 0, 'error' => 'connection refused', 'body' => ''];
     }
-    if ($https && $srv['tls'] !== 'ok' && !empty($opt['verify'])) {
+    if ($https && ($srv['tls'] !== 'ok' || $host !== 'shop.example') && !empty($opt['verify'])) {
         return ['status' => 0, 'error' => 'SSL certificate problem: self-signed certificate', 'body' => ''];
     }
     if ($host !== 'shop.example') {
@@ -59,7 +59,7 @@ $post = fn (array $p, bool $nonce = true, ?int $asset = null) => client_post('as
 section('the form');
 $h = html(client_get(['p' => 'asset', 'id' => $site->id]));
 ok(str_contains($h, 'name="origin"') && str_contains($h, 'name="tls_skip"') && str_contains($h, 'گواهی SSL سرور را نادیده بگیر') && str_contains($h, 'ثبت و آزمودن سرور'), 'the CDN card asks for the server\'s IP, with the «ignore SSL» tick');
-ok(str_contains($h, 'تا این دیده نشود، هیچ درخواستی مستقیم به آن سرور فرستاده نمی‌شود'), 'and says nothing goes direct before the test');
+ok(str_contains($h, 'تا این دیده نشود، هیچ بررسی دیگری مستقیم به آن سرور فرستاده نمی‌شود') && str_contains($h, 'گواهی SSL معتبری برای همین نام'), 'and says nothing goes direct before the test, and what counts as proof');
 $plain = Db::table('mod_mcsec_assets')->insertGetId(['client_id' => 1, 'kind' => 'domain', 'value' => 'nocdn.example', 'status' => 'verified', 'method' => 'dns', 'verified_at' => Clock::now(), 'created_at' => Clock::now(), 'cdn_checked_at' => Clock::now()]);
 ok(str_contains(html(client_get(['p' => 'asset', 'id' => $plain])), 'این سایت پشت CDN یا پروکسی است؟'), 'a domain whose CDN we did not recognise can name its server too (closed drawer)');
 
@@ -73,7 +73,14 @@ ok(Assets::direct($a) === ['ip' => $ORIGIN, 'tls_skip' => false], 'the direct ro
 $h = html(client_get(['p' => 'asset', 'id' => $site->id]));
 ok(str_contains($h, 'بله، آزموده شد') && str_contains($h, 'دوباره بیازما') && str_contains($h, 'مستقیم از همین سرور پرسیده می‌شود'), 'the card shows the result and a way to test again');
 
+section('a certificate that is publicly valid for the name is proof by itself');
+$srv['file'] = '';
+$r = $post(['retest' => '1']);
+ok((int) $row((int) $site->id)->origin_ok_at > 0 && Verify::onServer('shop.example', $ORIGIN, false, $proof, $token)['how'] === 'cert', 'no file on the server, but it shows a valid certificate for this very name: accepted');
+ok(!Verify::onServer('shop.example', $ORIGIN, true, $proof, $token)['ok'], 'with «ignore SSL» ticked the certificate proves nothing');
+
 section('somebody else\'s server, or no proof');
+$srv['tls'] = 'self';
 $srv['file'] = '';
 $r = $post(['retest' => '1']);
 ok((int) $row((int) $site->id)->origin_ok_at === 0 && str_contains(flash_of($r), 'فایل تأیید') && Assets::direct($row((int) $site->id)) === null, 'the server answers but has no proof for this site: no direct route, and the reason is said');

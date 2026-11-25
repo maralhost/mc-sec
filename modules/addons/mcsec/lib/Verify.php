@@ -222,8 +222,10 @@ final class Verify
     /**
      * Is this (sub)domain really served by that server? Asks the server itself, by its IP, for the site by name (the
      * connection is pinned to the IP; the name goes in the request and the TLS handshake), and looks for this account's
-     * own proof: the proof file, or the meta tag in the page's head. So naming somebody else's server gets nothing:
-     * that server does not hold this account's code for this name.
+     * own proof: the proof file, or the meta tag in the page's head; or, since 0.24.0, for a certificate that public
+     * authorities issued for this very name (checked in the handshake, with the connection pinned to the IP). So naming
+     * somebody else's server gets nothing: that server holds neither this account's code nor a valid certificate for
+     * this name. With «نادیده گرفتن SSL» the certificate proves nothing and the file or the meta tag is needed.
      * $skipTls: do not check the server's certificate (behind a CDN it is often self-signed or from the CDN's own CA).
      * @return array{ok:bool,how:string,note:string}
      */
@@ -235,13 +237,18 @@ final class Verify
         $tlsFailed = false;
         $answered = false;
         foreach (['https' => 443, 'http' => 80] as $scheme => $port) {
-            $opt = ['timeout' => 8, 'connect' => 4, 'verify' => $scheme === 'https' && !$skipTls, 'follow' => false, 'resolve' => $domain . ':' . $port . ':' . $ip];
+            $opt = ['timeout' => 8, 'connect' => 4, 'verify' => $scheme === 'https' && !$skipTls, 'follow' => false, 'resolve' => $domain . ':' . $port . ':' . $ip, 'egress' => true];
             $r = Http::request('GET', $scheme . '://' . $domain . self::FILE_PATH, ['Accept' => 'text/plain, */*;q=0.5'], null, $opt + ['max_bytes' => 4096]);
             if ((int) $r['status'] === 0) {
                 $tlsFailed = $tlsFailed || ($scheme === 'https' && !$skipTls && preg_match('~ssl|certificate|tls|verify~i', (string) $r['error']) === 1);
                 continue;
             }
             $answered = true;
+            if ($scheme === 'https' && !$skipTls) {
+                // the handshake was checked against the public authorities and against this very name, on this very address:
+                // only a server its owner set up for this site holds such a certificate (a stranger's server does not)
+                return ['ok' => true, 'how' => 'cert', 'note' => ''];
+            }
             if ((int) $r['status'] === 200 && self::fileIsProof((string) $r['body'], $proof)) {
                 return ['ok' => true, 'how' => 'file', 'note' => ''];
             }
@@ -260,7 +267,7 @@ final class Verify
         if (!$answered) {
             return ['ok' => false, 'how' => '', 'note' => Lang::t('سرور {ip} روی درگاه ۸۰ و ۴۴۳ جواب نداد. اگر فایروال سرور فقط به CDN اجازه می‌دهد، IPهای اسکنر را هم مجاز کنید.', ['ip' => $ip])];
         }
-        return ['ok' => false, 'how' => '', 'note' => Lang::t('سرور {ip} جواب داد، ولی فایل تأیید {domain} روی آن نبود. فایل تأیید را روی همین سرور، در مسیر /.well-known/mcsec-verify.txt همین سایت بگذارید و دوباره بیازمایید.', ['ip' => $ip, 'domain' => $domain])];
+        return ['ok' => false, 'how' => '', 'note' => Lang::t('سرور {ip} جواب داد، ولی نشانه‌ای ندیدیم که {domain} مال همین سرور باشد: گواهی SSL معتبری برای این نام نداشت و فایل تأیید هم روی آن نبود. فایل تأیید را روی همین سرور در مسیر /.well-known/mcsec-verify.txt همین سایت بگذارید و «دوباره بیازما» را بزنید.', ['ip' => $ip, 'domain' => $domain])];
     }
 
     /** A GET to the customer's own host, pinned to a public IP (no SSRF into our network). */
@@ -274,7 +281,7 @@ final class Verify
             $chk = ['resolve' => ''];
         }
         $r = Http::request('GET', $url, ['Accept' => 'text/plain, text/html;q=0.9, */*;q=0.5'], null,
-            ['timeout' => 8, 'connect' => 4, 'verify' => false, 'max_bytes' => $max, 'resolve' => $chk['resolve'] ?? '']);
+            ['timeout' => 8, 'connect' => 4, 'verify' => false, 'max_bytes' => $max, 'resolve' => $chk['resolve'] ?? '', 'egress' => true]);
         return $r['error'] !== '' && $r['status'] === 0 ? null : $r;
     }
 

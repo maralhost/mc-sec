@@ -645,6 +645,8 @@ final class Views
             'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'advanced' => 'حالت پیشرفته: اسکن سفارشی مشتری', 'assistant' => 'دستیار امنیت (گفت‌وگوی هوش مصنوعی)', 'extras' => 'قابلیت‌های تکمیلی (هر کدام یک کلید)', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
             $out .= self::box($l, self::form('settings', 'save_settings', self::fields($g) . '<button class="btn btn-primary">ذخیره</button>')
                 . ($g === 'checks' ? self::intelStatus() : '')
+                . ($g === 'scans' ? '<hr>' . self::form('settings', 'egress_test', '<button class="btn btn-default">آزمودن مسیر خروجی</button> <small>'
+                    . (\McSec\Egress::on() ? 'مسیرها: ' . self::e(implode('، ', \McSec\Egress::names()) ?: 'هیچ‌کدام خوانا نیست') . '. از هر مسیر یک اتصال به نشانی خود همین WHMCS آزموده می‌شود.' : 'مسیر خروجی خالی است: اتصال‌ها مستقیم از همین سرور می‌روند و IP آن در لاگ سایت مشتری دیده می‌شود.') . '</small>') : '')
                 . ($g === 'scope' ? '<hr>' . self::form('settings', 'scope_test', '<div class="mcsa-field"><label for="mcsa-scope-t">این دامنه یا IP اسکن می‌شود؟</label>'
                     . '<div class="mcsa-search"><input class="form-control" id="mcsa-scope-t" name="target" dir="ltr" placeholder="shop.example.com یا 203.0.113.10"><button class="btn btn-default">بسنج</button></div>'
                     . '<small>با قاعده‌های ذخیره‌شده‌ی بالا می‌سنجد: IPهای دامنه، قاعده‌ی ممنوعی که به آن می‌خورد و CDN جلوی آن. چیزی را تغییر نمی‌دهد.</small></div>') : ''));

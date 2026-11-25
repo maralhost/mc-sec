@@ -51,6 +51,9 @@ final class Monitor
         if (!$targets) {
             return ['checked' => 0];
         }
+        if (!\McSec\Egress::alive()) {
+            return ['checked' => 0, 'skip' => 'egress proxy down']; // never from this server's own address; no site is called down because of our proxy
+        }
         $res = self::probe($targets, 'https', min(10, max(3, (int) ($deadline - microtime(true)))));
         $retry = array_filter($targets, fn ($t, $id) => !$res[$id]['ok'] && $t['ip'] !== '', ARRAY_FILTER_USE_BOTH);
         if ($retry && microtime(true) < $deadline) {
@@ -104,7 +107,7 @@ final class Monitor
     {
         foreach (['https' => 443, 'http' => 80] as $scheme => $port) {
             $r = Http::request('GET', $scheme . '://' . $host . '/', ['Accept' => 'text/html,*/*;q=0.8'], null,
-                ['timeout' => 6, 'connect' => 3, 'verify' => false, 'max_bytes' => 4096, 'follow' => false, 'resolve' => $host . ':' . $port . ':' . $direct['ip']]);
+                ['timeout' => 6, 'connect' => 3, 'verify' => false, 'max_bytes' => 4096, 'follow' => false, 'resolve' => $host . ':' . $port . ':' . $direct['ip'], 'egress' => true]);
             if ((int) $r['status'] > 0 && (int) $r['status'] < 500) {
                 return true;
             }
@@ -147,7 +150,7 @@ final class Monitor
             }
             $reqs[$id] = ['url' => $scheme . '://' . $host . '/', 'resolve' => $host . ':' . ($scheme === 'https' ? 443 : 80) . ':' . (str_contains($t['ip'], ':') ? '[' . $t['ip'] . ']' : $t['ip'])];
         }
-        return $out + ($reqs ? Http::multi($reqs, $timeout) : []);
+        return $out + ($reqs ? Http::multi($reqs, $timeout, true) : []);
     }
 
     private static function isUp(array $x): bool
