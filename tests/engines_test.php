@@ -124,6 +124,11 @@ http_mock(function ($method, $url, $headers, $body) use (&$calls, &$state) {
         $state['nuclei_installed'] = ($b['toolId'] ?? '') === 'tool-nuclei';
         return ['status' => 201, 'body' => '{"tool":{"name":"nuclei"}}'];
     }
+    if ($method === 'GET' && str_starts_with($path, '/api/assets/ip?')) {
+        $state['geo_calls'] = ($state['geo_calls'] ?? 0) + 1;
+        return ['status' => 200, 'body' => json_encode(['data' => [['ip' => '93.184.216.34', 'geoIp' => ['country' => 'Germany<script>', 'countryCode' => 'de', 'city' => 'Frankfurt', 'lat' => 50.11, 'lon' => 8.68]],
+            ['ip' => 'not-an-ip', 'geoIp' => ['countryCode' => 'DE', 'lat' => 1, 'lon' => 1]], ['ip' => '93.184.216.35', 'geoIp' => ['countryCode' => 'D<', 'lat' => 1, 'lon' => 1]], ['ip' => '93.184.216.36', 'geoIp' => ['countryCode' => 'US', 'lat' => 'x', 'lon' => 1]]]])];
+    }
     return ['status' => 404, 'body' => '{"message":"not mocked ' . $path . '"}'];
 });
 $oasm = new Oasm();
@@ -150,6 +155,11 @@ ok($oasm->poll($scan, $asset, \McSec\Catalog::get('surface'))['status'] === 'com
 $c = $oasm->collect($scan, $asset, \McSec\Catalog::get('surface'));
 $kinds = array_count_values(array_column($c['surface'], 'kind'));
 ok(($kinds['host'] ?? 0) === 2 && ($kinds['port'] ?? 0) === 3 && ($kinds['tech'] ?? 0) === 2 && ($kinds['cert'] ?? 0) === 1, 'surface: hosts, ports, tech, cert (' . json_encode($kinds) . ')');
+ok(!isset($kinds['ip']) && ($state['geo_calls'] ?? 0) === 0, 'the map is off: OASM is not asked where the IPs are');
+\McSec\Settings::set('geo_map', '1');
+$geo = array_values(array_filter($oasm->collect($scan, $asset, \McSec\Catalog::get('surface'))['surface'], fn ($x) => $x['kind'] === 'ip'));
+\McSec\Settings::set('geo_map', '0');
+ok(count($geo) === 1 && $geo[0]['value'] === '93.184.216.34' && $geo[0]['meta']['cc'] === 'DE' && $geo[0]['meta']['country'] === 'Germanyscript' && $geo[0]['meta']['lat'] === 50.11, 'the map is on: only well-formed rows of OASM\'s own geo data are kept, cleaned (' . json_encode($geo) . ')');
 $ssh = array_values(array_filter($c['surface'], fn ($x) => $x['value'] === 'www.example.com:22'));
 ok(count($ssh) === 1 && $ssh[0]['meta'] === [], 'failed HTTP probe (SSH): port kept, no made-up URL');
 ok($c['findings'] === [] && $c['kinds'] === ['host', 'port'], 'discovery: no vulnerability list, hosts/ports fully covered');

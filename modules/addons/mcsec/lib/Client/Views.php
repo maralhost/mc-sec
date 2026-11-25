@@ -31,7 +31,7 @@ use McSec\Text;
  */
 final class Views
 {
-    private const PAGES = ['home' => 'نمای کلی', 'assets' => 'دارایی‌ها', 'asset' => 'دارایی', 'scans' => 'اسکن‌ها', 'scan' => 'اسکن', 'findings' => 'یافته‌ها',
+    private const PAGES = ['home' => 'نمای کلی', 'assets' => 'دارایی‌ها', 'asset' => 'دارایی', 'scans' => 'اسکن‌ها', 'scan' => 'اسکن', 'compare' => 'مقایسه‌ی دو اسکن', 'findings' => 'یافته‌ها',
         'finding' => 'یافته', 'reports' => 'گزارش‌ها', 'report' => 'گزارش', 'schedules' => 'زمان‌بندی‌ها', 'recipes' => 'اسکن سفارشی', 'assistant' => 'دستیار امنیت', 'support' => 'کمک کارشناس', 'notify' => 'اعلان‌ها', 'credits' => 'اعتبار و پلن', 'activity' => 'فعالیت‌ها'];
 
     private const DESC = ['home' => 'وضعیت امنیت سایت‌ها و سرورهایتان، آنچه تغییر کرده و مهم‌ترین کار بعدی.', 'assets' => 'دامنه‌ها و IPهایی که بررسی می‌شوند؛ فقط دارایی تأییدشده اسکن می‌شود.',
@@ -75,7 +75,7 @@ final class Views
         $pending = Db::table('mod_mcsec_assets')->where('client_id', $cid)->whereIn('status', ['pending', 'lapsed'])->count();
         $running = Scans::activeCount($cid);
         $nav = '';
-        $parent = ['asset' => 'assets', 'scan' => 'scans', 'finding' => 'findings', 'report' => 'reports'];
+        $parent = ['asset' => 'assets', 'scan' => 'scans', 'compare' => 'scans', 'finding' => 'findings', 'report' => 'reports'];
         $menu = self::MENU;
         if (\McSec\Recipes::allowed($cid)) {
             $menu['surface'][1][] = ['recipes', 'layers'];
@@ -112,7 +112,7 @@ final class Views
         $cid = $ctx['who']['client_id'];
         $bal = Credits::balance($cid);
         $unread = Notify::unread($cid);
-        $parent = ['asset' => 'assets', 'scan' => 'scans', 'finding' => 'findings', 'report' => 'reports'];
+        $parent = ['asset' => 'assets', 'scan' => 'scans', 'compare' => 'scans', 'finding' => 'findings', 'report' => 'reports'];
         $crumb = '<a href="index.php?m=mcsec">' . self::e(Settings::menuLabel()) . '</a>';
         if (isset($parent[$active])) {
             $crumb .= Ui::ico('chevron') . '<a href="index.php?m=mcsec&amp;p=' . $parent[$active] . '">' . self::e(self::PAGES[$parent[$active]]) . '</a>';
@@ -172,6 +172,7 @@ final class Views
             'asset' => AssetViews::detail($ctx),
             'scans' => ScanViews::list($ctx),
             'scan' => ScanViews::detail($ctx),
+            'compare' => ScanViews::compare($ctx),
             'schedules' => ScanViews::schedules($ctx),
             'recipes' => ScanViews::recipes($ctx),
             'assistant' => AssistantViews::page($ctx),
@@ -207,6 +208,13 @@ final class Views
             . '</div>';
         self::$view = $body;
         return self::root($body, false);
+    }
+
+    /** A page for a visitor without a login (a shared report): the module's look, no menu, no script. */
+    public static function bare(string $body): string
+    {
+        self::$view = '<div class="mcs-page mcs-public">' . $body . '</div>';
+        return self::root(self::$view, false);
     }
 
     public static function closed(array $who): string

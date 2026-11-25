@@ -44,8 +44,35 @@ final class Pdf
     }
 
     /** The name on the report: the admin's, or Maral Cloud. */
+    /** Set while a PDF is made for an account that prints its own name (white label): ['name' => …, 'contact' => …]. */
+    public static ?array $own = null;
+
+    /** May this account put its own name on its PDFs? (setting pdf_whitelabel: '' nobody, * everyone, or account ids) */
+    public static function ownAllowed(int $clientId): bool
+    {
+        $v = trim(Settings::get('pdf_whitelabel'));
+        return $v === '*' || ($v !== '' && in_array((string) $clientId, array_map('trim', preg_split('~[\s,،]+~u', $v) ?: []), true)); // i18n-skip (a pattern)
+    }
+
+    /** Runs $fn with the account's own name on the PDF, when it may and has set one. */
+    public static function asClient(int $clientId, callable $fn)
+    {
+        $a = self::ownAllowed($clientId) ? Accounts::get($clientId) : null;
+        $name = $a ? Text::name((string) ($a->brand_name ?? ''), 60) : '';
+        $old = self::$own;
+        self::$own = $name !== '' ? ['name' => $name, 'contact' => Text::name((string) ($a->brand_contact ?? ''), 160)] : null;
+        try {
+            return $fn();
+        } finally {
+            self::$own = $old;
+        }
+    }
+
     public static function brand(): string
     {
+        if (self::$own) {
+            return (string) self::$own['name'];
+        }
         $b = Text::name(Settings::get('pdf_brand'), 60);
         return Lang::t($b !== '' ? $b : 'مارال کلاد');
     }
@@ -61,8 +88,8 @@ final class Pdf
             'size' => max(8, min(12, Settings::int('pdf_size') ?: 10)), 'page' => in_array($page, self::PAGES, true) ? $page : 'A4',
             'cover' => Settings::bool('pdf_cover'), 'toc' => Settings::bool('pdf_toc'), 'index' => Settings::bool('pdf_index'), 'assets' => Settings::bool('pdf_assets'), 'method' => Settings::bool('pdf_method'),
             'label' => $label === '-' ? '' : Lang::t($label),
-            'footer' => $footer !== '' ? Lang::t($footer) : Lang::t('بخش امنیت سایبری {brand}', ['brand' => self::brand()]),
-            'contact' => Text::name(Settings::get('pdf_contact'), 160),
+            'footer' => self::$own ? self::brand() : ($footer !== '' ? Lang::t($footer) : Lang::t('بخش امنیت سایبری {brand}', ['brand' => self::brand()])),
+            'contact' => self::$own ? (string) self::$own['contact'] : Text::name(Settings::get('pdf_contact'), 160),
             'disclaimer' => trim(Settings::get('pdf_disclaimer')),
         ];
     }
@@ -373,6 +400,31 @@ final class Pdf
             $out[] = [Lang::t('اسکن‌های این دوره'), '<table cellpadding="4"><tr>' . $th('نوع اسکن', '30%') . $th('دارایی', '30%') . $th('وضعیت', '16%') . $th('پایان', '24%') . '</tr>' . $rows . '</table>'];
         }
 
+        $cp = is_array($d['compliance'] ?? null) ? $d['compliance'] : null;
+        if ($cp && !empty($cp['owasp'])) {
+            $crow = function (int $i, string $code, string $title, array $x): string {
+                $bg = $i % 2 ? '#f8fafc' : '#ffffff';
+                $sev = (string) ($x['severity'] ?? '');
+                return '<tr><td width="14%" style="background-color:' . $bg . '">' . self::ltr($code) . '</td><td width="50%" style="background-color:' . $bg . '">' . self::e(Lang::t($title)) . '</td>'
+                    . '<td width="18%" align="center" style="background-color:' . $bg . ((int) ($x['n'] ?? 0) > 0 ? ';font-weight:bold' : ';color:#94a3b8') . '">' . ((int) ($x['n'] ?? 0) > 0 ? self::e(Text::fa((int) $x['n'])) : self::e(Lang::t('دیده نشد'))) . '</td>'
+                    . '<td width="18%" align="center" style="background-color:' . $bg . ';color:' . (self::SEV_COLOR[$sev] ?? '#94a3b8') . '">' . ($sev !== '' ? self::e(Lang::t((string) (Findings::SEVERITIES[$sev]['label'] ?? ''))) : '') . '</td></tr>';
+            };
+            $chead = '<tr>' . $th('بند', '14%') . $th('عنوان', '50%') . $th('یافته‌ی باز', '18%', 'center') . $th('بالاترین شدت', '18%', 'center') . '</tr>';
+            $ow = '';
+            $i = 0;
+            foreach (Compliance::OWASP as $k => $title) {
+                $ow .= $crow($i++, $k, $title, (array) ($cp['owasp'][$k] ?? []));
+            }
+            $iso = '';
+            $i = 0;
+            foreach ((array) ($cp['iso'] ?? []) as $k => $x) {
+                $iso .= isset(Compliance::ISO[$k]) ? $crow($i++, (string) $k, Compliance::ISO[$k], (array) $x) : '';
+            }
+            $out[] = [Lang::t('نگاشت به استانداردها'), '<p><b>' . self::ltr('OWASP Top 10 (2021)') . '</b></p><table cellpadding="4">' . $chead . $ow . '</table>'
+                . ($iso !== '' ? '<p><b>' . self::ltr('ISO/IEC 27001:2022 — Annex A') . '</b></p><table cellpadding="4">' . $chead . $iso . '</table>' : '')
+                . '<p style="font-size:8pt;color:#64748b">' . self::e(Compliance::note()) . '</p>'];
+        }
+
         // last: how to read this report, and what it is not
         $note = '<p style="font-size:8pt;color:#64748b">' . ($t['disclaimer'] !== '' ? nl2br(self::text($t['disclaimer'])) : Lang::t('این گزارش از داده‌ی اسکن‌های خودکار ساخته شده و جای تست نفوذ دستی را نمی‌گیرد.'))
             . ($ai ? ' ' . Lang::t('بخش‌های هوش مصنوعی با مدل {model} نوشته شده‌اند؛ پیش از اجرای دستورها آن‌ها را بخوانید.', ['model' => self::ltr($ai['model'] ?? '')]) : '') . '</p>';
@@ -428,7 +480,7 @@ final class Pdf
         }
         $t = self::template();
         $rtl = Lang::rtl();
-        $logo = Blobs::get('pdf_logo');
+        $logo = self::$own ? null : Blobs::get('pdf_logo'); // another company's name never sits under our logo
         $pdf = new class('P', 'mm', $t['page'], true, 'UTF-8', false) extends \TCPDF {
             public string $mcsFont = 'dejavusans';
             public array $mcs = [];

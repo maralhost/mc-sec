@@ -165,6 +165,7 @@ final class AssetViews
         }
 
         $out .= self::surfaceCard($a, $ctx);
+        $out .= self::badgePanel($ctx, $a);
         $scans = Scans::recent($cid, 10, (int) $a->id);
         if ($scans) {
             $out .= Ui::card(ScanViews::table($scans, false), 'اسکن‌های این دارایی', 'radar', '<a class="btn btn-default btn-sm" href="index.php?m=mcsec&amp;p=scans">' . Lang::t('همه‌ی اسکن‌ها') . '</a>');
@@ -186,6 +187,28 @@ final class AssetViews
      * A domain behind a CDN: what that means for its scans and, when the admin allows it, the real server's IP on
      * which the scans that probe ports run instead.
      */
+    /** «نشان پایش امنیتی»: a small picture the customer may put on their own site. It says "monitored", never "secure". */
+    private static function badgePanel(array $ctx, object $a): string
+    {
+        if (!Settings::bool('site_badge') || $a->kind !== 'domain' || $a->status !== 'verified') {
+            return '';
+        }
+        $b = \McSec\Shares::badgeOf((int) $a->client_id, (int) $a->id);
+        $form = fn (string $inner, string $confirm = '') => Ui::form($ctx, 'asset', 'asset_badge', '<input type="hidden" name="asset" value="' . (int) $a->id . '">' . $inner, $confirm, 'mcs-inline', false, '&amp;id=' . (int) $a->id);
+        $body = '<p>' . Lang::t('یک نشان کوچک برای پایین سایت خودتان: می‌گوید این سایت با مارال کلاد پایش امنیتی می‌شود و آخرین بررسی کی بوده است. نمی‌گوید سایت «امن» است، و اگر بیش از ۳۵ روز اسکن کاملی نداشته باشید خاکستری می‌شود.') . '</p>';
+        if ($b) {
+            $src = \McSec\Shares::badgeUrl((string) $b->token) . (Lang::fa() ? '' : '&l=en');
+            $body .= '<p><img src="index.php?m=mcsec&amp;p=badge&amp;t=' . self::e($b->token) . (Lang::fa() ? '' : '&amp;l=en') . '" width="220" height="48" alt="' . self::e(Lang::t('نشان پایش امنیتی')) . '"></p>'
+                . Ui::code('<a href="' . \McSec\Whmcs::systemUrl() . '" rel="noopener"><img src="' . $src . '" width="220" height="48" alt="' . Lang::t('پایش امنیتی · مارال کلاد') . '"></a>', 'این کد را در قالب سایتتان بگذارید')
+                . ($ctx['manage'] ? $form('<input type="hidden" name="on" value="0"><button type="submit" class="btn btn-default btn-sm">' . Lang::t('برداشتن نشان') . '</button>', 'نشان برداشته شود؟ تصویر آن در سایتتان دیگر نشان داده نمی‌شود.') : '');
+        } elseif ($ctx['manage']) {
+            $body .= $form('<input type="hidden" name="on" value="1"><button type="submit" class="btn btn-default">' . Ui::ico('shield-check') . Lang::t('ساختن نشان') . '</button>');
+        } else {
+            return '';
+        }
+        return Ui::drawer(Lang::t('نشان «پایش امنیتی» برای سایت شما'), $body, (bool) $b, 'shield-check', 'badge');
+    }
+
     private static function cdnPanel(array $ctx, object $a): string
     {
         if ($a->kind !== 'domain') {

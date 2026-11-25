@@ -179,6 +179,7 @@ final class Reports
                 'location' => (string) $f->location, 'description' => mb_substr((string) $f->description, 0, 700), 'evidence' => mb_substr((string) $f->evidence, 0, 400),
                 'solution' => mb_substr((string) $f->solution, 0, 700), 'cve' => (string) $f->cve, 'cvss' => $f->cvss !== null ? (float) $f->cvss : null,
                 'first_seen' => (int) $f->first_seen_at, 'new' => $scan ? (int) $f->first_scan_id === (int) $scan->id : (int) $f->first_seen_at >= (int) $r->period_from && (int) $r->period_from > 0,
+                'kbk' => (string) $f->kb !== '' ? (string) $f->kb : Kb::match((string) $f->source_key, (string) $f->title),
                 'source_key' => (string) $f->source_key, 'kb' => $kb ? ['title' => $kb['title'], 'why' => $kb['why'], 'steps' => $kb['steps'], 'snippets' => $kb['snippets'] ?? [], 'effort' => $kb['effort'] ?? ''] : null,
             ];
         }
@@ -205,6 +206,8 @@ final class Reports
             'findings' => $findings, 'more' => max(0, count($open) - self::MAX_FINDINGS), 'fixed' => array_map(fn ($f) => (array) $f, $fixed),
             'surface' => $assetIds ? self::surfaceSummary($assetIds) : [], 'scans' => $scans,
             'basic_summary' => self::basicSummary($counts, $score, count($fixed), $newCount, $findings),
+            // every open finding counts here, not only the ones printed in full
+            'compliance' => Settings::bool('report_compliance') ? Compliance::summary(array_map(fn ($f) => ['kbk' => (string) $f->kb !== '' ? (string) $f->kb : Kb::match((string) $f->source_key, (string) $f->title), 'severity' => (string) $f->severity], $open)) : null,
         ];
     }
 

@@ -705,3 +705,13 @@ body.lagom .mcs a.mcs-stat{border-color:transparent}html.lagom-dark-mode .mcs a.
 .mcs a.mcs-pill{display:inline-flex;align-items:center;gap:.35rem;padding:.25rem .7rem;border:1px solid var(--t-line);border-radius:999px;font-size:.85rem;color:var(--t-text);text-decoration:none;background:var(--t-bg)}
 .mcs a.mcs-pill:hover,.mcs a.mcs-pill:focus-visible{border-color:var(--t-primary);color:var(--t-primary)}
 .mcs a.mcs-pill.is-on{background:var(--t-primary);border-color:var(--t-primary);color:#fff}
+/* 0.21.0 */
+.mcs .mcs-shares{display:grid;gap:.6rem;margin-block:.6rem}
+.mcs .mcs-share{display:flex;flex-wrap:wrap;align-items:center;gap:.5rem}
+.mcs .mcs-share .mcs-code{flex:1 1 16rem;min-inline-size:0}
+.mcs .mcs-geo{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr);gap:var(--t-gap);align-items:center}
+@container (max-width:640px){.mcs .mcs-geo{grid-template-columns:1fr}}
+.mcs .mcs-world{inline-size:100%;block-size:auto;display:block}
+.mcs .mcs-world-land{fill:var(--t-muted);opacity:.38}
+.mcs .mcs-world-pin{fill:#0ea5e9;stroke:#fff;stroke-width:.8}
+.mcs .mcs-world-halo{fill:#0ea5e9;opacity:.22}

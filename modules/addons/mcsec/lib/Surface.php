@@ -11,7 +11,7 @@ namespace McSec;
  */
 final class Surface
 {
-    public const KINDS = ['host' => 'میزبان', 'port' => 'درگاه و سرویس', 'tech' => 'فناوری', 'cert' => 'گواهی', 'url' => 'نشانی', 'dns' => 'رکورد DNS'];
+    public const KINDS = ['host' => 'میزبان', 'port' => 'درگاه و سرویس', 'tech' => 'فناوری', 'cert' => 'گواهی', 'url' => 'نشانی', 'dns' => 'رکورد DNS', 'ip' => 'نشانی IP'];
 
     /** Ports whose sudden appearance deserves an alert on its own. */
     public const RISKY_PORTS = [21, 23, 445, 1433, 2375, 3306, 3389, 5432, 5900, 6379, 9200, 11211, 27017];

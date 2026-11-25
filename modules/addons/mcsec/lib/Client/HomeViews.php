@@ -67,6 +67,7 @@ final class HomeViews
                 ['سرویس و درگاه', $d['hist']['port'], '#f59e0b'], ['میزبان', $d['hist']['host'], '#8b5cf6'], ['فناوری', $d['hist']['tech'], '#3b82f6'], ['نشانی', $d['hist']['url'], '#10b981'], ['دارایی', $d['hist']['asset'], '#ef4444'],
             ]), 'روند سطح حمله', 'activity') . self::newHosts($d) . '</div>'
             . '<div class="mcs-grid2">' . self::topPorts($d) . self::topTech($d) . '</div>'
+            . self::geoCard($cid, $verified)
             . '<div class="mcs-dash2">' . Ui::card(Charts::trend($d['days'], $d['hist']['open'], Lang::t('یافته‌ی باز')), 'روند آسیب‌پذیری‌ها', 'bug',
                 '<span class="mcs-small mcs-muted">' . self::e(Lang::t('۱۴ روز: {new} تازه، {fixed} رفع‌شده', ['new' => Text::fa(array_sum($d['dayNew'])), 'fixed' => Text::fa(array_sum($d['dayFixed']))])) . '</span>')
             . self::worst($verified) . '</div>';
@@ -196,6 +197,37 @@ final class HomeViews
     }
 
     /** The assets with the most open findings, each as a bar split by severity. */
+    /** «موقعیت سرورها»: where the IPs of the verified assets are (from the engine's own data), as a dotted map and a list of countries. */
+    private static function geoCard(int $cid, array $verified): string
+    {
+        if (!Settings::bool('geo_map') || !$verified) {
+            return '';
+        }
+        $rows = Db::rows(Db::table('mod_mcsec_surface')->where('client_id', $cid)->where('kind', 'ip')->where('gone_at', 0)
+            ->whereIn('asset_id', array_map(fn ($a) => (int) $a->id, $verified))->orderByDesc('last_seen_at')->limit(300));
+        $by = [];
+        $pts = [];
+        foreach ($rows as $r) {
+            $m = \McSec\Surface::meta($r);
+            if (!isset($m['lat'], $m['lon']) || !preg_match('~^[A-Z]{2}$~', (string) ($m['cc'] ?? ''))) {
+                continue;
+            }
+            $name = (string) ($m['country'] ?? '') !== '' ? (string) $m['country'] : (string) $m['cc'];
+            $by[$name] = ($by[$name] ?? 0) + 1;
+            $pts[round((float) $m['lon']) . ',' . round((float) $m['lat'])] = [(float) $m['lon'], (float) $m['lat']];
+        }
+        if (!$by) {
+            return '';
+        }
+        arsort($by);
+        $list = [];
+        foreach (array_slice($by, 0, 6, true) as $name => $n) {
+            $list[] = [$name, $n, ''];
+        }
+        return Ui::card('<div class="mcs-geo">' . Charts::world(array_values(array_slice($pts, 0, 60))) . '<div>' . Charts::ranked($list)
+            . '<p class="mcs-small mcs-muted">' . self::e(Lang::t('{n} نشانی IP در {c} کشور؛ موقعیت‌ها تقریبی است.', ['n' => Text::fa(array_sum($by)), 'c' => Text::fa(count($by))])) . '</p></div></div>', 'موقعیت سرورها', 'globe');
+    }
+
     private static function worst(array $verified): string
     {
         $list = [];

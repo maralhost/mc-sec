@@ -603,6 +603,24 @@ final class Oasm implements Engine
                 break;
             }
         }
+        if (Settings::bool('geo_map')) {
+            // where the target's IPs are, as OASM itself knows it (its own geo data; no other service is asked). Optional: a failure is not the scan's
+            try {
+                $r = $this->call('GET', '/api/assets/ip?targetIds=' . rawurlencode($tid) . '&limit=100&page=1', null, $ws, 20);
+                foreach ($r['ok'] ? (array) ($r['json']['data'] ?? []) : [] as $row) {
+                    $ip = (string) ($row['ip'] ?? '');
+                    $g = is_array($row['geoIp'] ?? null) ? $row['geoIp'] : [];
+                    $cc = strtoupper((string) ($g['countryCode'] ?? ''));
+                    if (filter_var($ip, FILTER_VALIDATE_IP) === false || !preg_match('~^[A-Z]{2}$~', $cc) || !is_numeric($g['lat'] ?? null) || !is_numeric($g['lon'] ?? null)) {
+                        continue;
+                    }
+                    $surface[] = ['kind' => 'ip', 'value' => $ip, 'meta' => ['cc' => $cc, 'country' => mb_substr(preg_replace('~[^\p{L}\p{N} .,()\'-]~u', '', (string) ($g['country'] ?? '')) ?? '', 0, 60),
+                        'city' => mb_substr(preg_replace('~[^\p{L}\p{N} .,()\'-]~u', '', (string) ($g['city'] ?? '')) ?? '', 0, 60), 'lat' => max(-90.0, min(90.0, round((float) $g['lat'], 2))), 'lon' => max(-180.0, min(180.0, round((float) $g['lon'], 2)))]];
+                }
+            } catch (\Throwable $e) {
+                // the map is extra
+            }
+        }
         $findings = [];
         $piped = in_array($m['kind'] ?? '', ['vuln', 'pipeline'], true);
         $mine = array_map('strtolower', (array) ($m['tools'] ?? ['nuclei']));

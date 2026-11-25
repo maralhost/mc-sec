@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.20.0';
+    public const SCHEMA = '0.21.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -488,6 +488,21 @@ final class Installer
             $t->integer('updated_at')->default(0);
         });
 
+        // 0.21.0 what an account shows to people without a login: a read-only report link, a badge for its own site
+        $make('mod_mcsec_shares', function ($t) {
+            $t->increments('id');
+            $t->integer('client_id')->index();
+            $t->string('kind', 12);                   // report | badge
+            $t->integer('ref_id');                    // report id, or asset id
+            $t->string('token', 64)->unique();
+            $t->string('pass', 255)->default('');     // password_hash, '' = none
+            $t->integer('expires_at')->default(0);    // 0 = no expiry (badges)
+            $t->integer('created_by')->default(0);
+            $t->integer('created_at')->default(0);
+            $t->integer('revoked_at')->default(0);
+            $t->index(['kind', 'ref_id']);
+        });
+
         // 0.15.0 requests for a person's work: a question, a paid fix, a manual test with the team's price
         $make('mod_mcsec_requests', function ($t) {
             $t->increments('id');
@@ -544,6 +559,9 @@ final class Installer
         $col('mod_mcsec_assets', 'cdn', fn ($t) => $t->string('cdn', 40)->default(''));
         $col('mod_mcsec_assets', 'cdn_checked_at', fn ($t) => $t->integer('cdn_checked_at')->default(0));
         $col('mod_mcsec_assets', 'origin_id', fn ($t) => $t->integer('origin_id')->default(0));
+        // 0.21.0: the account's own name and contact line on its PDF reports (white label)
+        $col('mod_mcsec_accounts', 'brand_name', fn ($t) => $t->string('brand_name', 60)->default(''));
+        $col('mod_mcsec_accounts', 'brand_contact', fn ($t) => $t->string('brand_contact', 160)->default(''));
         // 0.20.0: the user of the account who takes care of a finding (0 = nobody)
         $col('mod_mcsec_findings', 'assignee', fn ($t) => $t->integer('assignee')->default(0));
         // 0.18.0: the site was shown to be served by its origin server (requests may go straight there), and whether its certificate is ignored

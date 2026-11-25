@@ -39,10 +39,10 @@ final class Controller
     /** Tests: return arrays instead of printing JSON and exiting. */
     public static bool $testMode = false;
 
-    public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'assistant', 'support', 'notify', 'credits', 'activity'];
+    public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'compare', 'schedules', 'recipes', 'assistant', 'support', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send', 'request_accept', 'findings_retest_all'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send', 'request_accept', 'findings_retest_all', 'report_share', 'asset_badge'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode', 'setup_hide'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
@@ -56,6 +56,24 @@ final class Controller
             $label = Lang::t('درباره‌ی اسکنر امنیتی');
             return ['pagetitle' => $label, 'breadcrumb' => ['index.php?m=mcsec&p=scanner' => $label], 'templatefile' => 'templates/page', 'requirelogin' => false, 'forcessl' => true,
                 'vars' => ['mcsec_html' => Views::scanner()]];
+        }
+        if (($_GET['p'] ?? '') === 'badge' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+            // the picture a customer put on their own site: fixed words and one date, made here; no login, nothing changes
+            $svg = \McSec\Shares::badgeSvg((string) ($_GET['t'] ?? ''), (string) ($_GET['l'] ?? 'fa'));
+            return self::file($svg !== null ? ['mime' => 'image/svg+xml', 'bytes' => $svg] : null, 3600);
+        }
+        if (($_GET['p'] ?? '') === 'shared') {
+            // a read-only report behind a long random token (and a password, if its owner set one): that report and nothing else
+            $token = (string) ($_GET['t'] ?? '');
+            $st = \McSec\Shares::open($token, ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' ? (string) ($_POST['pw'] ?? '') : null);
+            if (!self::$testMode && !headers_sent()) {
+                header('X-Robots-Tag: noindex, nofollow');
+                header('Referrer-Policy: no-referrer');
+                header('Cache-Control: private, no-store');
+            }
+            $label = Lang::t('گزارش امنیتی');
+            return ['pagetitle' => $label, 'breadcrumb' => [], 'templatefile' => 'templates/page', 'requirelogin' => false, 'forcessl' => true,
+                'vars' => ['mcsec_html' => Views::bare(ReportViews::shared($st, preg_match('~^[a-f0-9]{48}$~', $token) ? $token : ''))]];
         }
         $who = Auth::client();
         if ($who === null) {
@@ -171,7 +189,7 @@ final class Controller
     private static function reportPdf(int $clientId, int $id): array
     {
         $r = \McSec\Reports::get($clientId, $id);
-        $bytes = $r && $r->status === 'ready' ? \McSec\Pdf::render(\McSec\Reports::data($r)) : '';
+        $bytes = $r && $r->status === 'ready' ? (string) \McSec\Pdf::asClient($clientId, fn () => \McSec\Pdf::render(\McSec\Reports::data($r))) : '';
         return self::file($bytes !== '' ? ['mime' => 'application/pdf', 'bytes' => $bytes, 'name' => 'mcsec-report-' . $id . '.pdf'] : null);
     }
 
@@ -400,6 +418,22 @@ final class Controller
             case 'finding_status':
                 $r = Findings::setStatus($who, $int('finding'), $in('status'), $in('note'));
                 return ['flash' => $r['ok'] ? 'ok:' . Lang::t('وضعیت یافته ذخیره شد.') : 'err:' . $r['error']];
+            case 'brand_save':
+                if (!\McSec\Pdf::ownAllowed($cid)) {
+                    return ['flash' => 'err:' . Lang::t('این قابلیت برای حساب شما باز نیست.')];
+                }
+                Accounts::update($cid, ['brand_name' => Text::name($in('brand_name'), 60), 'brand_contact' => Text::name($in('brand_contact'), 160)]);
+                \McSec\Audit::log($cid, 'brand', Text::name($in('brand_name'), 60), [], $who['user_id']);
+                return ['flash' => 'ok:' . ($in('brand_name') !== '' ? Lang::t('ذخیره شد. PDF گزارش‌ها از این پس با نام شما ساخته می‌شود.') : Lang::t('ذخیره شد. PDF گزارش‌ها با قالب پیش‌فرض ساخته می‌شود.'))];
+            case 'report_share':
+                $r = \McSec\Shares::create($who, $int('report'), $int('days'), (string) ($_POST['password'] ?? ''));
+                return ['flash' => $r['ok'] ? 'ok:' . Lang::t('پیوند ساخته شد. آن را از پایین همین صفحه کپی کنید.') : 'err:' . Lang::t((string) $r['error'])];
+            case 'report_unshare':
+                $r = \McSec\Shares::revoke($who, $int('share'));
+                return ['flash' => $r['ok'] ? 'ok:' . Lang::t('پیوند برداشته شد.') : 'err:' . Lang::t((string) $r['error'])];
+            case 'asset_badge':
+                $r = \McSec\Shares::badge($who, $int('asset'), $in('on') === '1');
+                return ['flash' => $r['ok'] ? 'ok:' . ($in('on') === '1' ? Lang::t('نشان ساخته شد. کد آن پایین همین صفحه است.') : Lang::t('نشان برداشته شد.')) : 'err:' . Lang::t((string) $r['error'])];
             case 'finding_assign':
                 $r = Findings::assign($who, $int('finding'), $int('user'));
                 return ['flash' => $r['ok'] ? 'ok:' . ($int('user') > 0 ? Lang::t('یافته واگذار شد.') : Lang::t('واگذاری برداشته شد.')) : 'err:' . Lang::t((string) $r['error'])];

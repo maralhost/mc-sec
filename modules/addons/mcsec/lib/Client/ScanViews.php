@@ -304,6 +304,11 @@ final class ScanViews
             } elseif ((int) ($sum['seen'] ?? 0) === 0) {
                 $out .= Ui::card(Ui::emptyState('shield-check', 'این اسکن مشکلی پیدا نکرد', Lang::t('آفرین. با زمان‌بندی، اسکن‌های بعدی را خودکار بگیرید.')));
             }
+            $prev = Db::table('mod_mcsec_scans')->where('client_id', $cid)->where('asset_id', (int) $s->asset_id)->where('profile', (string) $s->profile)->where('status', 'completed')->where('id', '<', (int) $s->id)->orderByDesc('id')->first();
+            if ($prev) {
+                $out .= '<p class="mcs-small"><a href="index.php?m=mcsec&amp;p=compare&amp;from=' . (int) $prev->id . '&amp;to=' . (int) $s->id . '">' . Ui::ico('layers')
+                    . self::e(Lang::t('چه چیزی نسبت به اسکن قبلی ({date}) عوض شده است؟', ['date' => Text::date((int) $prev->finished_at, false)])) . '</a></p>';
+            }
             $reports = Db::rows(Db::table('mod_mcsec_reports')->where('client_id', $cid)->where('scan_id', $s->id)->orderByDesc('id'));
             $rep = '';
             foreach ($reports as $r) {
@@ -319,6 +324,46 @@ final class ScanViews
                 . '<button type="submit" class="btn btn-default">' . Ui::ico('refresh') . ((int) (Catalog::get((string) $s->profile)['credits'] ?? 0) > 0 ? Lang::t('دوباره · {n} اعتبار', ['n' => self::e(Text::fa((int) Catalog::get((string) $s->profile)['credits']))]) : Lang::t('دوباره')) . '</button>', '', 'mcs-inline');
         }
         return $out;
+    }
+
+    /** What changed on one asset between two of its completed scans: findings that appeared, that were fixed, and the surface. */
+    public static function compare(array $ctx): string
+    {
+        $cid = (int) $ctx['who']['client_id'];
+        $from = Scans::get($cid, (int) Text::toAscii((string) ($_GET['from'] ?? '0')));
+        $to = Scans::get($cid, (int) Text::toAscii((string) ($_GET['to'] ?? '0')));
+        if (!$from || !$to || (int) $from->asset_id !== (int) $to->asset_id || $from->status !== 'completed' || $to->status !== 'completed' || (int) $from->id >= (int) $to->id) {
+            return Views::missing('این مقایسه', 'index.php?m=mcsec&p=scans', 'بازگشت به اسکن‌ها');
+        }
+        $aid = (int) $to->asset_id;
+        $asset = Db::table('mod_mcsec_assets')->where('id', $aid)->where('client_id', $cid)->first();
+        $rank = "CASE severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
+        $base = fn () => Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('asset_id', $aid);
+        $new = Db::rows($base()->where('first_scan_id', '>', (int) $from->id)->where('first_scan_id', '<=', (int) $to->id)->orderByRaw($rank . ' DESC')->limit(100));
+        $fixed = Db::rows($base()->where('fixed_scan_id', '>', (int) $from->id)->where('fixed_scan_id', '<=', (int) $to->id)->orderByRaw($rank . ' DESC')->limit(100));
+        $same = (int) $base()->where('first_scan_id', '<=', (int) $from->id)->where('status', 'open')->count();
+        $surf = fn () => Db::table('mod_mcsec_surface')->where('client_id', $cid)->where('asset_id', $aid);
+        $sNew = Db::rows($surf()->where('first_scan_id', '>', (int) $from->id)->where('first_scan_id', '<=', (int) $to->id)->orderBy('kind')->limit(100));
+        $sGone = Db::rows($surf()->where('gone_at', '>', (int) $from->finished_at)->where('gone_at', '<=', (int) $to->finished_at)->orderBy('kind')->limit(100));
+        $link = fn (object $s) => '<a href="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '">' . self::e(Catalog::label((string) $s->profile)) . '</a> <span class="mcs-muted">' . self::e(Text::date((int) $s->finished_at)) . '</span>';
+        $out = Ui::card(Ui::facts(['دارایی' => $asset ? '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . $aid . '">' . Ui::ltr((string) $asset->value) . '</a>' : '', 'اسکن قبلی' => $link($from), 'اسکن تازه' => $link($to)])
+            . '<ul class="mcs-diff"><li class="is-warn"><strong>' . self::e(Text::fa(count($new))) . '</strong><span>' . Lang::t('یافته‌ی تازه') . '</span></li><li class="is-ok"><strong>' . self::e(Text::fa(count($fixed)))
+            . '</strong><span>' . Lang::t('رفع‌شده') . '</span></li><li><strong>' . self::e(Text::fa($same)) . '</strong><span>' . Lang::t('هنوز باز') . '</span></li><li><strong>' . self::e(Text::fa(count($sNew)))
+            . '</strong><span>' . Lang::t('مورد تازه در سطح حمله') . '</span></li><li><strong>' . self::e(Text::fa(count($sGone))) . '</strong><span>' . Lang::t('مورد رفته از سطح حمله') . '</span></li></ul>', 'مقایسه', 'layers');
+        $fl = function (array $rows): string {
+            $h = '';
+            foreach ($rows as $f) {
+                $h .= '<li><a href="index.php?m=mcsec&amp;p=finding&amp;id=' . (int) $f->id . '">' . Ui::sev((string) $f->severity) . '<span class="mcs-todo-title" dir="auto">' . self::e($f->title) . '</span></a></li>';
+            }
+            return '<ol class="mcs-todo">' . $h . '</ol>';
+        };
+        $sl = fn (array $rows) => '<ul class="mcs-plain">' . implode('', array_map(fn ($x) => '<li>' . Ui::chip((string) (\McSec\Surface::KINDS[(string) $x->kind] ?? $x->kind), 'muted') . ' ' . Ui::ltr((string) $x->value) . '</li>', $rows)) . '</ul>';
+        $none = fn (string $t) => '<p class="mcs-muted">' . Lang::t($t) . '</p>';
+        $out .= '<div class="mcs-grid2">' . Ui::card($new ? $fl($new) : $none('یافته‌ی تازه‌ای نیست.'), 'یافته‌های تازه', 'bug') . Ui::card($fixed ? $fl($fixed) : $none('در این فاصله چیزی رفع نشده است.'), 'رفع‌شده‌ها', 'check') . '</div>';
+        if ($sNew || $sGone) {
+            $out .= '<div class="mcs-grid2">' . Ui::card($sNew ? $sl($sNew) : $none('چیز تازه‌ای دیده نشد.'), 'تازه در سطح حمله', 'radar') . Ui::card($sGone ? $sl($sGone) : $none('چیزی از دید نرفته است.'), 'رفته از سطح حمله', 'radar') . '</div>';
+        }
+        return $out . '<p class="mcs-small mcs-muted">' . Lang::t('این مقایسه همه‌ی اسکن‌های میان این دو را هم در بر دارد: هر چه پس از اسکن قبلی تا پایان اسکن تازه دیده یا رفع شده است.') . '</p>';
     }
 
     private static function duration(int $sec): string

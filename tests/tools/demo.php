@@ -15,6 +15,10 @@ function demo_data(): void
         'gift_enabled' => '1', 'invite_enabled' => '1', 'auto_topup_enabled' => '1', 'advanced_enabled' => '1', 'advanced_plan_only' => '0', 'assistant_enabled' => '1', 'assistant_all' => '1', 'verify_dns_api' => '1', 'support_dept' => '1', 'export_csv' => '1', 'host_mute' => '1', 'ai_opinion' => '1', 'service_box' => '1', 'domain_watch' => '1', 'threat_alerts' => '1', 'telegram_bot' => 'MaralSecBot', 'bale_bot' => 'maralsec_bot'] as $k => $v) {
         setting($k, $v);
     }
+    foreach (['geo_map', 'report_share', 'site_badge', 'report_compliance', 'fix_deadlines', 'finding_assign'] as $k) {
+        setting($k, '1'); // what 0.20.0 and 0.21.0 added, all on for the preview
+    }
+    setting('pdf_whitelabel', '*');
     \McSec\Rules::save(['scope' => 'group', 'target' => 2, 'monthly' => 30, 'max_assets' => 10]);
     \McSec\Settings::setSecret('ai_key', 'demo');
     \McSec\Settings::setSecret('bale_token', 'demo');
@@ -99,6 +103,10 @@ function demo_data(): void
         ['key' => 'oasm.wordpress-xmlrpc', 'title' => 'WordPress XML-RPC Enabled', 'severity' => 'low', 'location' => 'https://shop-maral.ir/xmlrpc.php', 'description' => 'xmlrpc.php answers system.listMethods'],
         ['key' => 'oasm.phpinfo', 'title' => 'phpinfo() Page Exposed', 'severity' => 'medium', 'location' => 'https://shop-maral.ir/info.php', 'evidence' => 'PHP Version 7.4.33'],
     ], true);
+    \McSec\Surface::ingest($vs, $asset, [['kind' => 'ip', 'value' => '185.165.119.20', 'meta' => ['cc' => 'IR', 'country' => 'Iran', 'city' => 'Tehran', 'lat' => 35.69, 'lon' => 51.42]],
+        ['kind' => 'ip', 'value' => '49.12.10.4', 'meta' => ['cc' => 'DE', 'country' => 'Germany', 'city' => 'Falkenstein', 'lat' => 50.47, 'lon' => 12.37]],
+        ['kind' => 'ip', 'value' => '49.12.10.5', 'meta' => ['cc' => 'DE', 'country' => 'Germany', 'city' => 'Nuremberg', 'lat' => 49.45, 'lon' => 11.08]],
+        ['kind' => 'ip', 'value' => '104.21.3.9', 'meta' => ['cc' => 'US', 'country' => 'United States', 'city' => 'San Francisco', 'lat' => 37.77, 'lon' => -122.42]]], []);
     \McSec\Surface::ingest($vs, $asset, [['kind' => 'host', 'value' => 'shop-maral.ir'], ['kind' => 'host', 'value' => 'www.shop-maral.ir'], ['kind' => 'host', 'value' => 'mail.shop-maral.ir'],
         ['kind' => 'port', 'value' => '198.51.100.7:443', 'meta' => ['title' => 'فروشگاه', 'server' => 'nginx']], ['kind' => 'tech', 'value' => 'WordPress:6.4.2'], ['kind' => 'tech', 'value' => 'WooCommerce']], []);
     Db::table('mod_mcsec_scans')->where('id', $sid)->update(['summary' => json_encode(['new' => count($diff['new']), 'fixed' => 0, 'reopened' => 0, 'seen' => 3, 'open' => \McSec\Findings::openCounts(0, $shop), 'surface_new' => 2, 'surface_seen' => 6])]);
