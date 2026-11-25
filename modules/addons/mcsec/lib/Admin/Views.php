@@ -640,7 +640,7 @@ final class Views
 
     private static function settings(): string
     {
-        $out = self::guide('<p>هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است. روال پیشنهادی: «چه کسانی» = list با چند حساب آزمایشی ← آزمودن ← groups یا all.</p>');
+        $out = self::advisor() . self::guide('<p>هر قابلیتی که روی مشتری اثر دارد پیش‌فرض خاموش است. روال پیشنهادی: «چه کسانی» = list با چند حساب آزمایشی ← آزمودن ← groups یا all.</p>');
         foreach (['general' => 'عمومی و دسترسی', 'scope' => 'محدوده‌ی اسکن: فهرست ممنوع و CDN', 'scans' => 'ظرفیت و اسکن', 'checks' => 'فهرست سیاه، پایش و اولویت آسیب‌پذیری‌ها',
             'support' => 'پشتیبانی، پیشنهاد خدمت و صفحه‌ی «درباره‌ی اسکنر»', 'advanced' => 'حالت پیشرفته: اسکن سفارشی مشتری', 'assistant' => 'دستیار امنیت (گفت‌وگوی هوش مصنوعی)', 'extras' => 'قابلیت‌های تکمیلی (هر کدام یک کلید)', 'credits' => 'اعتبار', 'billing' => 'هدیه، دعوت و شارژ خودکار', 'system' => 'سامانه'] as $g => $l) {
             $out .= self::box($l, self::form('settings', 'save_settings', self::fields($g) . '<button class="btn btn-primary">ذخیره</button>')
@@ -650,6 +650,63 @@ final class Views
                     . '<small>با قاعده‌های ذخیره‌شده‌ی بالا می‌سنجد: IPهای دامنه، قاعده‌ی ممنوعی که به آن می‌خورد و CDN جلوی آن. چیزی را تغییر نمی‌دهد.</small></div>') : ''));
         }
         return $out;
+    }
+
+    /**
+     * «راهنمای راه‌اندازی با هوش مصنوعی» on top of the settings page: a question box, and the stored answer of this
+     * admin with the changes it proposes (ticked by the admin, applied by a second POST) and samples to copy.
+     * Every text of the model is escaped; nothing here changes a setting by itself.
+     */
+    private static function advisor(): string
+    {
+        if (!Auth::adminCan('settings')) {
+            return '';
+        }
+        if (!\McSec\Ai::ready()) {
+            return self::box('راهنمای راه‌اندازی با هوش مصنوعی', '<p>بنویسید چه می‌خواهید و هوش مصنوعی گام‌ها، تنظیم‌های پیشنهادی و نمونه‌ی آماده می‌دهد. برای استفاده، اول در <a href="' . self::e(self::url('setup')) . '">راه‌اندازی موتورها</a> نشانی، مدل و کلید هوش مصنوعی را بگذارید (لازم نیست «گزارش هوش مصنوعی» برای مشتری‌ها روشن باشد).</p>');
+        }
+        $ask = '';
+        foreach (['برای شروع آزمایشی روی چند حساب چه چیزهایی را تنظیم کنم؟', 'پایش در دسترس بودن و SSL و هشدار انقضای دامنه را راه بینداز', 'می‌خواهم مشتری بتواند گزارش را با پیوند برای مدیرش بفرستد',
+            'یک نمونه برای «پیشنهاد خدمت کنار راهکار» بده', 'فشار اسکن روی سایت مشتری را کم کن'] as $q) {
+            $ask .= '<button class="btn btn-default btn-sm" name="q" value="' . self::e($q) . '">' . self::e($q) . '</button> ';
+        }
+        $form = self::form('settings', 'advisor_ask', '<div class="mcsa-field"><label for="mcsa-adv-q">چه چیزی را می‌خواهید راه بیندازید؟</label>'
+            . '<textarea class="form-control" id="mcsa-adv-q" name="q" rows="2" maxlength="600" dir="auto" placeholder="مثلاً: می‌خواهم دستیار امنیت فقط برای حساب‌های دارای پلن باز باشد"></textarea>'
+            . '<small>پرسش شما و فهرست تنظیم‌های ماژول (نام، توضیح، و مقدار کلیدها و عددها) برای مدل فرستاده می‌شود. رمزها، کلیدها و متن تنظیم‌های نوشتنی فرستاده نمی‌شوند. مدل چیزی را عوض نمی‌کند.</small></div>'
+            . '<button class="btn btn-primary">بپرس</button> <span class="mcsa-adv-or">یا یکی از این‌ها:</span> ' . $ask);
+        $p = \McSec\SetupAdvisor::current(Auth::adminId());
+        $res = '';
+        if (!empty($p['at'])) {
+            $res = '<hr><p class="mcsa-adv-q"><strong>پرسش:</strong> <span dir="auto">' . self::e($p['question'] ?? '') . '</span></p>'
+                . ((string) ($p['answer'] ?? '') !== '' ? '<p dir="auto">' . nl2br(self::e($p['answer'])) . '</p>' : '');
+            if (!empty($p['steps'])) {
+                $res .= '<ol>' . implode('', array_map(fn ($s) => '<li dir="auto">' . self::e($s) . '</li>', (array) $p['steps'])) . '</ol>';
+            }
+            $rows = '';
+            foreach ((array) ($p['changes'] ?? []) as $k => $c) {
+                $def = Settings::DEFS[$k] ?? null;
+                if ($def === null) {
+                    continue;
+                }
+                $show = fn (string $val) => $def[1] === 'bool' ? ($val === '1' ? 'روشن' : 'خاموش') : Text::fa($val);
+                $rows .= '<tr><td><input type="checkbox" name="pick[]" value="' . self::e($k) . '" id="mcsa-adv-' . self::e($k) . '" checked></td><td><label for="mcsa-adv-' . self::e($k) . '">' . self::e($def[3]) . '</label></td>'
+                    . '<td>' . self::e($show(Settings::get((string) $k))) . ' ← <strong>' . self::e($show((string) ($c['value'] ?? ''))) . '</strong></td><td dir="auto">' . self::e($c['why'] ?? '') . '</td></tr>';
+            }
+            if ($rows !== '') {
+                $res .= self::form('settings', 'advisor_apply', '<table class="table"><thead><tr><th></th><th>تنظیم</th><th>اکنون ← پیشنهاد</th><th>چرا</th></tr></thead><tbody>' . $rows . '</tbody></table>'
+                    . '<button class="btn btn-primary">اعمال موارد تیک‌خورده</button> <small>فقط همین کلیدها و عددها عوض می‌شوند؛ هر کدام را بعداً از همین صفحه می‌توانید برگردانید.</small>');
+            }
+            foreach ((array) ($p['samples'] ?? []) as $s) {
+                $def = Settings::DEFS[(string) ($s['key'] ?? '')] ?? null;
+                if ($def !== null) {
+                    $res .= '<div class="mcsa-adv-sample"><p><strong>نمونه برای «' . self::e($def[3]) . '»</strong>' . ((string) ($s['why'] ?? '') !== '' ? ' — <span dir="auto">' . self::e($s['why']) . '</span>' : '') . '</p>'
+                        . '<pre dir="ltr">' . self::e($s['text'] ?? '') . '</pre><small>این نمونه خودکار ذخیره نمی‌شود: آن را بخوانید، با داده‌ی خودتان درست کنید و در همان تنظیم بچسبانید.</small></div>';
+                }
+            }
+            $res .= self::form('settings', 'advisor_clear', '<button class="btn btn-link btn-sm">بستن این پاسخ</button>')
+                . '<p><small>این پاسخ را هوش مصنوعی نوشته و ممکن است اشتباه باشد؛ توضیح هر تنظیم در همین صفحه مرجع است.</small></p>';
+        }
+        return self::box('راهنمای راه‌اندازی با هوش مصنوعی', $form . $res);
     }
 
     /** Last KEV/EPSS refresh and how many monitored sites are down, under the "checks" settings. */
@@ -728,6 +785,7 @@ final class Views
             . '.mcsa .mcsa-pills a:hover{color:var(--ink)}.mcsa .mcsa-pills li.active a{border-bottom-color:var(--ink);color:var(--ink);font-weight:600}'
             . '.mcsa-flashwrap{padding:12px 20px 0}.mcsa-flashwrap>*{margin-bottom:8px}.mcsa-flashwrap>*:last-child{margin-bottom:0}'
             . '.mcsa-body{padding:14px 20px 0}.mcsa-head{margin:0 0 12px}.mcsa-head .sub{color:var(--mu);font-size:13px;max-width:860px}'
+            . '.mcsa-adv-or{color:#64748b;margin-inline:.5rem .25rem}.mcsa-adv-sample pre{background:#f8fafc;border:1px solid var(--ln);border-radius:8px;padding:10px;white-space:pre-wrap;text-align:left}'
             . '.mcsa-box{background:#fff;border:1px solid var(--ln);border-radius:10px;padding:12px 14px;margin:0 0 14px}'
             . '.mcsa-box>h3{margin:-12px -14px 12px;padding:8px 14px;background:var(--hd);border-bottom:1px solid var(--ln);border-radius:9px 9px 0 0;line-height:1.75}'
             . '.mcsa-help,.mcsa-muted{color:var(--mu);font-size:12.5px}'

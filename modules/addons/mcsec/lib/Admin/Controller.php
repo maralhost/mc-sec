@@ -34,7 +34,7 @@ final class Controller
 
     private const ACTIONS = [
         'save_settings' => 'settings', 'save_engines' => 'settings', 'save_profiles' => 'settings', 'save_packs' => 'settings', 'save_rule' => 'settings', 'disable_rule' => 'settings', 'save_code' => 'settings', 'disable_code' => 'settings', 'save_custom' => 'settings', 'delete_custom' => 'settings',
-        'upload_blob' => 'settings', 'remove_blob' => 'settings',
+        'upload_blob' => 'settings', 'remove_blob' => 'settings', 'advisor_ask' => 'settings', 'advisor_apply' => 'settings', 'advisor_clear' => 'settings',
         'request_quote' => 'ops', 'request_status' => 'ops', 'test_engine' => 'ops', 'run_worker' => 'ops', 'grant' => 'ops', 'approve_asset' => 'ops', 'cancel_scan' => 'ops', 'retry_scan' => 'ops', 'scope_test' => 'ops',
     ];
 
@@ -160,6 +160,16 @@ final class Controller
                     }
                     Audit::log(0, 'settings', $act, ['count' => $n]);
                     return 'ok:تنظیمات ذخیره شد.';
+                case 'advisor_ask':
+                    // the model only answers and proposes; nothing is changed here (SetupAdvisor)
+                    $r = \McSec\SetupAdvisor::ask(Auth::adminId(), $in('q'));
+                    return $r['ok'] ? 'ok:پاسخ آماده است. چیزی عوض نشده؛ پیشنهادها را ببینید و هر کدام را خواستید اعمال کنید.' : 'err:' . $r['error'];
+                case 'advisor_apply':
+                    $n = \McSec\SetupAdvisor::apply(Auth::adminId(), array_map('strval', (array) ($_POST['pick'] ?? [])));
+                    return $n > 0 ? 'ok:' . Text::fa($n) . ' تنظیم عوض شد. در همین صفحه می‌توانید هر کدام را برگردانید.' : 'err:چیزی انتخاب نشده بود یا پیشنهاد منقضی شده است؛ دوباره بپرسید.';
+                case 'advisor_clear':
+                    \McSec\SetupAdvisor::clear(Auth::adminId());
+                    return 'ok:پاسخ بسته شد.';
                 case 'request_quote':
                     // the team's price for a manual test; the customer still has to accept it
                     $r = \McSec\Requests::quote($int('id'), $int('credits'), (float) Text::toAscii($in('amount')), $in('note'));
