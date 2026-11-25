@@ -219,6 +219,50 @@ final class Verify
         return ['ok' => false, 'note' => Lang::t('DNS معکوس این IP ({host}) زیر هیچ دامنه‌ای که با رکورد DNS تأیید کرده‌اید نیست.', ['host' => $host])];
     }
 
+    /**
+     * Is this (sub)domain really served by that server? Asks the server itself, by its IP, for the site by name (the
+     * connection is pinned to the IP; the name goes in the request and the TLS handshake), and looks for this account's
+     * own proof: the proof file, or the meta tag in the page's head. So naming somebody else's server gets nothing:
+     * that server does not hold this account's code for this name.
+     * $skipTls: do not check the server's certificate (behind a CDN it is often self-signed or from the CDN's own CA).
+     * @return array{ok:bool,how:string,note:string}
+     */
+    public static function onServer(string $domain, string $ip, bool $skipTls, string $proof, string $token): array
+    {
+        if (!filter_var($ip, FILTER_VALIDATE_IP) || (!Net::isPublicIp($ip) && !Settings::bool('allow_private_ips')) || Net::cdnOf('ip', $ip) !== '') {
+            return ['ok' => false, 'how' => '', 'note' => Lang::t('این IP پذیرفته نیست (خصوصی، رزروشده یا از سرورهای CDN).')];
+        }
+        $tlsFailed = false;
+        $answered = false;
+        foreach (['https' => 443, 'http' => 80] as $scheme => $port) {
+            $opt = ['timeout' => 8, 'connect' => 4, 'verify' => $scheme === 'https' && !$skipTls, 'follow' => false, 'resolve' => $domain . ':' . $port . ':' . $ip];
+            $r = Http::request('GET', $scheme . '://' . $domain . self::FILE_PATH, ['Accept' => 'text/plain, */*;q=0.5'], null, $opt + ['max_bytes' => 4096]);
+            if ((int) $r['status'] === 0) {
+                $tlsFailed = $tlsFailed || ($scheme === 'https' && !$skipTls && preg_match('~ssl|certificate|tls|verify~i', (string) $r['error']) === 1);
+                continue;
+            }
+            $answered = true;
+            if ((int) $r['status'] === 200 && self::fileIsProof((string) $r['body'], $proof)) {
+                return ['ok' => true, 'how' => 'file', 'note' => ''];
+            }
+            $r = Http::request('GET', $scheme . '://' . $domain . '/', ['Accept' => 'text/html, */*;q=0.5'], null, $opt + ['max_bytes' => 262144]);
+            if ((int) $r['status'] === 200 && preg_match_all('~<meta\s[^>]*name\s*=\s*["\']mcsec-verification["\'][^>]*>~i', self::headOnly((string) $r['body']), $mm)) {
+                foreach ($mm[0] as $tag) {
+                    if (preg_match('~content\s*=\s*["\']([^"\']+)["\']~i', $tag, $c) && (hash_equals($token, trim($c[1])) || hash_equals($proof, trim($c[1])))) {
+                        return ['ok' => true, 'how' => 'meta', 'note' => ''];
+                    }
+                }
+            }
+        }
+        if ($tlsFailed && !$answered) {
+            return ['ok' => false, 'how' => '', 'note' => Lang::t('گواهی SSL این سرور برای {domain} معتبر نیست. اگر گواهی سرور شما خودامضا یا مخصوص CDN است، «گواهی SSL سرور را نادیده بگیر» را تیک بزنید و دوباره بیازمایید.', ['domain' => $domain])];
+        }
+        if (!$answered) {
+            return ['ok' => false, 'how' => '', 'note' => Lang::t('سرور {ip} روی درگاه ۸۰ و ۴۴۳ جواب نداد. اگر فایروال سرور فقط به CDN اجازه می‌دهد، IPهای اسکنر را هم مجاز کنید.', ['ip' => $ip])];
+        }
+        return ['ok' => false, 'how' => '', 'note' => Lang::t('سرور {ip} جواب داد، ولی فایل تأیید {domain} روی آن نبود. فایل تأیید را روی همین سرور، در مسیر /.well-known/mcsec-verify.txt همین سایت بگذارید و دوباره بیازمایید.', ['ip' => $ip, 'domain' => $domain])];
+    }
+
     /** A GET to the customer's own host, pinned to a public IP (no SSRF into our network). */
     private static function fetch(string $url, int $max): ?array
     {

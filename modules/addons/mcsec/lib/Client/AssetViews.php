@@ -188,29 +188,48 @@ final class AssetViews
      */
     private static function cdnPanel(array $ctx, object $a): string
     {
-        if ($a->kind !== 'domain' || (string) ($a->cdn ?? '') === '') {
+        if ($a->kind !== 'domain') {
             return '';
         }
-        $body = '<p>' . Lang::t('بازدیدکننده‌ها به سرورهای {cdn} وصل می‌شوند، نه سرور شما. «بررسی سلامت پایه» همان چیزی را می‌سنجد که بازدیدکننده می‌بیند؛ ولی اسکن‌هایی که درگاه‌ها را می‌سنجند هرگز روی سرورهای CDN اجرا نمی‌شوند، چون آن سرورها مال شما نیستند.',
-            ['cdn' => self::e(Net::cdnLabel((string) $a->cdn))]) . '</p>';
-        if (!Settings::bool('cdn_origin_scan')) {
+        $behind = (string) ($a->cdn ?? '') !== '';
+        $on = Settings::bool('cdn_origin_scan');
+        $origin = $on ? Assets::origin($a) : null;
+        if (!$behind && (!$on || $a->status !== 'verified')) {
+            return '';
+        }
+        $body = $behind ? '<p>' . Lang::t('بازدیدکننده‌ها به سرورهای {cdn} وصل می‌شوند، نه سرور شما. «بررسی سلامت پایه» همان چیزی را می‌سنجد که بازدیدکننده می‌بیند؛ ولی اسکن‌هایی که درگاه‌ها را می‌سنجند هرگز روی سرورهای CDN اجرا نمی‌شوند، چون آن سرورها مال شما نیستند.',
+            ['cdn' => self::e(Net::cdnLabel((string) $a->cdn))]) . '</p>'
+            : '<p>' . Lang::t('اگر این سایت پشت CDN یا پروکسی است، IP سرور اصلی‌اش را بدهید تا بررسی‌ها مستقیم از خود سرور پرسیده شوند، نه از CDN.') . '</p>';
+        if (!$on) {
             return Ui::card($body . '<p class="mcs-small mcs-muted">' . Lang::t('برای این دامنه «بررسی سلامت پایه» در دسترس است.') . '</p>', 'این دامنه پشت CDN است', 'globe');
         }
-        $origin = Assets::origin($a);
         $form = fn (string $inner, string $confirm = '') => Ui::form($ctx, 'asset', 'asset_origin', '<input type="hidden" name="asset" value="' . (int) $a->id . '">' . $inner, $confirm, '', false, '&amp;id=' . (int) $a->id);
+        $skip = (int) ($a->origin_tls_skip ?? 0) === 1;
+        $tick = '<label class="mcs-check"><input type="checkbox" name="tls_skip" value="1"' . ($skip ? ' checked' : '') . '><span>' . Lang::t('گواهی SSL سرور را نادیده بگیر') . '<small>'
+            . Lang::t('اگر گواهی سرور خودامضا یا مخصوص CDN است تیک بزنید؛ آن‌وقت گواهی سرور سنجیده و گزارش نمی‌شود (گواهی‌ای که بازدیدکننده می‌بیند مال CDN است).') . '</small></span></label>';
         if ($origin) {
-            $body .= Ui::facts(['سرور اصلی' => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $origin->id . '">' . Ui::ltr($origin->value) . '</a> ' . self::statusChip($origin)])
-                . '<p class="mcs-small">' . ($origin->status === 'verified' ? Lang::t('کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی همین IP اجرا می‌شوند.')
-                    : Lang::t('پس از تأیید مالکیت این IP (در صفحه‌ی خودش)، کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی آن اجرا می‌شوند.')) . '</p>';
+            $ok = (int) ($a->origin_ok_at ?? 0) > 0;
+            $body .= Ui::facts([
+                'سرور اصلی' => '<a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $origin->id . '">' . Ui::ltr($origin->value) . '</a> ' . self::statusChip($origin),
+                'این سایت روی همین سرور است؟' => $ok ? Ui::chip('بله، آزموده شد', 'ok') . ' <span class="mcs-small mcs-muted">' . self::e(Views::when((int) $a->origin_ok_at)) . '</span>' . ($skip ? ' ' . Ui::chip('گواهی سرور نادیده گرفته می‌شود', 'muted') : '')
+                    : Ui::chip('هنوز دیده نشد', 'warn'),
+            ]);
+            $body .= $ok ? '<p class="mcs-small">' . Lang::t('«بررسی سلامت پایه» این دامنه مستقیم از همین سرور پرسیده می‌شود (با نام همین سایت)، نه از CDN.') . '</p>'
+                : Ui::alert('warning', self::e(trim((string) ($a->origin_note ?? '')) !== '' ? (string) $a->origin_note : Lang::t('هنوز آزموده نشده است.'))
+                    . ' <a href="index.php?m=mcsec&amp;p=asset&amp;id=' . (int) $a->id . '&amp;vfile=1" download>' . Lang::t('دانلود فایل تأیید') . '</a>', 'alert');
+            $body .= '<p class="mcs-small">' . ($origin->status === 'verified' ? Lang::t('کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی همین IP اجرا می‌شوند.')
+                : Lang::t('پس از تأیید مالکیت این IP (در صفحه‌ی خودش)، کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی آن اجرا می‌شوند.')) . '</p>';
             if ($ctx['manage']) {
-                $body .= $form('<input type="hidden" name="origin" value=""><button type="submit" class="btn btn-default btn-sm">' . Lang::t('برداشتن پیوند') . '</button>', 'پیوند سرور اصلی برداشته شود؟ دارایی IP آن سر جایش می‌ماند.');
+                $body .= $form('<input type="hidden" name="retest" value="1">' . $tick . '<button type="submit" class="btn btn-default btn-sm">' . Ui::ico('refresh') . Lang::t('دوباره بیازما') . '</button>')
+                    . $form('<input type="hidden" name="origin" value=""><button type="submit" class="btn btn-default btn-sm">' . Lang::t('برداشتن پیوند') . '</button>', 'پیوند سرور اصلی برداشته شود؟ دارایی IP آن سر جایش می‌ماند.');
             }
         } elseif ($ctx['manage']) {
             $body .= $form('<div class="mcs-form-row">' . Ui::field('mcs-origin', 'IP اصلی سرور', '<input class="form-control" id="mcs-origin" name="origin" maxlength="45" dir="ltr" inputmode="decimal" autocomplete="off" placeholder="203.0.113.10">',
                 Lang::t('IP سروری که سایت واقعاً روی آن است؛ در پنل CDN، بخش DNS، به نام «IP مبدأ» یا Origin. اگر از سرویس‌های مارال کلاد در همین حساب باشد خودکار تأیید می‌شود؛ وگرنه مالکیتش را مثل هر IP دیگر تأیید می‌کنید.'))
-                . '</div><button type="submit" class="btn btn-primary">' . Lang::t('ثبت سرور اصلی') . '</button>');
+                . '</div>' . $tick . '<p class="mcs-help">' . Lang::t('پس از ثبت، از خود همان سرور می‌پرسیم که این سایت رویش هست یا نه (با فایل تأیید همین حساب). تا این دیده نشود، هیچ درخواستی مستقیم به آن سرور فرستاده نمی‌شود.') . '</p>'
+                . '<button type="submit" class="btn btn-primary">' . Lang::t('ثبت و آزمودن سرور') . '</button>');
         }
-        return Ui::card($body, 'این دامنه پشت CDN است', 'globe');
+        return $behind ? Ui::card($body, 'این دامنه پشت CDN است', 'globe') : Ui::drawer(Lang::t('این سایت پشت CDN یا پروکسی است؟ (سرور اصلی)'), $body, (bool) $origin, 'globe', 'origin');
     }
 
     /**

@@ -696,4 +696,7 @@ body.lagom .mcs a.mcs-stat{border-color:transparent}html.lagom-dark-mode .mcs a.
 .mcs .mcs-worst a strong{font-family:var(--t-mono);color:var(--t-muted);font-weight:400}
 .mcs .mcs-sevbar{display:flex;gap:2px;height:4px;border-radius:4px;overflow:hidden;margin-block-start:.35rem}
 .mcs .mcs-sevbar i.c{background:var(--sev-c-ic)}.mcs .mcs-sevbar i.h{background:var(--sev-h-ic)}.mcs .mcs-sevbar i.m{background:var(--sev-m-ic)}.mcs .mcs-sevbar i.l{background:var(--sev-l-ic)}
-.mcs .mcs-dash .mcs-card-title,.mcs .mcs-dash2 .mcs-card-title{font-size:.98rem}
+.mcs .mcs-dash .mcs-card-title,.mcs .mcs-dash2 .mcs-card-title{font-size:.98rem}/* 0.18.0 */
+.mcs .mcs-setup-back{margin-block-end:var(--t-gap)}
+.mcs .mcs-linkbtn{display:inline-flex;align-items:center;gap:.4rem;border:0;background:none;padding:.2rem 0;color:var(--t-muted);font:inherit;font-size:.85rem;cursor:pointer}
+.mcs .mcs-linkbtn:hover,.mcs .mcs-linkbtn:focus-visible{color:var(--t-primary);text-decoration:underline}

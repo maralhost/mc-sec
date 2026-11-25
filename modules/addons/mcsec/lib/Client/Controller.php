@@ -44,7 +44,7 @@ final class Controller
     /** Actions that create something or cost credits also need the page's one-time nonce. */
     private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send', 'request_accept'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
-    private const VIEWER_ACTIONS = ['notice_read', 'view_mode'];
+    private const VIEWER_ACTIONS = ['notice_read', 'view_mode', 'setup_hide'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
     private const BUYER_ACTIONS = ['buy_pack', 'code_redeem', 'auto_save', 'request_accept', 'request_decline'];
 
@@ -313,15 +313,28 @@ final class Controller
                 \McSec\Kv::set('view:' . $cid . ':' . (int) $who['user_id'], $in('view') === 'advanced' ? 'advanced' : 'simple');
                 return ['redirect' => 'index.php?m=mcsec'];
             case 'asset_origin':
-                $r = Assets::setOrigin($who, $int('asset'), $in('origin'));
+                if (($_POST['retest'] ?? '') === '1') {
+                    // «دوباره بیازما»: the same server, asked again (with the tick as it is now)
+                    if (!RateLimit::hit('origin:' . $cid, 20, 3600)) {
+                        return ['flash' => 'err:' . Lang::t('در یک ساعت اخیر چند بار آزموده‌اید. کمی بعد دوباره امتحان کنید.')];
+                    }
+                    $t = Assets::testOrigin(Assets::get($cid, $int('asset')), ($_POST['tls_skip'] ?? '') === '1');
+                    return ['flash' => $t['ok'] ? 'ok:' . Lang::t('این سایت روی همین سرور است. بررسی‌های وب از این پس مستقیم از سرور پرسیده می‌شوند.') : 'err:' . $t['note']];
+                }
+                $r = Assets::setOrigin($who, $int('asset'), $in('origin'), ($_POST['tls_skip'] ?? '') === '1');
                 if (!$r['ok']) {
                     return ['flash' => 'err:' . $r['error']];
                 }
                 if (!empty($r['unlinked'])) {
                     return ['flash' => 'ok:' . Lang::t('پیوند سرور اصلی برداشته شد. دارایی IP آن سر جایش ماند.')];
                 }
-                return ['flash' => 'ok:' . ($r['verified'] ? Lang::t('سرور اصلی ثبت و تأیید شد. کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی {ip} اجرا می‌شوند.', ['ip' => $r['value']])
-                    : Lang::t('سرور اصلی ثبت شد. حالا مالکیت {ip} را در صفحه‌ی همان IP تأیید کنید؛ پس از آن اسکن‌ها روی آن اجرا می‌شوند.', ['ip' => $r['value']]))];
+                $msg = $r['verified'] ? Lang::t('سرور اصلی ثبت و تأیید شد. کشف سطح حمله و اسکن آسیب‌پذیری این دامنه روی {ip} اجرا می‌شوند.', ['ip' => $r['value']])
+                    : Lang::t('سرور اصلی ثبت شد. حالا مالکیت {ip} را در صفحه‌ی همان IP تأیید کنید؛ پس از آن اسکن‌ها روی آن اجرا می‌شوند.', ['ip' => $r['value']]);
+                return ['flash' => 'ok:' . $msg . "\n" . (!empty($r['direct']) ? Lang::t('این سایت روی همین سرور است. بررسی‌های وب از این پس مستقیم از سرور پرسیده می‌شوند.') : Lang::t('هنوز دیده نشد که این سایت روی همین سرور است: {note}', ['note' => (string) ($r['note'] ?? '')]))];
+            case 'setup_hide':
+                // a preference of this person: the start-up checklist is put away (and can be brought back)
+                \McSec\Kv::set('setup_hidden:' . $cid . ':' . (int) $who['user_id'], ($_POST['show'] ?? '') === '1' ? '0' : '1');
+                return ['redirect' => 'index.php?m=mcsec'];
             case 'asset_remove':
                 $r = Assets::remove($who, $int('asset'));
                 return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=assets&removed=1'] : ['flash' => 'err:' . $r['error']];

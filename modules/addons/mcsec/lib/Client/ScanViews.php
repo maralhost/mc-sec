@@ -249,6 +249,10 @@ final class ScanViews
                 ? Lang::t('اسکن ثبت شد و {n} اعتبار کم شد. می‌توانید این صفحه را ببندید؛ پس از پایان خبرتان می‌کنیم.', ['n' => self::e(Text::fa((int) $s->credits))])
                 : Lang::t('اسکن ثبت شد. می‌توانید این صفحه را ببندید؛ پس از پایان خبرتان می‌کنیم.'), 'check');
         }
+        $went = (string) (\McSec\Db::decode((string) $s->backend_meta, [])['result']['direct'] ?? '');
+        if ($went !== '') {
+            $out .= '<p class="mcs-small mcs-muted">' . Ui::ico('server') . ' ' . Lang::t('بررسی‌های وب این اسکن مستقیم از سرور اصلی {ip} پرسیده شد، نه از CDN.', ['ip' => Ui::ltr($went)]) . '</p>';
+        }
         $live = in_array($s->status, ['queued', 'running'], true);
         if ($live) {
             $body = '<div data-mcs-progress="index.php?m=mcsec&amp;p=scan&amp;id=' . (int) $s->id . '&amp;progress=1">'

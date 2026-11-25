@@ -157,7 +157,7 @@ final class Assets
      * its own ownership proof; once verified, the scans that probe ports run on it instead of the CDN's servers.
      * @return array{ok:bool,error?:string,id?:int,verified?:bool,value?:string,unlinked?:bool}
      */
-    public static function setOrigin(array $who, int $id, string $input): array
+    public static function setOrigin(array $who, int $id, string $input, bool $skipTls = false): array
     {
         $a = self::get($who['client_id'], $id);
         if (!$a || $a->kind !== 'domain') {
@@ -167,7 +167,7 @@ final class Assets
             return ['ok' => false, 'error' => 'اسکن سرور اصلی دامنه‌های پشت CDN فعلاً فعال نیست.'];
         }
         if (trim($input) === '') {
-            Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['origin_id' => 0]);
+            Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['origin_id' => 0, 'origin_ok_at' => 0, 'origin_tls_skip' => 0, 'origin_note' => '']);
             Audit::log((int) $a->client_id, 'origin_unlink', (string) $a->value, [], $who['user_id']);
             return ['ok' => true, 'unlinked' => true];
         }
@@ -188,9 +188,52 @@ final class Assets
             }
             [$ipId, $verified] = [(int) $r['id'], (bool) $r['verified']];
         }
-        Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['origin_id' => $ipId]);
-        Audit::log((int) $a->client_id, 'origin_set', $a->value . ' → ' . $t['value'], [], $who['user_id']);
-        return ['ok' => true, 'id' => $ipId, 'verified' => $verified, 'value' => $t['value']];
+        Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['origin_id' => $ipId, 'origin_tls_skip' => $skipTls ? 1 : 0, 'origin_ok_at' => 0, 'origin_note' => '']);
+        Audit::log((int) $a->client_id, 'origin_set', $a->value . ' → ' . $t['value'], ['tls_skip' => $skipTls], $who['user_id']);
+        // is the site really on that server? asked of the server itself, now, in this POST
+        $test = self::testOrigin(self::get((int) $a->client_id, (int) $a->id));
+        return ['ok' => true, 'id' => $ipId, 'verified' => $verified, 'value' => $t['value'], 'direct' => $test['ok'], 'note' => $test['note']];
+    }
+
+    /**
+     * Asks the origin server whether it serves this site (Verify::onServer) and keeps the answer on the domain.
+     * Network: only from an explicit POST or the worker. @return array{ok:bool,note:string}
+     */
+    public static function testOrigin(?object $a, ?bool $skipTls = null): array
+    {
+        $origin = $a ? self::origin($a) : null;
+        if (!$a || $a->kind !== 'domain' || !$origin || !Settings::bool('cdn_origin_scan')) {
+            return ['ok' => false, 'note' => Lang::t('برای این دامنه سرور اصلی ثبت نشده است.')];
+        }
+        if ($a->status !== 'verified') {
+            return ['ok' => false, 'note' => Lang::t('اول مالکیت خود دامنه را تأیید کنید.')];
+        }
+        $skip = $skipTls ?? ((int) ($a->origin_tls_skip ?? 0) === 1);
+        $acc = Accounts::ensure((int) $a->client_id);
+        $r = Verify::onServer((string) $a->value, (string) $origin->value, $skip, Accounts::proof($acc), (string) $acc->verify_token);
+        Db::table('mod_mcsec_assets')->where('id', $a->id)->update(['origin_ok_at' => $r['ok'] ? Clock::now() : 0, 'origin_tls_skip' => $skip ? 1 : 0, 'origin_note' => mb_substr($r['note'], 0, 255)]);
+        return ['ok' => $r['ok'], 'note' => $r['note']];
+    }
+
+    /**
+     * The direct route of a domain: its origin server's IP, when the site was shown to be on it, and whether that
+     * server's certificate is ignored. null when there is none (requests then go the public way, through the CDN).
+     * $recheck (the worker, right before using it): the test is run again, so a server that changed hands is dropped.
+     * @return array{ip:string,tls_skip:bool}|null
+     */
+    public static function direct(object $a, bool $recheck = false): ?array
+    {
+        if ($a->kind !== 'domain' || (int) ($a->origin_ok_at ?? 0) <= 0 || !Settings::bool('cdn_origin_scan')) {
+            return null;
+        }
+        $origin = self::origin($a);
+        if (!$origin) {
+            return null;
+        }
+        if ($recheck && !self::testOrigin($a)['ok']) {
+            return null;
+        }
+        return ['ip' => (string) $origin->value, 'tls_skip' => (int) ($a->origin_tls_skip ?? 0) === 1];
     }
 
     public static function noteCdn(object $asset, string $cdn): void

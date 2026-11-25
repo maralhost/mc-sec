@@ -232,7 +232,7 @@ final class Views
         $score = Score::forClient($cid);
         $counts = Findings::openCounts($cid);
         $out = Ui::guide(Lang::t('<p>این‌جا در یک نگاه می‌بینید وضعیت امنیت سایت‌ها و سرورهایتان چطور است، از اسکن‌های اخیر چه چیزی تغییر کرده و مهم‌ترین کاری که الان باید انجام دهید چیست.</p>')
-            . Lang::t('<p>روال کار سه گام است: <strong>دارایی</strong> (دامنه یا IP) را بیفزایید، <strong>مالکیت</strong> را تأیید کنید (سرویس‌های خود مارال کلاد خودکار تأیید می‌شوند)، و <strong>اسکن</strong> بگیرید. بعد با زمان‌بندی، تغییرها را خودکار خبر می‌دهیم.</p>'), !$verified);
+            . Lang::t('<p>روال کار سه گام است: <strong>دارایی</strong> (دامنه یا IP) را بیفزایید، <strong>مالکیت</strong> را تأیید کنید (سرویس‌های خود مارال کلاد خودکار تأیید می‌شوند)، و <strong>اسکن</strong> بگیرید. بعد با زمان‌بندی، تغییرها را خودکار خبر می‌دهیم.</p>'), !$verified && \McSec\Kv::get('setup_hidden:' . (int) $cid . ':' . (int) $ctx['who']['user_id']) !== '1');
 
         $checklist = self::checklist($ctx, $assets, $verified);
         if ($checklist !== '') {
@@ -254,6 +254,7 @@ final class Views
     private static function checklist(array $ctx, array $assets, array $verified): string
     {
         $cid = $ctx['who']['client_id'];
+        $hidden = \McSec\Kv::get('setup_hidden:' . (int) $cid . ':' . (int) $ctx['who']['user_id']) === '1';
         $acc = Accounts::get($cid);
         $steps = [
             ['افزودن اولین دارایی', (bool) $assets, 'index.php?m=mcsec&p=assets#add'],
@@ -274,7 +275,13 @@ final class Views
             $items .= '<li class="' . ($ok ? 'is-done' : ($isNext ? 'is-next' : '')) . '"><span class="mcs-step-n" aria-hidden="true">' . ($ok ? Ui::ico('check') : self::e(Text::fa($i + 1))) . '</span>'
                 . ($ok ? '<span>' . self::e($label) . '</span><span class="mcs-sr">' . Lang::t('انجام شد') . '</span>' : '<a href="' . self::e($href) . '">' . self::e($label) . '</a>') . '</li>';
         }
-        return Ui::card(Ui::meter($done, count($steps), self::e(Lang::t('{n} از {total} گام', ['n' => Text::fa($done), 'total' => Text::fa(count($steps))]))) . '<ol class="mcs-steps">' . $items . '</ol>', 'شروع کار', 'list', '', 'mcs-onboard');
+        if ($hidden) {
+            // put away by this person: one quiet line brings it back
+            return '<div class="mcs-setup-back">' . Ui::form($ctx, 'home', 'setup_hide', '<input type="hidden" name="show" value="1"><button type="submit" class="mcs-linkbtn">' . Ui::ico('list')
+                . self::e(Lang::t('راهنمای شروع کار ({n} از {total} گام) را نشان بده', ['n' => Text::fa($done), 'total' => Text::fa(count($steps))])) . '</button>', '', 'mcs-inline') . '</div>';
+        }
+        $close = Ui::form($ctx, 'home', 'setup_hide', '<button type="submit" class="btn btn-default btn-sm" title="' . self::e(Lang::t('این کادر را ببند؛ هر وقت خواستید از همین صفحه برمی‌گردد')) . '">' . Ui::ico('x') . Lang::t('بستن') . '</button>', '', 'mcs-inline');
+        return Ui::card(Ui::meter($done, count($steps), self::e(Lang::t('{n} از {total} گام', ['n' => Text::fa($done), 'total' => Text::fa(count($steps))]))) . '<ol class="mcs-steps">' . $items . '</ol>', 'شروع کار', 'list', $close, 'mcs-onboard');
     }
 
     /** Certificates that expire within 30 days (from the surface data). */

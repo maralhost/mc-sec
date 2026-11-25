@@ -19,7 +19,7 @@ final class Installer
      * serve the new bootstrap.php with the old Installer.php for a moment; an old installer must never be able to mark
      * the new schema as done. Raise it together with MCSEC_VERSION (a test compares the two).
      */
-    public const SCHEMA = '0.17.0';
+    public const SCHEMA = '0.18.0';
 
     /** Runs install() when the stored schema is not the one this file builds (admin page, cron, activation, upgrade). */
     public static function ensure(): void
@@ -543,6 +543,10 @@ final class Installer
         $col('mod_mcsec_assets', 'cdn', fn ($t) => $t->string('cdn', 40)->default(''));
         $col('mod_mcsec_assets', 'cdn_checked_at', fn ($t) => $t->integer('cdn_checked_at')->default(0));
         $col('mod_mcsec_assets', 'origin_id', fn ($t) => $t->integer('origin_id')->default(0));
+        // 0.18.0: the site was shown to be served by its origin server (requests may go straight there), and whether its certificate is ignored
+        $col('mod_mcsec_assets', 'origin_ok_at', fn ($t) => $t->integer('origin_ok_at')->default(0));
+        $col('mod_mcsec_assets', 'origin_tls_skip', fn ($t) => $t->integer('origin_tls_skip')->default(0));
+        $col('mod_mcsec_assets', 'origin_note', fn ($t) => $t->string('origin_note', 255)->default(''));
         // 0.2.0: incomplete scans, light monitoring, KEV/EPSS priority
         $col('mod_mcsec_assets', 'partial', fn ($t) => $t->string('partial', 255)->default(''));
         $col('mod_mcsec_assets', 'mon_status', fn ($t) => $t->string('mon_status', 8)->default(''));

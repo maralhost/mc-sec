@@ -243,7 +243,8 @@ final class Oasm implements Engine
             if (!$n['known'] || !$n['installed']) {
                 return 'OASM cannot run ' . $name . ': ' . (!$n['known'] ? 'tool list not readable or tool missing' : 'not installed in workspace');
             }
-            $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1, 'config' => \McSec\Recipes::apply(self::toolConfig($name), (array) ($profile['options'][$name] ?? []))];
+            $steps[] = ['toolId' => $n['id'], 'category' => $def['category'], 'input' => $def['input'], 'stage' => $i + 1,
+                'config' => \McSec\Recipes::apply(self::toolConfig($name), (array) ($profile['options'][$name] ?? [])) + self::vhostConfig($name, (array) ($profile['vhost'] ?? []))];
         }
         return $steps;
     }
@@ -351,6 +352,27 @@ final class Oasm implements Engine
             }
         }
         return $c;
+    }
+
+    /**
+     * A scan that runs on the origin server (an IP) for a site behind a CDN: the tools that can be told which site
+     * they are asking for get its name, so they see the site itself and not the server's default page. Keys read from
+     * OASM's connector manifest (katana and ffuf: `headers` lines; nikto and wpscan: `vhost`; wpscan: `disableTlsChecks`).
+     * Nuclei and ZAP have no such setting in 0.12.1 and still see whatever the IP answers by default.
+     * @param array{host?:string,tls_skip?:bool} $v
+     */
+    public static function vhostConfig(string $tool, array $v): array
+    {
+        $host = strtolower((string) ($v['host'] ?? ''));
+        if ($host === '' || !preg_match('~^[a-z0-9.-]{1,253}$~', $host)) {
+            return [];
+        }
+        return match ($tool) {
+            'katana', 'ffuf' => ['headers' => ['Host: ' . $host]],
+            'nikto' => ['vhost' => $host],
+            'wpscan' => ['vhost' => $host] + (!empty($v['tls_skip']) ? ['disableTlsChecks' => true] : []),
+            default => [],
+        };
     }
 
     /** Secrets and addresses a tool needs, for its config profile only. */

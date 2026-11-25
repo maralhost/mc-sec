@@ -69,6 +69,7 @@ final class Scans
             return ['ok' => false, 'error' => Lang::t('دارایی «{asset}» هنوز تأیید نشده است؛ اسکن فقط پس از تأیید مالکیت ممکن است.', ['asset' => $asset->value])];
         }
         $via = '';
+        $vhost = [];
         if ($asset->kind === 'domain') {
             // one lookup: the domain's IPs against the blocklist, and the CDN in front of it
             $sc = Net::screen('domain', (string) $asset->value);
@@ -83,6 +84,7 @@ final class Scans
                 if ($why !== '') {
                     return ['ok' => false, 'error' => $why, 'cdn' => $sc['cdn']];
                 }
+                $vhost = Assets::direct($asset) !== null ? ['host' => (string) $asset->value, 'tls_skip' => (int) ($asset->origin_tls_skip ?? 0) === 1] : [];
                 [$via, $asset] = [(string) $asset->value, $origin];
             }
         }
@@ -115,7 +117,7 @@ final class Scans
         $id = Db::table('mod_mcsec_scans')->insertGetId([
             'client_id' => $clientId, 'asset_id' => (int) $asset->id, 'profile' => $profileKey, 'engine' => $profile['engine'], 'status' => 'queued',
             'credits' => $cost, 'schedule_id' => $scheduleId, 'requested_by' => $userId, 'admin_id' => (int) ($opt['admin'] ?? 0) ?: Auth::masqueradingAdmin(),
-            'queued_at' => Clock::now(), 'stage' => $stage, 'backend_meta' => Db::json(array_filter(['retest' => (int) ($opt['retest'] ?? 0)])),
+            'queued_at' => Clock::now(), 'stage' => $stage, 'backend_meta' => Db::json(array_filter(['retest' => (int) ($opt['retest'] ?? 0), 'vhost' => $vhost])),
         ]);
         if ($cost > 0) {
             $paid = Credits::spend($clientId, $cost, 'scan:' . $id, $name . ' — ' . $asset->value, $id);
@@ -245,6 +247,11 @@ final class Scans
             }
             self::fail($s, Lang::t('«{asset}» اکنون پشت CDN ({cdn}) است و اسکن روی سرورهای CDN انجام نمی‌شود.', ['asset' => $asset->value, 'cdn' => Net::cdnLabel($sc['cdn'])]), true);
             return false;
+        }
+        // a scan on an origin server for a site behind a CDN: the engine is told the site's name
+        $vh = Db::decode((string) $s->backend_meta, [])['vhost'] ?? null;
+        if (is_array($vh) && $vh) {
+            $profile['vhost'] = $vh;
         }
         ScanLog::begin((int) $s->id, (int) $s->client_id, 'start');
         try {

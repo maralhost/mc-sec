@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace McSec\Engines;
 
+use McSec\Assets;
 use McSec\Db;
 use McSec\Http;
 use McSec\Lang;
@@ -44,7 +45,8 @@ final class Builtin implements Engine
 
     public function start(object $scan, object $asset, array $profile): array
     {
-        $res = $this->run((string) $asset->kind, (string) $asset->value, self::portScopeFor($asset), self::subdomainsOf($asset));
+        // a site behind a CDN whose own server was shown to serve it: the web checks ask that server, not the CDN
+        $res = $this->run((string) $asset->kind, (string) $asset->value, self::portScopeFor($asset), self::subdomainsOf($asset), Assets::direct($asset, true));
         return ['ok' => true, 'ref' => 'builtin-' . $scan->id, 'meta' => ['result' => $res], 'progress' => 100, 'stage' => Lang::t('تمام شد')];
     }
 
@@ -114,9 +116,10 @@ final class Builtin implements Engine
     /**
      * @param string[]|null $portScope see portScopeFor()
      * @param string[] $subdomains discovered names under this domain, checked for dangling CNAMEs only (DNS, no HTTP)
-     * @return array{findings:array,surface:array,partial:string} partial: why the web part was not judged ('' = complete)
+     * @param array{ip:string,tls_skip:bool}|null $direct the site's own server behind a CDN: the web requests are pinned to it
+     * @return array{findings:array,surface:array,partial:string,direct?:string} partial: why the web part was not judged ('' = complete)
      */
-    public function run(string $kind, string $value, ?array $portScope = null, array $subdomains = []): array
+    public function run(string $kind, string $value, ?array $portScope = null, array $subdomains = [], ?array $direct = null): array
     {
         $f = [];
         $s = [];
@@ -143,8 +146,9 @@ final class Builtin implements Engine
         $partial = '';
 
         // web: HTTPS, certificate, redirect, headers, cookies, leaks, exposed files
-        $https = $this->get('https://' . $this->urlHost($host) . '/', $publicIps[0] ?? '', $host, true);
-        $http = $this->get('http://' . $this->urlHost($host) . '/', $publicIps[0] ?? '', $host, false);
+        $webIp = $kind === 'domain' && $direct !== null ? (string) $direct['ip'] : ($publicIps[0] ?? '');
+        $https = $this->get('https://' . $this->urlHost($host) . '/', $webIp, $host, true);
+        $http = $this->get('http://' . $this->urlHost($host) . '/', $webIp, $host, false);
         if ($kind === 'domain') {
             $f = array_merge($f, $this->takeover($value, $chain, $https ?? $http));
         }
@@ -152,7 +156,8 @@ final class Builtin implements Engine
             $partial = Lang::t('سایت به درخواست‌های بررسی (HTTP و HTTPS) پاسخ نداد؛ بررسی‌های وب انجام نشد.');
         }
         if ($https !== null || $http !== null) {
-            $cert = $this->cert($host, $publicIps[0] ?? $host);
+            // with «ignore the server's certificate» the origin's certificate is not judged: behind a CDN it is meant for the CDN, not for visitors
+            $cert = $direct !== null && $direct['tls_skip'] ? null : $this->cert($host, $webIp !== '' ? $webIp : $host);
             if ($cert !== null) {
                 $s[] = ['kind' => 'cert', 'value' => $host . ':443', 'meta' => $cert];
                 if ($cert['days'] < 0) {
@@ -191,7 +196,7 @@ final class Builtin implements Engine
                 $partial = Lang::t('سایت هنگام بررسی خطای سرور داد (HTTP {code})؛ هدرها و فایل‌های لورفته سنجیده نشدند.', ['code' => $st]);
             } else {
                 $f = array_merge($f, $this->headers($main, $host, $https !== null));
-                $f = array_merge($f, $this->exposedFiles(($https !== null ? 'https://' : 'http://') . $this->urlHost($host), $publicIps[0] ?? '', $host, $https !== null));
+                $f = array_merge($f, $this->exposedFiles(($https !== null ? 'https://' : 'http://') . $this->urlHost($host), $webIp, $host, $https !== null));
             }
         }
 
@@ -218,7 +223,7 @@ final class Builtin implements Engine
             }
         }
         $f = array_merge($f, $this->reputation($kind === 'domain' ? $value : '', $owned));
-        return ['findings' => $f, 'surface' => $s, 'partial' => $partial];
+        return ['findings' => $f, 'surface' => $s, 'partial' => $partial] + ($kind === 'domain' && $direct !== null ? ['direct' => (string) $direct['ip']] : []);
     }
 
     /**
