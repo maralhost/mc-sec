@@ -81,9 +81,12 @@ final class FindingViews
                 . Ui::td('وضعیت', self::statusChip($r))
                 . Ui::td('دیده‌شده', self::e(Views::when((int) $r->last_seen_at))) . '</tr>';
         }
+        // one click for everything that is still open, instead of a click on every finding
+        $again = $ctx['manage'] && $f['status'] === 'open' && $res['total'] > 0 ? Ui::form($ctx, 'findings', 'findings_retest_all', '<button type="submit" class="btn btn-default btn-sm">' . Ui::ico('refresh') . Lang::t('رفع کردم، همه را دوباره بسنج') . '</button>',
+            Lang::t('برای هر دارایی که یافته‌ی باز دارد یک بررسی دوباره‌ی رایگان گرفته شود؟'), 'mcs-inline') : '';
         $csv = Settings::bool('export_csv') ? ' · <a href="' . self::e($keep(['page' => '', 'csv' => '1'])) . '" download>' . Ui::ico('file') . Lang::t('خروجی CSV') . '</a>' : '';
         return $out . Ui::card(Ui::table(['شدت', 'یافته', 'محل', 'وضعیت', 'آخرین بار'], $rows) . Ui::pager($keep(['page' => '']), $res['page'], $res['pages']),
-            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . Lang::t('{n} یافته', ['n' => self::e(Text::fa($res['total']))]) . $csv . '</p>';
+            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . Lang::t('{n} یافته', ['n' => self::e(Text::fa($res['total']))]) . $csv . '</p>' . ($again !== '' ? '<div class="mcs-actions">' . $again . '<span class="mcs-small mcs-muted">' . Lang::t('رایگان است؛ یافته‌ای که دیگر دیده نشود خودش «رفع‌شده» می‌شود.') . '</span></div>' : '');
     }
 
     public static function detail(array $ctx): string

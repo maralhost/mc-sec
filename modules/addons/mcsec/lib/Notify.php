@@ -245,7 +245,8 @@ final class Notify
                     'lines' => $lines, 'link' => count($f) === 1 ? 'index.php?m=mcsec&p=finding&id=' . (int) $f[0]['id'] : 'index.php?m=mcsec&p=findings', 'tone' => 'err'];
             case 'site_down':
                 return ['title' => Lang::t('{asset} از دسترس خارج شد', ['asset' => $asset]),
-                    'lines' => [!empty($d['note']) ? Lang::t('دو بررسی پشت سر هم پاسخی نگرفت: {note}.', ['note' => $d['note']]) : Lang::t('دو بررسی پشت سر هم پاسخی نگرفت.'), Lang::t('وقتی دوباره در دسترس شد خبر می‌دهیم.')],
+                    'lines' => [!empty($d['note']) ? Lang::t('دو بررسی پشت سر هم پاسخی نگرفت: {note}.', ['note' => $d['note']]) : Lang::t('دو بررسی پشت سر هم پاسخی نگرفت.'), Lang::t('وقتی دوباره در دسترس شد خبر می‌دهیم.'),
+                        ($d['origin'] ?? '') === 'up' ? Lang::t('سرور خودتان جواب می‌دهد؛ مشکل از CDN یا تنظیم آن است.') : (($d['origin'] ?? '') === 'down' ? Lang::t('سرور خودتان هم جواب نمی‌دهد.') : '')],
                     'link' => 'index.php?m=mcsec&p=asset&id=' . (int) ($d['asset_id'] ?? 0), 'tone' => 'err'];
             case 'site_up':
                 $m = intdiv(max(0, (int) ($d['down_for'] ?? 0)), 60);

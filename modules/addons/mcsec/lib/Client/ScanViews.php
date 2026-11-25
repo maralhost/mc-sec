@@ -370,6 +370,12 @@ final class ScanViews
             $assets[(string) $a->id] = (string) $a->value;
         }
         $profiles = [];
+        // the ready-made bundles first: one schedule, several scans
+        foreach (Catalog::bundles(Catalog::forClient($cid)) as $bk => $bb) {
+            if (count($bb['profiles']) > 1) {
+                $profiles[$bk] = Lang::t('بسته‌ی «{name}» ({n} اسکن) — {credits} اعتبار هر اجرا', ['name' => Lang::t($bb['label']), 'n' => Text::fa(count($bb['profiles'])), 'credits' => Text::fa($bb['credits'])]);
+            }
+        }
         foreach (Catalog::forClient($cid) as $k => $p) {
             if ($p['allowed']) {
                 $profiles[$k] = (int) $p['credits'] > 0

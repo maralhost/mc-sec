@@ -28,7 +28,7 @@ final class Monitor
         $now = Clock::now();
         $every = max(5, Settings::int('monitor_minutes')) * 60;
         $rows = Db::rows(Db::table('mod_mcsec_assets')->where('kind', 'domain')->where('status', 'verified')->where('mon_at', '<=', $now - $every + 60)
-            ->orderBy('mon_at')->limit(self::BATCH)->select(['id', 'client_id', 'value', 'mon_status', 'mon_fails', 'mon_since', 'mon_note', 'mon_cert_at', 'mon_cert_end']));
+            ->orderBy('mon_at')->limit(self::BATCH)->select(['id', 'client_id', 'kind', 'value', 'status', 'mon_status', 'mon_fails', 'mon_since', 'mon_note', 'mon_cert_at', 'mon_cert_end', 'origin_id', 'origin_ok_at', 'origin_tls_skip']));
         if (!$rows) {
             return ['checked' => 0];
         }
@@ -65,9 +65,22 @@ final class Monitor
             Trace::warn('monitor', 'outage', 'most monitored sites failed at once; assuming a local network problem', ['checked' => count($res), 'failed' => $failed]);
             return ['checked' => count($res), 'skip' => 'local network'];
         }
-        $out = ['checked' => count($res), 'down' => 0, 'up' => 0, 'certs' => 0];
+        $out = ['checked' => count($res), 'down' => 0, 'up' => 0, 'certs' => 0, 'rescans' => 0];
         foreach ($targets as $id => $t) {
-            $ev = self::apply($t['row'], $res[$id] ?? ['ok' => false, 'status' => 0, 'error' => 'no address', 'ms' => 0], $now);
+            $x = $res[$id] ?? ['ok' => false, 'status' => 0, 'error' => 'no address', 'ms' => 0];
+            // a site behind a CDN that does not answer: its own server is asked too, so the alert can say which of the two is down
+            if (!self::isUp($x) && (int) $t['row']->mon_fails >= 1 && ($direct = Assets::direct($t['row'])) !== null && microtime(true) < $deadline) {
+                $x['origin'] = self::originUp((string) $t['row']->value, $direct) ? 'up' : 'down';
+            }
+            $ev = self::apply($t['row'], $x, $now);
+            // the address of a site changed (a new server or a new CDN): worth a fresh look
+            $ipKey = 'monip:' . $id;
+            $was = Kv::get($ipKey);
+            if ($t['ip'] !== '' && $was !== $t['ip']) {
+                Kv::set($ipKey, $t['ip']);
+                $out['rescans'] += $was !== null && $was !== '' ? self::rescan($t['row'], 'ip') : 0;
+            }
+            $out['rescans'] += $ev === 'site_up' ? self::rescan($t['row'], 'up') : 0;
             if ($ev !== '') {
                 $out[$ev === 'site_down' ? 'down' : 'up']++;
             }
@@ -84,6 +97,41 @@ final class Monitor
             $out['certs']++;
         }
         return $out;
+    }
+
+    /** The site asked of its own server (pinned to the origin IP, by the site's name). */
+    private static function originUp(string $host, array $direct): bool
+    {
+        foreach (['https' => 443, 'http' => 80] as $scheme => $port) {
+            $r = Http::request('GET', $scheme . '://' . $host . '/', ['Accept' => 'text/html,*/*;q=0.8'], null,
+                ['timeout' => 6, 'connect' => 3, 'verify' => false, 'max_bytes' => 4096, 'follow' => false, 'resolve' => $host . ':' . $port . ':' . $direct['ip']]);
+            if ((int) $r['status'] > 0 && (int) $r['status'] < 500) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * A free basic check after something about a site changed (it came back, its address or its certificate
+     * changed): at most one a day per site, and only when the admin switched it on. @return int 1 when queued
+     */
+    private static function rescan(object $r, string $why): int
+    {
+        if (!Settings::bool('auto_rescan') || !RateLimit::hit('rescan:' . (int) $r->id, 1, 86400)) {
+            return 0;
+        }
+        $profile = Catalog::get('hygiene');
+        $asset = Db::table('mod_mcsec_assets')->where('id', (int) $r->id)->where('status', 'verified')->first();
+        if (!$profile || !$asset || (int) $profile['credits'] > 0) {
+            return 0; // only ever the free check: nothing is spent without the customer
+        }
+        $q = Lang::with(Lang::forClient((int) $r->client_id), fn () => Scans::queue((int) $r->client_id, $asset, 'hygiene', 0, 0));
+        if ($q['ok'] && empty($q['again'])) {
+            Audit::log((int) $r->client_id, 'auto_rescan', (string) $r->value, ['why' => $why, 'scan' => (int) $q['scan_id']]);
+            return 1;
+        }
+        return 0;
     }
 
     /** @param array<int,array{row:object,ip:string}> $targets @return array<int,array{ok:bool,status:int,error:string,ms:int}> */
@@ -122,9 +170,12 @@ final class Monitor
         }
         $note = (int) ($x['status'] ?? 0) > 0 ? 'HTTP ' . (int) $x['status'] : mb_substr(self::errorText((string) ($x['error'] ?? '')), 0, 160);
         $fails = (int) $r->mon_fails + 1;
+        if (isset($x['origin'])) {
+            Kv::set('monorigin:' . (int) $r->id, (string) $x['origin'], 3 * 86400);
+        }
         if ($fails >= 2 && (string) $r->mon_status !== 'down') {
             Db::table('mod_mcsec_assets')->where('id', $r->id)->update(['mon_status' => 'down', 'mon_fails' => $fails, 'mon_note' => $note, 'mon_since' => $now]);
-            Notify::event((int) $r->client_id, 'site_down', ['asset' => (string) $r->value, 'asset_id' => (int) $r->id, 'note' => $note], 'down:' . $r->id . ':' . $now);
+            Notify::event((int) $r->client_id, 'site_down', ['asset' => (string) $r->value, 'asset_id' => (int) $r->id, 'note' => $note, 'origin' => (string) ($x['origin'] ?? '')], 'down:' . $r->id . ':' . $now);
             return 'site_down';
         }
         Db::table('mod_mcsec_assets')->where('id', $r->id)->update(['mon_fails' => $fails, 'mon_note' => $note]);
@@ -151,6 +202,9 @@ final class Monitor
         $c = Builtin::certInfo((string) $r->value, $ip);
         $end = $c !== null ? (string) ($c['not_after'] ?? '') : '';
         Db::table('mod_mcsec_assets')->where('id', $r->id)->update(['mon_cert_at' => $now, 'mon_cert_end' => mb_substr($end, 0, 10)]);
+        if ($end !== '' && (string) $r->mon_cert_end !== '' && mb_substr($end, 0, 10) !== (string) $r->mon_cert_end) {
+            self::rescan($r, 'cert'); // a new certificate
+        }
         if ($c === null || $end === '') {
             return;
         }
@@ -169,8 +223,10 @@ final class Monitor
         }
         if ($a->mon_status === 'down') {
             // the note was stored by the worker in Persian: it gets its English here, when it is read
-            return ['از دسترس خارج', 'err', $a->mon_note !== '' ? Lang::t('از {since} — {note}', ['since' => Text::ago((int) $a->mon_since), 'note' => Lang::t((string) $a->mon_note)])
-                : Lang::t('از {since}', ['since' => Text::ago((int) $a->mon_since)])];
+            $base = $a->mon_note !== '' ? Lang::t('از {since} — {note}', ['since' => Text::ago((int) $a->mon_since), 'note' => Lang::t((string) $a->mon_note)])
+                : Lang::t('از {since}', ['since' => Text::ago((int) $a->mon_since)]);
+            $o = (int) ($a->origin_ok_at ?? 0) > 0 ? Kv::get('monorigin:' . (int) $a->id) : null;
+            return ['از دسترس خارج', 'err', $base . ($o === 'up' ? ' — ' . Lang::t('سرور خودتان جواب می‌دهد؛ مشکل از CDN یا تنظیم آن است') : ($o === 'down' ? ' — ' . Lang::t('سرور خودتان هم جواب نمی‌دهد') : ''))];
         }
         return ['در دسترس', 'ok', Lang::t('آخرین بررسی {when}', ['when' => Text::ago((int) $a->mon_at)])];
     }

@@ -137,6 +137,33 @@ final class Catalog
             'credits' => 14, 'kinds' => ['domain'], 'free' => true, 'enabled' => true, 'eta' => '۴۰ دقیقه تا ۳ ساعت', 'depth' => 4, 'icon' => 'layers',
             'desc' => 'یک بار سایت را می‌خزد و همه‌ی صفحه‌های پیداشده را هم با الگوهای Nuclei و هم با ZAP می‌سنجد. کامل‌ترین اسکن بی حمله‌ی فعال.',
         ],
+        // 0.19.0 ── Nuclei by topic: the same scanner with only the templates of one subject (its `tags`), so a
+        // customer can ask one question for less. The tag names are those of the public nuclei-templates.
+        'nuclei_cve' => [
+            'cat' => 'vuln', 'label' => 'فقط CVEهای شناخته‌شده', 'engine' => 'oasm', 'tools' => ['nuclei'], 'options' => ['nuclei' => ['tags' => ['cve']]],
+            'credits' => 4, 'kinds' => ['domain', 'ip', 'cidr'], 'free' => true, 'enabled' => true, 'eta' => '۱۵ دقیقه تا ۱ ساعت', 'depth' => 2, 'icon' => 'bug',
+            'desc' => 'فقط آسیب‌پذیری‌هایی که شماره‌ی CVE دارند: همان‌هایی که خبرشان می‌پیچد و مهاجمان خودکار دنبالشان می‌گردند.',
+        ],
+        'nuclei_exposure' => [
+            'cat' => 'vuln', 'label' => 'فایل‌ها و اطلاعات لورفته', 'engine' => 'oasm', 'tools' => ['nuclei'], 'options' => ['nuclei' => ['tags' => ['exposure', 'config', 'backup']]],
+            'credits' => 3, 'kinds' => ['domain', 'ip', 'cidr'], 'free' => true, 'enabled' => true, 'eta' => '۱۰ تا ۴۰ دقیقه', 'depth' => 2, 'icon' => 'search',
+            'desc' => 'فایل پشتیبان، فایل تنظیمات، کلید و رمز و هر چیزی که نباید از بیرون دیده شود ولی در دسترس مانده است.',
+        ],
+        'nuclei_panels' => [
+            'cat' => 'vuln', 'label' => 'پنل‌های مدیریت و رمز پیش‌فرض', 'engine' => 'oasm', 'tools' => ['nuclei'], 'options' => ['nuclei' => ['tags' => ['panel', 'login', 'default-login']]],
+            'credits' => 3, 'kinds' => ['domain', 'ip', 'cidr'], 'free' => true, 'enabled' => true, 'eta' => '۱۰ تا ۴۰ دقیقه', 'depth' => 2, 'icon' => 'key',
+            'desc' => 'صفحه‌های ورود و پنل‌های مدیریتی که از اینترنت باز هستند، و سامانه‌هایی که هنوز رمز کارخانه را دارند.',
+        ],
+        'nuclei_misconfig' => [
+            'cat' => 'vuln', 'label' => 'پیکربندی نادرست', 'engine' => 'oasm', 'tools' => ['nuclei'], 'options' => ['nuclei' => ['tags' => ['misconfig', 'misconfiguration']]],
+            'credits' => 3, 'kinds' => ['domain', 'ip', 'cidr'], 'free' => true, 'enabled' => true, 'eta' => '۱۰ تا ۴۰ دقیقه', 'depth' => 2, 'icon' => 'alert',
+            'desc' => 'تنظیم‌های اشتباه رایج وب‌سرور و نرم‌افزارها: دسترسی‌های باز، صفحه‌های اشکال‌زدایی روشن و مانند آن.',
+        ],
+        'nuclei_takeover' => [
+            'cat' => 'discover', 'label' => 'تسخیر زیردامنه', 'engine' => 'oasm', 'tools' => ['nuclei'], 'options' => ['nuclei' => ['tags' => ['takeover']]],
+            'credits' => 2, 'kinds' => ['domain'], 'free' => true, 'enabled' => true, 'eta' => '۵ تا ۲۰ دقیقه', 'depth' => 1, 'icon' => 'link',
+            'desc' => 'زیردامنه‌هایی که به سرویسی اشاره می‌کنند که دیگر مال شما نیست و هر کسی می‌تواند آن را به نام شما بگیرد.',
+        ],
         'content' => [
             'cat' => 'web', 'label' => 'کشف پوشه و فایل پنهان', 'engine' => 'oasm', 'tools' => ['ffuf'],
             'credits' => 5, 'kinds' => ['domain', 'ip'], 'free' => true, 'enabled' => false, 'eta' => '۱۰ تا ۳۰ دقیقه', 'depth' => 3, 'icon' => 'search',
@@ -287,6 +314,9 @@ final class Catalog
     /** The name of a scan type in the current language (a name the admin or the customer wrote stays as written). */
     public static function label(string $key, string $default = ''): string
     {
+        if (isset(self::BUNDLES[$key])) {
+            return Lang::t(self::BUNDLES[$key][0]);
+        }
         return Lang::t((string) (self::find($key)['label'] ?? ($default !== '' ? $default : $key)));
     }
 

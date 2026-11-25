@@ -42,7 +42,7 @@ final class Controller
     public const PAGES = ['home', 'assets', 'asset', 'scans', 'scan', 'findings', 'finding', 'reports', 'report', 'schedules', 'recipes', 'assistant', 'support', 'notify', 'credits', 'activity'];
 
     /** Actions that create something or cost credits also need the page's one-time nonce. */
-    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send', 'request_accept'];
+    private const NEEDS_NONCE = ['add_asset', 'scan_start', 'report_create', 'schedule_save', 'buy_pack', 'finding_aifix', 'webhook_test', 'finding_retest', 'asset_origin', 'code_redeem', 'recipe_save', 'chat_send', 'chat_confirm', 'finding_opinion', 'verify_auto', 'support_send', 'request_accept', 'findings_retest_all'];
     /** Actions a viewer (WHMCS permission 'products' only) may do. */
     private const VIEWER_ACTIONS = ['notice_read', 'view_mode', 'setup_hide'];
     /** Money actions: the owner or a user with the WHMCS permission 'invoices' (checked in each case). */
@@ -403,6 +403,13 @@ final class Controller
             case 'finding_retest':
                 $r = Findings::retest($who, $int('finding'));
                 return $r['ok'] ? ['redirect' => 'index.php?m=mcsec&p=scan&id=' . (int) $r['scan_id'] . '&started=1'] : ['flash' => 'err:' . $r['error']];
+            case 'findings_retest_all':
+                $r = Findings::retestAll($who);
+                if (!$r['ok']) {
+                    return ['flash' => 'err:' . Lang::t((string) $r['error'])];
+                }
+                return ['flash' => 'ok:' . Lang::t('{n} بررسی دوباره‌ی رایگان در صف قرار گرفت. هر یافته‌ای که دیگر دیده نشود خودش «رفع‌شده» می‌شود و خبرتان می‌کنیم.', ['n' => Text::fa((int) $r['queued'])])
+                    . ((int) $r['left'] > 0 ? "\n" . Lang::t('{n} مورد به سقف امروز خورد و فردا می‌شود سنجید.', ['n' => Text::fa((int) $r['left'])]) : '')];
             case 'finding_aifix':
                 $r = Reports::aiFix($who, $int('finding'));
                 return ['flash' => $r['ok'] ? 'ok:' . Lang::t('راهکار هوش مصنوعی آماده شد.') : 'err:' . $r['error']];

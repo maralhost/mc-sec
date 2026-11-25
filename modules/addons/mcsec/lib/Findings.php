@@ -298,6 +298,44 @@ final class Findings
         return Scans::queue($who['client_id'], $asset, $profile, 0, $who['user_id'], ['retest' => (int) $f->id, 'free' => true]);
     }
 
+    /**
+     * «رفع کردم، همه را دوباره بسنج»: one free re-check per asset and scan type that still has open findings, instead of
+     * a click on every finding. The same daily allowance as single re-checks (retest_daily_cap counts each scan), and
+     * once a day for the whole account. @return array{ok:bool,error?:string,queued?:int,left?:int}
+     */
+    public static function retestAll(array $who): array
+    {
+        $cid = (int) $who['client_id'];
+        $pairs = Db::rows(Db::table('mod_mcsec_findings')->where('client_id', $cid)->where('status', 'open')->selectRaw('asset_id, profile, MIN(id) AS id, COUNT(*) AS n')->groupBy('asset_id', 'profile')->orderByDesc('n')->limit(200));
+        if (!$pairs) {
+            return ['ok' => false, 'error' => 'یافته‌ی بازی برای سنجیدن نیست.'];
+        }
+        if (!RateLimit::hit('retestall:' . $cid, 1, 86400)) {
+            return ['ok' => false, 'error' => 'امروز یک بار همه را دوباره سنجیده‌اید. فردا دوباره امتحان کنید یا یک یافته را جدا بسنجید.'];
+        }
+        $queued = 0;
+        $left = 0;
+        foreach ($pairs as $p) {
+            $profile = (string) $p->profile !== '' ? (string) $p->profile : 'hygiene';
+            $asset = Assets::get($cid, (int) $p->asset_id);
+            if (!$asset || !Catalog::get($profile)) {
+                continue;
+            }
+            if (!RateLimit::hit('retests:' . $cid, max(1, Settings::int('retest_daily_cap')), 86400)) {
+                $left++;
+                continue;
+            }
+            $r = Scans::queue($cid, $asset, $profile, 0, (int) $who['user_id'], ['retest' => (int) $p->id, 'free' => true]);
+            $queued += $r['ok'] && empty($r['again']) ? 1 : 0;
+            $left += $r['ok'] ? 0 : 1;
+        }
+        if ($queued === 0) {
+            return ['ok' => false, 'error' => $left > 0 ? 'سقف بررسی دوباره‌ی رایگان امروز پر شده است. فردا دوباره امتحان کنید.' : 'برای این یافته‌ها از قبل اسکنی در جریان است.'];
+        }
+        Audit::log($cid, 'retest_all', '', ['scans' => $queued], (int) $who['user_id']);
+        return ['ok' => true, 'queued' => $queued, 'left' => $left];
+    }
+
     /** Severity rank for sorting and thresholds. */
     public static function rank(string $severity): int
     {

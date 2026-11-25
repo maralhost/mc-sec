@@ -231,6 +231,12 @@ final class Recipes
                 $base[$k] = min((int) $base[$k], $v);
             } elseif ($k === 'severity' && is_array($v)) {
                 $base[$k] = array_values(array_intersect((array) ($base[$k] ?? $v), $v));
+            } elseif ($k === 'tags' && is_array($v)) {
+                // fewer templates is always gentler: only plain tag names, and never a tag the admin excluded
+                $tags = array_values(array_filter(array_map('strval', $v), fn ($t) => preg_match('~^[a-z0-9_-]{1,40}$~', $t) === 1 && !in_array($t, (array) ($base['excludeTags'] ?? []), true)));
+                if ($tags) {
+                    $base['tags'] = $tags;
+                }
             }
         }
         return $base;

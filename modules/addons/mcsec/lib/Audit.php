@@ -11,7 +11,7 @@ namespace McSec;
 final class Audit
 {
     public const ACTIONS = [
-        'support' => 'درخواست بررسی کارشناس', 'request_accept' => 'تأیید قیمت تست دستی', 'request_decline' => 'رد قیمت تست دستی', 'request_admin' => 'رسیدگی به درخواست', 'assistant' => 'کار با دستیار', 'verify_auto' => 'ساخت خودکار رکورد تأیید', 'host_mute' => 'کنار گذاشتن میزبان', 'ai_opinion' => 'نظر دوم هوش مصنوعی', 'export' => 'خروجی یافته‌ها', 'recipe' => 'اسکن سفارشی', 'code' => 'ثبت کد', 'rule' => 'قاعده‌ی قیمت', 'auto_topup' => 'شارژ خودکار',
+        'retest_all' => 'سنجش دوباره‌ی همه‌ی یافته‌ها', 'auto_rescan' => 'بررسی خودکار پس از تغییر', 'support' => 'درخواست بررسی کارشناس', 'request_accept' => 'تأیید قیمت تست دستی', 'request_decline' => 'رد قیمت تست دستی', 'request_admin' => 'رسیدگی به درخواست', 'assistant' => 'کار با دستیار', 'verify_auto' => 'ساخت خودکار رکورد تأیید', 'host_mute' => 'کنار گذاشتن میزبان', 'ai_opinion' => 'نظر دوم هوش مصنوعی', 'export' => 'خروجی یافته‌ها', 'recipe' => 'اسکن سفارشی', 'code' => 'ثبت کد', 'rule' => 'قاعده‌ی قیمت', 'auto_topup' => 'شارژ خودکار',
         'asset_add' => 'افزودن دارایی', 'asset_remove' => 'حذف دارایی', 'asset_verified' => 'تأیید مالکیت', 'asset_lapsed' => 'منقضی شدن تأیید',
         'scan_start' => 'شروع اسکن', 'scan_cancel' => 'لغو اسکن', 'finding_status' => 'تغییر وضعیت یافته', 'schedule_save' => 'زمان‌بندی',
         'schedule_delete' => 'حذف زمان‌بندی', 'report_request' => 'درخواست گزارش', 'notify_save' => 'تنظیم اعلان', 'topup' => 'خرید اعتبار',

@@ -40,7 +40,10 @@ final class Schedules
             return ['ok' => false, 'error' => 'تکرار را انتخاب کنید.'];
         }
         $profileKey = (string) ($d['profile'] ?? '');
-        $p = Catalog::forClient($clientId)[$profileKey] ?? null;
+        $mine = Catalog::forClient($clientId);
+        $bundle = Catalog::bundles($mine)[$profileKey] ?? null;
+        // a ready-made bundle runs each of its scans; the asset kinds it covers are those of any of them
+        $p = $bundle ? ['allowed' => true, 'label' => $bundle['label'], 'kinds' => array_values(array_unique(array_merge(...array_map(fn ($k) => $mine[$k]['kinds'], $bundle['profiles']))))] : ($mine[$profileKey] ?? null);
         if (!$p || !$p['allowed']) {
             return ['ok' => false, 'error' => 'این نوع اسکن برای زمان‌بندی در پلن شما نیست.'];
         }
@@ -201,8 +204,10 @@ final class Schedules
             $assets = (int) $s->asset_id > 0
                 ? array_filter([Db::table('mod_mcsec_assets')->where('id', $s->asset_id)->where('client_id', $s->client_id)->where('status', '!=', 'removed')->first()])
                 : Assets::forClient((int) $s->client_id, 'verified');
-            $profile = Catalog::get((string) $s->profile);
-            if (!$profile) {
+            // a bundle: its scans that are on and allowed now, each run in turn
+            $keys = isset(Catalog::BUNDLES[(string) $s->profile]) ? (Catalog::bundles(Catalog::forClient((int) $s->client_id))[(string) $s->profile]['profiles'] ?? []) : [(string) $s->profile];
+            $profiles = array_filter(array_map(fn ($k) => ($pp = Catalog::get((string) $k)) ? $pp + ['key' => (string) $k] : null, $keys));
+            if (!$profiles) {
                 self::pause($s, 'plan');
                 $out['paused']++;
                 continue;
@@ -215,6 +220,7 @@ final class Schedules
                 continue;
             }
             foreach ($assets as $a) {
+              foreach ($profiles as $profile) {
                 if (!in_array($a->kind, $profile['kinds'], true)) {
                     continue;
                 }
@@ -226,18 +232,19 @@ final class Schedules
                     continue;
                 }
                 // no visitor here: the reason the customer is told later is written in the account's own language
-                $r = Lang::with(Lang::forClient((int) $s->client_id), fn () => Scans::queue((int) $s->client_id, $a, (string) $s->profile, (int) $s->id, 0));
+                $r = Lang::with(Lang::forClient((int) $s->client_id), fn () => Scans::queue((int) $s->client_id, $a, (string) $profile['key'], (int) $s->id, 0));
                 if ($r['ok']) {
                     $out['queued'] += empty($r['again']) ? 1 : 0;
                 } elseif (isset($r['need'])) {
                     self::pause($s, 'credits', $r['error']);
                     $out['paused']++;
-                    break;
+                    break 2;
                 } elseif (!empty($r['plan'])) {
                     self::pause($s, 'plan', $r['error']);
                     $out['paused']++;
-                    break;
+                    break 2;
                 }
+              }
             }
         }
         return $out;
