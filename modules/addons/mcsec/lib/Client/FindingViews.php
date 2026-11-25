@@ -30,24 +30,39 @@ final class FindingViews
         return Ui::chip(Findings::STATUS[$f->status] ?? $f->status, $tone) . ((int) $f->reopened > 0 && $f->status === 'open' ? ' ' . Ui::chip('دوباره دیده‌شده', 'err') : '');
     }
 
+    /**
+     * The filters of the findings list, read from the address in one place: the page and the CSV file use the same
+     * ones, so a file always holds what the list shows. Every value is checked here; an unknown one is dropped.
+     * @return array{status:string,severity:string,asset:int,scan:int,new:int,q:string,page:int,kb:string,mine:int,overdue:int,sort:string,per:int}
+     */
+    public static function filters(array $who): array
+    {
+        // a parameter sent as a list (status[]=…) is not a value: it counts as absent
+        $str = fn (string $k, string $d = '') => is_scalar($_GET[$k] ?? null) ? (string) $_GET[$k] : $d;
+        $int = fn (string $k, string $d = '0') => (int) Text::toAscii($str($k, $d));
+        return [
+            'status' => $str('status', 'open'), 'severity' => $str('severity'), 'asset' => $int('asset'), 'scan' => $int('scan'), 'new' => $int('new'),
+            'q' => mb_substr(trim($str('q')), 0, 80), 'page' => $int('page', '1'),
+            'kb' => preg_match('~^[a-z0-9._-]{1,64}$~', $str('kb')) ? $str('kb') : '',
+            'mine' => Settings::bool('finding_assign') && !empty($_GET['mine']) ? (int) $who['user_id'] : 0,
+            'overdue' => array_filter(Findings::deadlineDays()) && !empty($_GET['overdue']) ? 1 : 0,
+            'sort' => is_string($_GET['sort'] ?? null) && isset(Findings::SORTS[$_GET['sort']]) ? $_GET['sort'] : 'priority',
+            'per' => in_array($int('per'), Findings::PAGE_SIZES, true) ? $int('per') : Findings::PAGE_SIZES[0],
+        ];
+    }
+
     public static function list(array $ctx): string
     {
         $cid = $ctx['who']['client_id'];
-        $f = [
-            'status' => (string) ($_GET['status'] ?? 'open'), 'severity' => (string) ($_GET['severity'] ?? ''), 'asset' => (int) Text::toAscii((string) ($_GET['asset'] ?? '0')),
-            'scan' => (int) Text::toAscii((string) ($_GET['scan'] ?? '0')), 'new' => (int) Text::toAscii((string) ($_GET['new'] ?? '0')),
-            'q' => mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80), 'page' => (int) Text::toAscii((string) ($_GET['page'] ?? '1')),
-            'kb' => preg_match('~^[a-z0-9._-]{1,64}$~', (string) ($_GET['kb'] ?? '')) ? (string) $_GET['kb'] : '',
-            'mine' => Settings::bool('finding_assign') && !empty($_GET['mine']) ? (int) $ctx['who']['user_id'] : 0,
-            'overdue' => array_filter(Findings::deadlineDays()) && !empty($_GET['overdue']) ? 1 : 0,
-        ];
+        $f = self::filters($ctx['who']);
         $grouped = !empty($_GET['group']) && $f['status'] === 'open';
         $res = Findings::search($cid, $f);
         $any = Db::table('mod_mcsec_findings')->where('client_id', $cid)->exists();
         $out = Ui::guide(Lang::t('<p>هر مشکلی که اسکن‌ها پیدا کرده‌اند یک بار این‌جا می‌آید (اگر دوباره دیده شود تکرار نمی‌شود) و از مهم‌ترین مرتب است. روی هر کدام بزنید تا ببینید <strong>چرا مهم است و چطور رفعش کنید</strong>.</p>')
             . Lang::t('<ul><li><strong>رفع‌شده</strong> را فقط خود سامانه می‌زند: وقتی اسکن بعدی آن را دیگر نبیند. پس از رفع، «رفع کردم، دوباره بسنج» را بزنید.</li><li>اگر موردی برایتان پذیرفتنی است یا اشتباه است، با نوشتن دلیل «ریسک پذیرفته» یا «مثبت کاذب» کنید؛ از امتیاز و اعلان‌ها بیرون می‌رود.</li></ul>'), !$any);
         $base = 'index.php?m=mcsec&p=findings';
-        $keep = fn (array $over) => $base . '&' . http_build_query(array_filter(array_merge(['status' => $f['status'], 'severity' => $f['severity'], 'asset' => $f['asset'] ?: '', 'new' => $f['new'] ?: '', 'q' => $f['q'], 'scan' => $f['scan'] ?: '', 'kb' => $f['kb'], 'mine' => $f['mine'] ? '1' : '', 'overdue' => $f['overdue'] ?: ''], $over), fn ($v) => $v !== '' && $v !== null));
+        $keep = fn (array $over) => $base . '&' . http_build_query(array_filter(array_merge(['status' => $f['status'], 'severity' => $f['severity'], 'asset' => $f['asset'] ?: '', 'new' => $f['new'] ?: '', 'q' => $f['q'], 'scan' => $f['scan'] ?: '', 'kb' => $f['kb'], 'mine' => $f['mine'] ? '1' : '', 'overdue' => $f['overdue'] ?: '',
+            'sort' => $f['sort'] !== 'priority' ? $f['sort'] : '', 'per' => $f['per'] !== Findings::PAGE_SIZES[0] ? $f['per'] : ''], $over), fn ($v) => $v !== '' && $v !== null));
         $seg = [];
         foreach (['open' => 'باز', 'fixed' => 'رفع‌شده', 'accepted' => 'ریسک پذیرفته', 'false_positive' => 'مثبت کاذب', 'all' => 'همه'] as $k => $l) {
             $seg[$keep(['status' => $k, 'page' => ''])] = self::e($l);
@@ -64,6 +79,9 @@ final class FindingViews
             . '<label class="mcs-sr" for="mcs-fq">' . Lang::t('جستجو') . '</label><input class="form-control" id="mcs-fq" name="q" value="' . self::e($f['q']) . '" placeholder="' . Lang::t('جستجو در عنوان، نشانی یا CVE') . '" dir="auto">'
             . '<label class="mcs-sr" for="mcs-fs">' . Lang::t('شدت') . '</label>' . Ui::select('severity', $sev, $f['severity'], 'mcs-fs')
             . '<label class="mcs-sr" for="mcs-fa">' . Lang::t('دارایی') . '</label>' . Ui::select('asset', $assets, (string) $f['asset'], 'mcs-fa')
+            . '<label class="mcs-sr" for="mcs-fo">' . Lang::t('ترتیب') . '</label>' . Ui::select('sort', Findings::SORTS, $f['sort'], 'mcs-fo')
+            . '<label class="mcs-sr" for="mcs-fp">' . Lang::t('در هر صفحه') . '</label>' . Ui::select('per', array_combine(array_map('strval', Findings::PAGE_SIZES), array_map(fn ($n) => Lang::t('{n} در صفحه', ['n' => Text::fa($n)]), Findings::PAGE_SIZES)), (string) $f['per'], 'mcs-fp')
+            . ($f['kb'] !== '' ? '<input type="hidden" name="kb" value="' . self::e($f['kb']) . '">' : '') . ($f['mine'] ? '<input type="hidden" name="mine" value="1">' : '') . ($f['overdue'] ? '<input type="hidden" name="overdue" value="1">' : '')
             . ($f['new'] > 0 ? '<input type="hidden" name="new" value="' . (int) $f['new'] . '">' : '')
             . '<button type="submit" class="btn btn-default">' . Ui::ico('search') . Lang::t('اعمال') . '</button>'
             . (($f['severity'] !== '' || $f['asset'] > 0 || $f['q'] !== '' || $f['new'] > 0 || $f['scan'] > 0 || $f['kb'] !== '' || $f['mine'] || $f['overdue']) ? '<a class="btn btn-link" href="' . self::e($base . '&status=' . $f['status']) . '">' . Lang::t('پاک کردن فیلترها') . '</a>' : '') . '</form>';
@@ -105,7 +123,8 @@ final class FindingViews
             Lang::t('برای هر دارایی که یافته‌ی باز دارد یک بررسی دوباره‌ی رایگان گرفته شود؟'), 'mcs-inline') : '';
         $csv = Settings::bool('export_csv') ? ' · <a href="' . self::e($keep(['page' => '', 'csv' => '1'])) . '" download>' . Ui::ico('file') . Lang::t('خروجی CSV') . '</a>' : '';
         return $out . Ui::card(Ui::table(['شدت', 'یافته', 'محل', 'وضعیت', 'آخرین بار'], $rows) . Ui::pager($keep(['page' => '']), $res['page'], $res['pages']),
-            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . Lang::t('{n} یافته', ['n' => self::e(Text::fa($res['total']))]) . $csv . '</p>' . ($again !== '' ? '<div class="mcs-actions">' . $again . '<span class="mcs-small mcs-muted">' . Lang::t('رایگان است؛ یافته‌ای که دیگر دیده نشود خودش «رفع‌شده» می‌شود.') . '</span></div>' : '');
+            '', '', '', '', '') . '<p class="mcs-small mcs-muted">' . ($res['pages'] > 1 ? Lang::t('{from} تا {to} از {n} یافته', ['from' => self::e(Text::fa(($res['page'] - 1) * $f['per'] + 1)), 'to' => self::e(Text::fa(($res['page'] - 1) * $f['per'] + count($res['rows']))), 'n' => self::e(Text::fa($res['total']))])
+                : Lang::t('{n} یافته', ['n' => self::e(Text::fa($res['total']))])) . $csv . '</p>' . ($again !== '' ? '<div class="mcs-actions">' . $again . '<span class="mcs-small mcs-muted">' . Lang::t('رایگان است؛ یافته‌ای که دیگر دیده نشود خودش «رفع‌شده» می‌شود.') . '</span></div>' : '');
     }
 
     /** «مهلت گذشته» or the days left, for an open finding with a deadline; '' otherwise. */

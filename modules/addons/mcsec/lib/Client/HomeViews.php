@@ -64,7 +64,7 @@ final class HomeViews
             . '<div class="mcs-dash-side">' . self::scoreCard($score, $counts, $d) . self::certCard($d) . '</div></div>'
             . self::live($ctx, $d)
             . '<div class="mcs-dash2">' . Ui::card(Charts::lines($d['days'], [
-                ['سرویس و درگاه', $d['hist']['port'], '#f59e0b'], ['میزبان', $d['hist']['host'], '#8b5cf6'], ['فناوری', $d['hist']['tech'], '#3b82f6'], ['نشانی', $d['hist']['url'], '#10b981'], ['دارایی', $d['hist']['asset'], '#ef4444'],
+                ['سرویس و درگاه', $d['hist']['port'], 1], ['میزبان', $d['hist']['host'], 2], ['فناوری', $d['hist']['tech'], 3], ['نشانی', $d['hist']['url'], 4], ['دارایی', $d['hist']['asset'], 5],
             ]), 'روند سطح حمله', 'activity') . self::newHosts($d) . '</div>'
             . '<div class="mcs-grid2">' . self::topPorts($d) . self::topTech($d) . '</div>'
             . self::geoCard($cid, $verified)

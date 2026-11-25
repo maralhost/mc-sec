@@ -194,8 +194,16 @@ final class Findings
      * Filtered list for the findings page. $f: status, severity, asset, q, new (days), page
      * @return array{rows:object[],total:int,page:int,pages:int}
      */
-    public static function search(int $clientId, array $f, int $per = 25): array
+    /** Orders a reader may choose (the label is shown in the list); anything else falls back to the first. */
+    public const SORTS = ['priority' => 'مهم‌ترین اول', 'newest' => 'تازه‌ترین اول', 'oldest' => 'قدیمی‌ترین اول', 'seen' => 'آخرین بار دیده‌شده'];
+
+    /** Rows on a page a reader may choose. */
+    public const PAGE_SIZES = [25, 50, 100];
+
+    public static function search(int $clientId, array $f, int $per = 0): array
     {
+        // the page size: the caller's (the CSV file asks for many), else the reader's choice from the list, else 25
+        $per = $per > 0 ? $per : (in_array((int) ($f['per'] ?? 0), self::PAGE_SIZES, true) ? (int) $f['per'] : self::PAGE_SIZES[0]);
         $q = Db::table('mod_mcsec_findings as f')->join('mod_mcsec_assets as a', 'a.id', '=', 'f.asset_id')
             ->where('f.client_id', $clientId)->where('a.status', '!=', 'removed');
         $status = (string) ($f['status'] ?? 'open');
@@ -237,8 +245,15 @@ final class Findings
         $pages = max(1, (int) ceil($total / $per));
         $page = min($page, $pages);
         $rank = "CASE f.severity WHEN 'critical' THEN 5 WHEN 'high' THEN 4 WHEN 'medium' THEN 3 WHEN 'low' THEN 2 ELSE 1 END";
-        $rows = Db::rows($q->select(['f.*', 'a.value as asset_value', 'a.label as asset_label'])->orderByDesc('f.priority')->orderByRaw($rank . ' DESC')->orderByDesc('f.last_seen_at')
-            ->offset(($page - 1) * $per)->limit($per));
+        $q->select(['f.*', 'a.value as asset_value', 'a.label as asset_label']);
+        // the order is applied here, to everything that matches, before the page is cut out
+        match (is_string($f['sort'] ?? null) && isset(self::SORTS[$f['sort']]) ? $f['sort'] : 'priority') {
+            'newest' => $q->orderByDesc('f.first_seen_at')->orderByDesc('f.id'),
+            'oldest' => $q->orderBy('f.first_seen_at')->orderBy('f.id'),
+            'seen' => $q->orderByDesc('f.last_seen_at')->orderByDesc('f.id'),
+            default => $q->orderByDesc('f.priority')->orderByRaw($rank . ' DESC')->orderByDesc('f.last_seen_at')->orderByDesc('f.id'),
+        };
+        $rows = Db::rows($q->offset(($page - 1) * $per)->limit($per));
         return ['rows' => $rows, 'total' => $total, 'page' => $page, 'pages' => $pages];
     }
 

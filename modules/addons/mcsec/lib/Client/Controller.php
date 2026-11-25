@@ -101,8 +101,7 @@ final class Controller
         }
         if (($_GET['p'] ?? '') === 'findings' && ($_GET['csv'] ?? '') === '1' && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET' && Settings::bool('export_csv')) {
             // the same list the page shows, as a file; reading only
-            $f = ['status' => (string) ($_GET['status'] ?? 'open'), 'severity' => (string) ($_GET['severity'] ?? ''), 'asset' => (int) Text::toAscii((string) ($_GET['asset'] ?? '0')),
-                'scan' => (int) Text::toAscii((string) ($_GET['scan'] ?? '0')), 'new' => (int) Text::toAscii((string) ($_GET['new'] ?? '0')), 'q' => mb_substr(trim((string) ($_GET['q'] ?? '')), 0, 80)];
+            $f = FindingViews::filters($who);
             return self::file(['mime' => 'text/csv; charset=utf-8', 'bytes' => Findings::csv($who['client_id'], $f), 'name' => 'mcsec-findings-' . date('Ymd', Clock::now()) . '.csv']);
         }
         Accounts::ensure($who['client_id']);

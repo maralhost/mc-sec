@@ -281,9 +281,10 @@ final class Charts
             foreach (array_values($vals) as $i => $v) {
                 $pts[] = [$padL + self::x($i, $n, $w - $padL, 8), round(($h - $padB) - ((int) $v / $top) * ($h - $padB - 10), 1)];
             }
-            $paths .= '<path d="' . self::smooth($pts) . '" fill="none" stroke="' . $color . '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>';
+            $tok = 'mcs-s' . max(1, min(6, (int) $color)); // the series' design token (--mds-chart-N), never a colour from the caller
+            $paths .= '<path class="' . $tok . '" d="' . self::smooth($pts) . '" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>';
             $now = (int) end($vals);
-            $legend .= '<span><i style="background:' . $color . '" aria-hidden="true"></i>' . self::e(\McSec\Lang::t($label)) . ' <strong>' . self::e(Text::fa($now)) . '</strong></span>';
+            $legend .= '<span><i class="' . $tok . '" aria-hidden="true"></i>' . self::e(\McSec\Lang::t($label)) . ' <strong>' . self::e(Text::fa($now)) . '</strong></span>';
             $say[] = \McSec\Lang::t($label) . ' ' . Text::fa($now);
         }
         return '<figure class="mcs-big"><svg viewBox="0 0 ' . $w . ' ' . $h . '" role="img" aria-label="' . self::e(\McSec\Lang::t('۱۴ روز اخیر؛ اکنون: {list}', ['list' => \McSec\Lang::join($say)])) . '">'
