@@ -14,10 +14,10 @@ if (!defined('WHMCS')) {
 require_once __DIR__ . '/bootstrap.php';
 
 /** Whether the logged-in client may see MC-Sec on this request (cached per request; database only). */
-function mcsec_hook_client(): ?array
+function mcsec_hook_client(bool $fresh = false): ?array
 {
     static $who = false;
-    if ($who !== false) {
+    if ($who !== false && !$fresh) {
         return $who;
     }
     $who = null;
@@ -77,6 +77,12 @@ add_hook('ClientAreaPrimaryNavbar', 1, function ($primaryNavbar) {
             return;
         }
         $label = \McSec\Settings::menuLabel();
+        // an admin who signed in as this customer sees the section even while it is off for customers (to try it):
+        // the item says so, so it is not taken for something customers see
+        $me = mcsec_hook_client();
+        if ($me['masq'] && !\McSec\Access::clientAllowed((int) $me['client_id'], false)) {
+            $label .= ' ' . \McSec\Lang::t('(فقط مدیر می‌بیند)');
+        }
         $item = ['label' => $label, 'uri' => 'index.php?m=mcsec', 'icon' => 'fa-shield-alt'];
         $services = method_exists($primaryNavbar, 'getChild') ? $primaryNavbar->getChild('Services') : null;
         if (is_object($services)) {

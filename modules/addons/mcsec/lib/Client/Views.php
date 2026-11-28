@@ -140,10 +140,22 @@ final class Views
             . (self::$pageActions !== '' ? '<div class="mcs-actions">' . self::$pageActions . '</div>' : '') . '</div>';
     }
 
+    /**
+     * For an admin signed in as this customer while the section is off for customers (or this account is not on the
+     * list): says plainly that the customer does not see this menu or this page.
+     */
+    private static function adminOnly(array $ctx): string
+    {
+        if (empty($ctx['who']['masq']) || \McSec\Access::clientAllowed((int) $ctx['who']['client_id'], false)) {
+            return '';
+        }
+        return Ui::alert('warning', Lang::t('<strong>فقط شما این بخش را می‌بینید.</strong> «امنیت سایبری» برای این مشتری باز نیست (ماژول برای مشتری‌ها خاموش است یا این حساب در فهرست مجاز نیست). چون از پنل مدیر «به‌جای مشتری» وارد شده‌اید، منو و صفحه‌ها را برای آزمودن می‌بینید؛ خود مشتری هیچ‌کدام را نمی‌بیند.'), 'lock');
+    }
+
     private static function wrap(array $ctx, string $active, string $body): string
     {
         self::$view = '<div class="mcs-shell">' . self::side($ctx, $active) . '<main class="mcs-main"><div class="mcs-loadbar" aria-hidden="true"></div>' . self::topbar($ctx, $active, self::$pageTitle)
-            . '<div class="mcs-page" data-mcs-page="' . self::e($active) . '">' . self::pageHead($active) . $body . '</div></main></div>';
+            . '<div class="mcs-page" data-mcs-page="' . self::e($active) . '">' . self::adminOnly($ctx) . self::pageHead($active) . $body . '</div></main></div>';
         return self::root(self::$view, true);
     }
 

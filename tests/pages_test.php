@@ -124,10 +124,31 @@ foreach ($GLOBALS['__hooks']['ClientAreaHomepagePanels'] as $fn) {
 }
 ok(isset($panels->children['mcsec']) && str_contains($panels->children['mcsec']['bodyHtml'], 'از ۱۰۰'), 'home panel with the score');
 setting('enabled', '0');
-$nav2 = clone $nav;
-$nav2->children = [];
-foreach ($GLOBALS['__hooks']['ClientAreaPrimaryNavbar'] as $fn) {
-    $fn($nav2);
-}
+$menu = function () use ($nav) {
+    mcsec_hook_client(true);
+    $n = clone $nav;
+    $n->children = [];
+    foreach ($GLOBALS['__hooks']['ClientAreaPrimaryNavbar'] as $fn) {
+        $fn($n);
+    }
+    return $n->children;
+};
+ok($menu() === [], 'the module is off for customers: a customer has no menu item');
+ok(str_contains(html(client_get(['p' => 'home'])), 'هنوز برای حساب شما باز نشده') , 'and the address itself shows nothing of the section');
+$_SESSION['adminid'] = 1;
+login(1, 1, true);
+$m = $menu();
+ok(isset($m['mcsec']) && str_contains($m['mcsec']['label'], 'فقط مدیر می‌بیند'), 'an admin signed in as the customer sees it, marked as admin-only');
+ok(str_contains(html(client_get(['p' => 'home'])), 'فقط شما این بخش را می‌بینید'), 'and every page says the customer does not see it');
+setting('enabled', '1');
+setting('access_mode', 'all');
+$m = $menu();
+ok(isset($m['mcsec']) && !str_contains($m['mcsec']['label'], 'فقط مدیر') && !str_contains(html(client_get(['p' => 'home'])), 'فقط شما این بخش را می‌بینید'), 'when the customer sees it too, there is no such mark');
+setting('access_mode', 'list');
+setting('access_clients', '7');
+ok(str_contains($menu()['mcsec']['label'] ?? '', 'فقط مدیر می‌بیند'), 'an account that is not on the list: admin-only again');
+unset($_SESSION['adminid']);
+login(1, 1);
+ok($menu() === [], 'and that customer has no menu item');
 ok(true, 'hooks never throw when the feature is off');
 done();
